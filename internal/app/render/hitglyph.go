@@ -186,12 +186,7 @@ func glyphFade(t float32) uint8 {
 
 // glyphGrow is an ease-out 0→1 for the expanding glyphs (impact, fire, holy).
 func glyphGrow(t float32) float32 {
-	if t < 0 {
-		t = 0
-	} else if t > 1 {
-		t = 1
-	}
-	return 1 - (1-t)*(1-t)
+	return core.EaseOutQuad(t)
 }
 
 // glyphPopR is a quick pop-in radius (full by ~30% of life) for frost/venom.

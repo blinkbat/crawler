@@ -802,9 +802,7 @@ func RollDodge(rng *rand.Rand, s Stats) bool {
 // capped at CritCap. Quality outside the table contributes no bonus.
 func CritChance(s Stats, quality int) float64 {
 	base := CritBaseline + CritPerDEX*float64(s.DEX)
-	if quality >= 0 && quality < len(timingGrades) {
-		base += timingGrades[quality].CritBonus
-	}
+	base += timingGrades[timingGradeAt(quality)].CritBonus
 	return Clamp(base, 0, CritCap)
 }
 

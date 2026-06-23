@@ -895,13 +895,7 @@ func flashAlpha(remaining float32) float32 {
 	if core.TimingFlashDuration <= 0 {
 		return 0
 	}
-	t := remaining / core.TimingFlashDuration
-	if t < 0 {
-		t = 0
-	}
-	if t > 1 {
-		t = 1
-	}
+	t := core.Clamp(remaining/core.TimingFlashDuration, 0, 1)
 	return t * t
 }
 
@@ -1083,12 +1077,7 @@ const (
 // popupAnimation returns scale/rise/alpha for life ratio t (1=spawned, 0=expired):
 // 0.6→2.15→1.0 scale, 36px rise, Smoothstep alpha fade.
 func popupAnimation(t float32) (scale, rise float32, alpha uint8) {
-	if t < 0 {
-		t = 0
-	}
-	if t > 1 {
-		t = 1
-	}
+	t = core.Clamp(t, 0, 1)
 	age := 1 - t
 	scale = 1
 	switch {

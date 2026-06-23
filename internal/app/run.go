@@ -208,9 +208,11 @@ func applyAreaTransition(g *core.GameState) error {
 		// start tile, not where this portal landed) so a door INTO a region fires its
 		// enter trigger only on the next crossing, not on arrival.
 		core.SeedLocationPresence(g)
-		// Symmetry with the cross-map branch: close any equip picker and clear
-		// VFX so a (latent today) teleport from an open panel stays honest.
-		core.CloseEquipPicker(g)
+		// Same-map keeps the GameState struct (no NewGameState rebuild), so every
+		// transient overlay must be closed explicitly to match the cross-map branch's
+		// fresh-state reset — otherwise a panel/menu/chest open at teleport time
+		// would persist into the destination. CloseTransitionOverlays owns that set.
+		core.CloseTransitionOverlays(g)
 		core.RequestVFXReset(g)
 		return nil
 	}

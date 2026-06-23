@@ -274,7 +274,9 @@ func (d MapDoor) HasTarget() bool {
 }
 
 // SelfMapToken is the placeholder TargetMap for same-map portals (keeps the row
-// 6 fields). The parser rewrites it to the map's own name at load.
+// 6 fields). Kept verbatim end-to-end — survives parse and re-encode so a renamed
+// map keeps its self-loop (see TestSelfDoorSurvivesRename); resolved to the
+// concrete map id only at transition/display time, never at load.
 const SelfMapToken = "self"
 
 const (
@@ -700,11 +702,26 @@ func Parse(r io.Reader) (MapFile, error) {
 
 		if state == slotPropLevels {
 			// Single Height-row grid of per-tile prop levels (base-36, '.' = auto).
+			// Same blank-tolerant overflow guard as the generic grid arm below, so an
+			// editor-inserted trailing blank doesn't inflate the count and a non-blank
+			// overflow is pinpointed here rather than as a downstream size mismatch.
+			if len(mf.PropLevels) >= mf.Height {
+				if strings.TrimSpace(raw) == "" {
+					continue
+				}
+				return mf, fmt.Errorf("line %d: prop_levels: extra row past declared height %d", lineNo, mf.Height)
+			}
 			mf.PropLevels = append(mf.PropLevels, raw)
 			continue
 		}
 
 		if state == slotDecorLevels {
+			if len(mf.DecorLevels) >= mf.Height {
+				if strings.TrimSpace(raw) == "" {
+					continue
+				}
+				return mf, fmt.Errorf("line %d: decor_levels: extra row past declared height %d", lineNo, mf.Height)
+			}
 			mf.DecorLevels = append(mf.DecorLevels, raw)
 			continue
 		}
@@ -1326,13 +1343,12 @@ func (mf MapFile) Encode(w io.Writer) error {
 	if len(mf.Doors) > 0 {
 		fmt.Fprintln(bw, SectionDoors+":")
 		for _, d := range mf.Doors {
-			// Refuse a half-populated door (one of TargetMap/TargetDoor set) — it
-			// would emit a row the parser rejects on reload. Both-empty is legal;
-			// only the asymmetric case is rejected.
-			haveMap := d.TargetMap != ""
-			haveDoor := d.TargetDoor != ""
-			if haveMap != haveDoor {
-				return fmt.Errorf("door %q has asymmetric target (map=%q, door=%q); both must be set or both empty", d.Name, d.TargetMap, d.TargetDoor)
+			// Refuse a door without a complete destination — it would emit a row the
+			// parser collapses to too few fields and rejects on reload. validate()
+			// already enforces HasTarget(); mirror it here so a direct Encode (which
+			// skips validate) can't produce an unparseable byte stream.
+			if !d.HasTarget() {
+				return fmt.Errorf("door %q has incomplete target (map=%q, door=%q); both must be set", d.Name, d.TargetMap, d.TargetDoor)
 			}
 			style := d.Style
 			if style == "" {

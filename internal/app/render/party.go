@@ -462,7 +462,7 @@ func DrawPartyRibbon(g *core.GameState, assets Resources) {
 
 	// Dim other cards only when a member is actually up (ActiveActorIndex is -1 on
 	// enemy/between turns, so the ribbon stays full-bright then).
-	dimOthers := activeIdx >= 0 && activeIdx < len(g.Party) && core.PartyMemberAvailable(g.Party, activeIdx)
+	dimOthers := core.PartyIndexInRange(g.Party, activeIdx) && core.PartyMemberAvailable(g.Party, activeIdx)
 
 	for i := range g.Party {
 		member := &g.Party[i]

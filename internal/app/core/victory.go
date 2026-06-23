@@ -14,9 +14,7 @@ func VictoryFillProgress(elapsed float32) float32 {
 	if t >= 1 {
 		return 1
 	}
-	// Ease-out quad: 1 - (1-t)^2.
-	inv := 1 - t
-	return 1 - inv*inv
+	return EaseOutQuad(t)
 }
 
 // VictorySpoilsAnimEnd is the elapsed time the fill animation finishes — the

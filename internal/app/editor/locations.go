@@ -243,7 +243,9 @@ func deleteCurrentLocation(s *State) {
 	}
 	pushUndo(s)
 	i := s.modalLocationIdx
-	s.area.Locations = append(s.area.Locations[:i], s.area.Locations[i+1:]...)
+	// Fresh-slice removal, not in-place append-shift — the latter mutates the
+	// backing array an undo snapshot could alias (see removeModalListItem).
+	s.area.Locations = removeModalListItem(s.area.Locations, i)
 	s.dirty = true
 	closeModal(s)
 }

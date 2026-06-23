@@ -19,13 +19,27 @@ const (
 	minimapPanelH    = minimapViewCells*minimapCell + 16 + minimapHeader + minimapFooter
 )
 
-// minimapSliceBuf / minimapSeenBuf / minimapRampBuf are reused per-cell classifier grids
-// for drawMinimap (single-threaded; each frame overwrites the whole window+border range).
+// minimapSliceBuf / minimapSeenBuf / minimapRampBuf / minimapColBuf are reused per-cell
+// classifier grids for drawMinimap (single-threaded). Their contents are cached across
+// frames keyed on minimapClassCache — see the classify loop in drawMinimap.
 var (
 	minimapSliceBuf []bool
 	minimapSeenBuf  []bool
 	minimapRampBuf  []int8
+	minimapColBuf   []rl.Color
 )
+
+// minimapClassKey fingerprints the inputs the minimap cell classification depends on:
+// area (Path), player tile, and level. NOT facing (only rotates the arrow) or time
+// (footer only), and fog reveals happen on the same step that moves the player — so a
+// stationary player reuses the cached grids instead of reclassifying ~vc² cells/frame.
+type minimapClassKey struct {
+	path                string
+	tileX, tileZ, level int
+	valid               bool
+}
+
+var minimapClassCache minimapClassKey
 
 // MinimapWidth is the corner minimap card's on-screen width (panels beneath it match it).
 func MinimapWidth() int32 { return minimapPanelW }
@@ -73,18 +87,31 @@ func drawMinimap(m *core.AreaDefinition, g *core.GameState, assets Resources) {
 		minimapSliceBuf = make([]bool, n)
 		minimapSeenBuf = make([]bool, n)
 		minimapRampBuf = make([]int8, n)
+		minimapColBuf = make([]rl.Color, n)
+		minimapClassCache.valid = false // fresh grids — force a reclassify
 	}
 	slice := minimapSliceBuf[:n]
 	seen := minimapSeenBuf[:n]
 	ramp := minimapRampBuf[:n]
-	for localZ := -1; localZ <= vc; localZ++ {
-		for localX := -1; localX <= vc; localX++ {
-			col, onSlice, seenWall, rampDir := mapSliceCell(m, g, indoor, startX+localX, startZ+localZ)
-			i := (localZ+1)*gw + (localX + 1)
-			slice[i], seen[i], ramp[i] = onSlice, seenWall, rampDir
-			if localX >= 0 && localX < vc && localZ >= 0 && localZ < vc {
-				rl.DrawRectangle(gridX+int32(localX)*cell, gridY+int32(localZ)*cell, cell-1, cell-1, col)
+	col := minimapColBuf[:n]
+	// Reclassify only when the fingerprint changes (player moved / changed level /
+	// area changed); otherwise the cached grids from last frame still hold. The draw
+	// calls below always run — only the ~vc² MapSurfaceAt classifications are skipped.
+	key := minimapClassKey{path: m.Path, tileX: p.TileX, tileZ: p.TileZ, level: p.Level, valid: true}
+	if key != minimapClassCache {
+		for localZ := -1; localZ <= vc; localZ++ {
+			for localX := -1; localX <= vc; localX++ {
+				c, onSlice, seenWall, rampDir := mapSliceCell(m, g, indoor, startX+localX, startZ+localZ)
+				i := (localZ+1)*gw + (localX + 1)
+				slice[i], seen[i], ramp[i], col[i] = onSlice, seenWall, rampDir, c
 			}
+		}
+		minimapClassCache = key
+	}
+	for localZ := 0; localZ < vc; localZ++ {
+		for localX := 0; localX < vc; localX++ {
+			i := (localZ+1)*gw + (localX + 1)
+			rl.DrawRectangle(gridX+int32(localX)*cell, gridY+int32(localZ)*cell, cell-1, cell-1, col[i])
 		}
 	}
 	// Border only where explored current-level floor abuts a seen wall, over the fills.
@@ -320,13 +347,7 @@ var mapLevelFadeTable = func() [core.MaxElevationLevel + 1]float32 {
 }()
 
 func mapLevelFadeFor(d int) float32 {
-	if d < 0 {
-		d = -d
-	}
-	if d >= len(mapLevelFadeTable) {
-		return mapLevelFadeMin
-	}
-	return mapLevelFadeTable[d]
+	return core.DistanceFade(d, mapLevelFadeTable[:], mapLevelFadeMin)
 }
 
 // mapSurfaceColor turns a column classification into its swatch: current level full strength,

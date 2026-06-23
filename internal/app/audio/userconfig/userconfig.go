@@ -66,7 +66,10 @@ func ListSounds() []string {
 		if !strings.HasSuffix(strings.ToLower(name), WavExt) {
 			continue
 		}
-		out = append(out, strings.TrimSuffix(name, filepath.Ext(name)))
+		// Strip only the trailing .wav, not the last dot-segment: a dotted stem like
+		// "a.b.wav" must list as "a.b" so SoundPath round-trips it (filepath.Ext would
+		// drop ".b", yielding a name that resolves to a different/missing file).
+		out = append(out, name[:len(name)-len(WavExt)])
 	}
 	sort.Strings(out)
 	return out

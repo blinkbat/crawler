@@ -647,7 +647,7 @@ func beginPartyTurn(g *core.GameState, partyIndex int) {
 	g.Battle.EnemyAttacker = -1
 	g.Battle.CurrentParty = partyIndex
 	resetBattleAction(g)
-	if partyIndex >= 0 && partyIndex < len(g.Party) {
+	if core.PartyIndexInRange(g.Party, partyIndex) {
 		g.Party[partyIndex].Defending = false
 		g.Battle.PartyTarget = partyIndex
 	} else {

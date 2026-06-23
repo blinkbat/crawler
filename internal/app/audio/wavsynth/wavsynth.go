@@ -186,6 +186,12 @@ func adsrEnv(secs, duration, attack, decay, sustain, release, releaseStart float
 //
 //	oscillator → noise mix → drive → low-pass → bitcrush → ×(ADSR·tremolo·volume)
 func SynthShapeParams(p ShapeParams) []int16 {
+	// NaN slips past `> maxDuration` (all NaN comparisons are false), and int(NaN)
+	// is unspecified — it can land large-positive and dodge the samples<=0 guard,
+	// blowing up the make below. Pin non-finite/non-positive durations first.
+	if math.IsNaN(p.Duration) || p.Duration <= 0 {
+		p.Duration = maxDuration
+	}
 	if p.Duration > maxDuration {
 		p.Duration = maxDuration
 	}

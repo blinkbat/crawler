@@ -176,6 +176,10 @@ func updateMenu(g *core.GameState) {
 			openDebugMenu(g)
 		case core.PauseMenuQuit:
 			openQuitConfirm(g)
+		default:
+			// MenuIndex is clamped to PauseMenuCount above, so a new PauseMenuItem
+			// row without a case here lands loudly instead of silently no-opping.
+			panic(fmt.Sprintf("updateMenu: no handler for PauseMenuItem %d", g.MenuIndex))
 		}
 	}
 }
@@ -236,6 +240,8 @@ func updateOptionsMenu(g *core.GameState) {
 			restartGame(g)
 		case core.OptionsMenuClose:
 			g.OptionsMenuOpen = false
+		default:
+			panic(fmt.Sprintf("updateOptionsMenu: no handler for OptionsMenuItem %d", item))
 		}
 	})
 }
@@ -292,6 +298,8 @@ func updateDebugMenu(g *core.GameState) {
 			startFirstAreaDialog(g)
 		case core.DebugMenuClose:
 			g.DebugMenuOpen = false
+		default:
+			panic(fmt.Sprintf("updateDebugMenu: no handler for DebugMenuItem %d", item))
 		}
 	})
 }

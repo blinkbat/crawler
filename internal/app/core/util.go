@@ -216,6 +216,27 @@ func Smoothstep(t float32) float32 {
 	return t * t * (3 - 2*t)
 }
 
+// EaseOutQuad maps t (clamped to [0,1]) by 1-(1-t)^2 — quick start, easing to 1.
+// Single source for the expand/fill curves (glyph grow, victory XP fill).
+func EaseOutQuad(t float32) float32 {
+	t = Clamp(t, 0, 1)
+	inv := 1 - t
+	return 1 - inv*inv
+}
+
+// DistanceFade indexes a precomputed fade table by |d| (level/depth distance from
+// the observer), returning min once past the table's end. Single source for the
+// minimap depth fade and the editor level-distance fade.
+func DistanceFade(d int, table []float32, min float32) float32 {
+	if d < 0 {
+		d = -d
+	}
+	if d >= len(table) {
+		return min
+	}
+	return table[d]
+}
+
 func Lerp(a, b, t float32) float32 {
 	return a + (b-a)*t
 }

@@ -2,6 +2,7 @@ package editor
 
 import (
 	"crawler/internal/app/core"
+	"crawler/internal/app/core/mapfile"
 	"crawler/internal/app/render"
 	"fmt"
 	"image/color"
@@ -2493,14 +2494,7 @@ var levelFadeTable = func() [maxEditLevel + 1]float32 {
 // levelDistanceFade returns the opacity multiplier for a tile on level lvl
 // (1.0 on the active level, falling off with distance). Table lookup.
 func levelDistanceFade(s *State, lvl int) float32 {
-	d := lvl - s.editLevel
-	if d < 0 {
-		d = -d
-	}
-	if d >= len(levelFadeTable) {
-		return levelFadeMin
-	}
-	return levelFadeTable[d]
+	return core.DistanceFade(lvl-s.editLevel, levelFadeTable[:], levelFadeMin)
 }
 
 // currentLevelOutlineColor is the gold stroke around active-level tile groups.
@@ -2830,13 +2824,7 @@ func drawStatus(s *State, font rl.Font, theme render.Theme) {
 		theme.SurfacePrimary, theme.BorderSoft, theme.BorderStrong)
 	for i, e := range s.statusLog {
 		y := r.Y + pad/2 + float32(i)*lineH
-		alpha := e.timer / statusLogLifetime
-		if alpha < 0 {
-			alpha = 0
-		}
-		if alpha > 1 {
-			alpha = 1
-		}
+		alpha := core.Clamp(e.timer/statusLogLifetime, 0, 1)
 		col := theme.TextPrimary
 		if e.warn {
 			col = theme.BorderDanger
@@ -3019,7 +3007,7 @@ func drawSaveAsModal(s *State, font rl.Font, theme render.Theme) {
 	previewPath := core.MapPath(sanitized)
 	render.DrawRichText(font, fmt.Sprintf("Will save to: %s", previewPath),
 		rl.NewVector2(r.X+modalContentInset, r.Y+96), editorFontHint, 1, theme.TextMuted)
-	if sanitized != strings.TrimSuffix(strings.TrimSuffix(s.modalFilename, ".map"), ".MAP") {
+	if sanitized != strings.TrimSuffix(strings.TrimSuffix(s.modalFilename, mapfile.Ext), strings.ToUpper(mapfile.Ext)) {
 		render.DrawRichText(font, "(Punctuation and spaces are stripped)",
 			rl.NewVector2(r.X+modalContentInset, r.Y+112), editorFontTiny, 1, theme.BorderDanger)
 	}

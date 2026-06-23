@@ -1262,8 +1262,10 @@ func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, hitVerb, emptyVe
 	vfx := vfxKindFor(skill)
 	hits := 0
 	afflicted := 0
+	totalDealt := 0
 	forEachLivingEnemy(g, func(slot int, enemy *core.Enemy) {
-		_, defeated := damageEnemy(g, slot, damage, quality, tag)
+		dealt, defeated := damageEnemy(g, slot, damage, quality, tag)
+		totalDealt += dealt
 		core.EnqueueEnemyVFX(g, vfx, slot)
 		hits++
 		resistWIS := core.EffectiveEnemyStats(enemy).WIS
@@ -1291,7 +1293,9 @@ func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, hitVerb, emptyVe
 	}
 	// AoE casts earn the big camera punch.
 	triggerBigShake(g)
-	msg := appendCrit(aoeSkillMessage(actor.Name, skillNoun, hitVerb, hits, damage, quality), crit)
+	// Report the average post-mitigation hit so the figure tracks real HP loss
+	// (armor/MDef varies per foe); hits >= 1 here (the hits == 0 case returned above).
+	msg := appendCrit(aoeSkillMessage(actor.Name, skillNoun, hitVerb, hits, totalDealt/hits, quality), crit)
 	if afflicted > 0 {
 		msg = fmt.Sprintf("%s %d afflicted.", msg, afflicted)
 	}

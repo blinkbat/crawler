@@ -360,7 +360,8 @@ const (
 	hudPanelMinH = int32(160)
 
 	// Enemy roster card (battle.go) — the top-center foe-list pane, laid out as a
-	// formation grid: back rank (up to 5) on top, front rank (up to 3) below.
+	// formation grid: back rank (up to EnemyBackRowCap) on top, front rank (up to
+	// EnemyFrontRowCap) below.
 	rosterTopPad    = int32(16) // inset above the first rank
 	rosterBottomPad = int32(16) // inset below the last rank
 	rosterCellW     = int32(152) // per-foe cell width
@@ -472,7 +473,7 @@ const (
 	overlayTabPadding = int32(12)
 
 	// overlayFooterReserve is the bottom band reserved for the hint footer
-	// (DrawFooterHint). Body = card minus this band minus the heading band.
+	// (DrawHintBar / drawModalFooterGlyphs). Body = card minus this band minus the heading band.
 	overlayFooterReserve = int32(38)
 )
 
@@ -1389,7 +1390,7 @@ func drawRowSheen(r rl.Rectangle, flick float32) {
 		band = 110
 	}
 	// Sweep phase, starting/ending fully off-edge so there's a beat between passes.
-	t, _ := math.Modf(rl.GetTime() / rowSheenPeriod)
+	_, t := math.Modf(rl.GetTime() / rowSheenPeriod)
 	x := r.X - band + float32(t)*(r.Width+2*band)
 	peak := fadeColor(giltBright, 0.13*flick)
 	clear := fadeColor(giltBright, 0)

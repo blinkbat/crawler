@@ -37,6 +37,13 @@ func Hint(label string, glyphs ...InputGlyph) HintSeg {
 	return HintSeg{Glyphs: glyphs, Label: label}
 }
 
+// confirmBackHints is the ubiquitous "Confirm / Back" footer, built once so the
+// many steady-state surfaces that show it don't reallocate a hint bar per frame.
+var confirmBackHints = []HintSeg{
+	Hint("Confirm", GlyphA),
+	Hint("Back", GlyphB),
+}
+
 // Hint-bar layout: glyphs in a seg sit nearly flush; label trails by glyphLabelGap; segs spaced by hintSegGap.
 const (
 	glyphInnerGap = float32(3)
@@ -142,11 +149,20 @@ func drawModalFooterGlyphsLeft(font rl.Font, card rl.Rectangle, x float32, segs 
 	DrawHintBarLeft(font, segs, x, y, FontSmall)
 }
 
+// glyphPromptScratch backs drawGlyphPrompt's single seg so the per-frame in-world
+// prompt (drawn while adjacent to a chest/crystal/door) allocates nothing. Safe to
+// reuse: each call fully measures + draws before returning, never retaining it.
+var (
+	glyphPromptSegScratch   = make([]HintSeg, 1)
+	glyphPromptGlyphScratch = make([]InputGlyph, 1)
+)
+
 // drawGlyphPrompt centers a single "[glyph] Verb" in-world cue; brighter than a footer (borderActive, no termini).
 func drawGlyphPrompt(font rl.Font, glyph InputGlyph, label string, cx, y, size float32) {
-	segs := []HintSeg{Hint(label, glyph)}
-	w := measureHintBar(font, segs, size)
-	drawHintSegs(font, segs, cx-w/2, y, size, borderActive, 1)
+	glyphPromptGlyphScratch[0] = glyph
+	glyphPromptSegScratch[0] = HintSeg{Glyphs: glyphPromptGlyphScratch, Label: label}
+	w := measureHintBar(font, glyphPromptSegScratch, size)
+	drawHintSegs(font, glyphPromptSegScratch, cx-w/2, y, size, borderActive, 1)
 }
 
 // drawInputGlyph paints one button icon (top-left at x,y) centered on the text line and returns its advance width.

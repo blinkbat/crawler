@@ -140,7 +140,7 @@ size is a bug.
 
 This ladder is applied **automatically**: `drawTextWithShadow` (and the
 helpers built on it — `drawTextCentered`, `drawTextRightAligned`,
-`DrawFooterHint`, the wrap/fit helpers) resolves spacing from the size
+`DrawHintBar`, the wrap/fit helpers) resolves spacing from the size
 via `canonicalSpacing(size)`, so a plain call site conforms by
 construction and draw + measure can never disagree on width. Only
 `drawTextWithShadowStyle` takes spacing explicitly — use it when an
@@ -369,7 +369,7 @@ Every modal calls `drawModalScaffold(font, w, h, heading)`:
 - Renders the heading using `drawPanelHeading`.
 - Returns the body rect for the caller to paint into.
 - Reserves the bottom 28 px for the footer hint, drawn via
-  `DrawFooterHint`.
+  `drawModalFooterGlyphs` (see Footer hint below).
 
 ### Footer hint
 Every modal has a footer line of control affordances. The game is
@@ -383,8 +383,8 @@ Owners build a `[]render.HintSeg` — each seg is one glyph (or two, e.g.
 y, size)` (centred, with the same diamond termini the old text footer
 stitched) or `DrawHintBarLeft(font, segs, x, y, size)`. Modal owners use
 the `drawModalFooterGlyphs` / `drawModalFooterGlyphsLeft` wrappers, which
-own the card-geometry math (mirrors of the old `drawModalFooter` /
-`drawModalFooterLeft`, which remain for any pure-text footer). In-world
+own the card-geometry math. (The pure-text footer helpers were removed —
+all footers are glyph footers now.) In-world
 press cues (chest / crystal / door) use `drawGlyphPrompt(font, glyph,
 verb, cx, y, size)` — brighter, no termini. Build segs with the terse
 `render.Hint("Verb", render.GlyphA)` constructor.

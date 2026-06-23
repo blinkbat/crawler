@@ -808,10 +808,7 @@ func HealAmount(s Stats, base int) int {
 // Excellent press exceeds 1.0 pre-clamp, so a perfect hit always lands.
 func accuracyFrom(stat int, quality int) float64 {
 	base := AccuracyBaseline + AccuracyPerStat*float64(stat)
-	bonus := 0.0
-	if quality >= 0 && quality < len(timingGrades) {
-		bonus = timingGrades[quality].AccuracyBonus
-	}
+	bonus := timingGrades[timingGradeAt(quality)].AccuracyBonus
 	return Clamp(base+bonus, 0, 1)
 }
 

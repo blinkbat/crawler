@@ -133,6 +133,28 @@ func NewGameState(area AreaDefinition) GameState {
 	return g
 }
 
+// CloseTransitionOverlays dismisses every transient explore overlay so none
+// survives an area change. A cross-map transition rebuilds GameState fresh
+// (NewGameState) and gets this for free; a same-map (in-place) teleport keeps the
+// struct, so it must call this to match. ONE home for the "closed" set: add a new
+// overlay gate here and both transition paths stay consistent.
+func CloseTransitionOverlays(g *GameState) {
+	g.MenuOpen = false
+	g.OptionsMenuOpen = false
+	g.DebugMenuOpen = false
+	g.RetroMenuOpen = false
+	g.CombatTuneOpen = false
+	g.WipeMenuOpen = false
+	g.QuitConfirmOpen = false
+	g.LevelUpOpen = false
+	g.PanelsOpen = false
+	g.SkillTreeOpen = false
+	g.DialogOpen = false
+	CloseEquipPicker(g)
+	g.ChestOpen = -1
+	g.DoorPrompt = -1
+}
+
 // spawnLevel picks the standing level for a unit at (x,z): the lowest standable
 // surface, falling back to the column top so the value is never -1.
 func spawnLevel(a *AreaDefinition, x, z int) int {

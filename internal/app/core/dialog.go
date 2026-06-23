@@ -391,6 +391,10 @@ func applyDialogAction(g *GameState, action *DialogAction) {
 		}
 	case DialogActionEvent:
 		// No event registry yet; seam for a future switch on action.EventID.
+	default:
+		// Unknown action kind (authoring typo / unhandled new kind) — do nothing
+		// rather than guess, mirroring the QuestOp default above. Data-driven, so
+		// no panic.
 	}
 }
 

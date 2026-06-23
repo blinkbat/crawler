@@ -34,7 +34,7 @@ func battleWipeProgress(g *core.GameState) (float32, bool) {
 	return 0, false
 }
 
-func wipeEase(t float32) float32 { return t * t * (3 - 2*t) }
+func wipeEase(t float32) float32 { return core.Smoothstep(t) }
 
 // battleWipeCamera returns the camera up-vector + FOV after applying any camera-based
 // wipe FX (Zoom/Spin/Wobble) for this frame; identity (worldUp, fov) otherwise. dir is

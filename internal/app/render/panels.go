@@ -50,60 +50,58 @@ var panelTabDrawers = [core.PanelTabCount]func(*core.GameState, Resources, rl.Re
 }
 
 // footerHintMemberTabs is the shared hint for member-cursor-only tabs (Stats/Quests/Map).
-func footerHintMemberTabs() []HintSeg {
-	return []HintSeg{
-		Hint("Tabs", GlyphLB, GlyphRB),
-		Hint("Member", GlyphLeftRight),
-		Hint("Close", GlyphB),
-	}
+var footerHintMemberTabs = []HintSeg{
+	Hint("Tabs", GlyphLB, GlyphRB),
+	Hint("Member", GlyphLeftRight),
+	Hint("Close", GlyphB),
 }
 
 // footerHintCharacterTab adds the formation Swap to the member-tab hints.
-func footerHintCharacterTab() []HintSeg {
-	return []HintSeg{
-		Hint("Tabs", GlyphLB, GlyphRB),
-		Hint("Move", GlyphUpDown, GlyphLeftRight),
-		Hint("Swap", GlyphX),
-		Hint("Close", GlyphB),
-	}
+var footerHintCharacterTab = []HintSeg{
+	Hint("Tabs", GlyphLB, GlyphRB),
+	Hint("Move", GlyphUpDown, GlyphLeftRight),
+	Hint("Swap", GlyphX),
+	Hint("Close", GlyphB),
 }
 
-// panelTabFooterHints is the per-tab footer hint, parallel to panelTabDrawers. Functions (not values) so each call rebuilds fresh segs.
-var panelTabFooterHints = [core.PanelTabCount]func() []HintSeg{
+// Sub-picker footer hints, built once (static) so an open picker doesn't realloc
+// its hint bar each frame.
+var (
+	equipPickerHints     = []HintSeg{Hint("Equip", GlyphA), Hint("Cancel", GlyphB)}
+	useTargetPickerHints = []HintSeg{Hint("Use", GlyphA), Hint("Cancel", GlyphB)}
+	healPickerHints      = []HintSeg{Hint("Cast", GlyphA), Hint("Cancel", GlyphB)}
+)
+
+// panelTabFooterHints is the per-tab footer hint, parallel to panelTabDrawers.
+// Static values built once at init (the segs never change), so the per-frame
+// panels draw doesn't reallocate a hint bar + glyph slices each frame.
+var panelTabFooterHints = [core.PanelTabCount][]HintSeg{
 	core.PanelTabStats: footerHintCharacterTab,
-	core.PanelTabEquipment: func() []HintSeg {
-		return []HintSeg{
-			Hint("Tabs", GlyphLB, GlyphRB),
-			Hint("Member", GlyphLeftRight),
-			Hint("Slot", GlyphUpDown),
-			Hint("Change gear", GlyphA),
-			Hint("Close", GlyphB),
-		}
+	core.PanelTabEquipment: {
+		Hint("Tabs", GlyphLB, GlyphRB),
+		Hint("Member", GlyphLeftRight),
+		Hint("Slot", GlyphUpDown),
+		Hint("Change gear", GlyphA),
+		Hint("Close", GlyphB),
 	},
-	core.PanelTabItems: func() []HintSeg {
-		return []HintSeg{
-			Hint("Tabs", GlyphLB, GlyphRB),
-			Hint("Item", GlyphUpDown),
-			Hint("Use", GlyphX),
-			Hint("Close", GlyphB),
-		}
+	core.PanelTabItems: {
+		Hint("Tabs", GlyphLB, GlyphRB),
+		Hint("Item", GlyphUpDown),
+		Hint("Use", GlyphX),
+		Hint("Close", GlyphB),
 	},
-	core.PanelTabSkills: func() []HintSeg {
-		return []HintSeg{
-			Hint("Tabs", GlyphLB, GlyphRB),
-			Hint("Member", GlyphLeftRight),
-			Hint("Open trees", GlyphA),
-			Hint("Use skill", GlyphX),
-			Hint("Close", GlyphB),
-		}
+	core.PanelTabSkills: {
+		Hint("Tabs", GlyphLB, GlyphRB),
+		Hint("Member", GlyphLeftRight),
+		Hint("Open trees", GlyphA),
+		Hint("Use skill", GlyphX),
+		Hint("Close", GlyphB),
 	},
-	core.PanelTabQuests: func() []HintSeg {
-		return []HintSeg{
-			Hint("Tabs", GlyphLB, GlyphRB),
-			Hint("Quests / Bestiary", GlyphLeftRight),
-			Hint("Scroll", GlyphUpDown),
-			Hint("Close", GlyphB),
-		}
+	core.PanelTabQuests: {
+		Hint("Tabs", GlyphLB, GlyphRB),
+		Hint("Quests / Bestiary", GlyphLeftRight),
+		Hint("Scroll", GlyphUpDown),
+		Hint("Close", GlyphB),
 	},
 	core.PanelTabMap: footerHintMemberTabs,
 }
@@ -180,7 +178,7 @@ func drawPanelsBody(g *core.GameState, assets Resources) {
 	if int(g.PanelsTab) >= 0 && int(g.PanelsTab) < len(panelTabFooterHints) {
 		footerHint = panelTabFooterHints[g.PanelsTab]
 	}
-	drawModalFooterGlyphs(font, card, footerHint())
+	drawModalFooterGlyphs(font, card, footerHint)
 
 	// Sub-modals painted on top of the whole overlay.
 	if g.PanelsTab == core.PanelTabEquipment && g.EquipPickerOpen {
@@ -703,10 +701,7 @@ func drawEquipPicker(g *core.GameState, assets Resources) {
 		}
 	}
 
-	drawModalFooterGlyphsLeft(font, card, card.X+pickerCardLeftInset, []HintSeg{
-		Hint("Equip", GlyphA),
-		Hint("Cancel", GlyphB),
-	})
+	drawModalFooterGlyphsLeft(font, card, card.X+pickerCardLeftInset, equipPickerHints)
 }
 
 // drawUseTargetPicker paints the shared ally-target sub-modal for out-of-battle "use" actions (Items/Skills tab):
@@ -763,10 +758,7 @@ func drawUseTargetPicker(g *core.GameState, assets Resources) {
 		drawBar(font, barX, rect.Y+30, barW, barHeightMini, "MP", m.MP, m.MaxMP, barMP, false)
 	}
 
-	drawModalFooterGlyphsLeft(font, card, card.X+pickerCardLeftInset, []HintSeg{
-		Hint("Use", GlyphA),
-		Hint("Cancel", GlyphB),
-	})
+	drawModalFooterGlyphsLeft(font, card, card.X+pickerCardLeftInset, useTargetPickerHints)
 }
 
 // drawHealPicker paints the out-of-battle support-skill chooser: the caster's heals/cures with MP cost, cursored row gilded.
@@ -798,10 +790,7 @@ func drawHealPicker(g *core.GameState, assets Resources) {
 		drawTextRightAligned(font, costText, rect.X+rect.Width-12, rect.Y+rect.Height/2-8, FontSmall, inkAccent)
 	}
 
-	drawModalFooterGlyphsLeft(font, card, card.X+pickerCardLeftInset, []HintSeg{
-		Hint("Cast", GlyphA),
-		Hint("Cancel", GlyphB),
-	})
+	drawModalFooterGlyphsLeft(font, card, card.X+pickerCardLeftInset, healPickerHints)
 }
 
 // equipBonusSummary returns the single-line "STR +2" / "Armor +1" bonus copy under an item's tile.

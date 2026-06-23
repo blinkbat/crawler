@@ -619,13 +619,7 @@ func drawParticle(camera rl.Camera3D, p *particle) {
 		// Guard the lifetime divide (drawParticle runs before the alive() cull).
 		return
 	}
-	t := p.Elapsed / p.Duration
-	if t < 0 {
-		t = 0
-	}
-	if t > 1 {
-		t = 1
-	}
+	t := core.Clamp(p.Elapsed/p.Duration, 0, 1)
 	size := p.SizeStart + (p.SizeEnd-p.SizeStart)*t
 	col := core.MixColor(p.ColorStart, p.ColorEnd, float64(t))
 	pos := rl.NewVector3(p.X, p.Y, p.Z)

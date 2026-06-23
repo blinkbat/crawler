@@ -659,7 +659,10 @@ func init() {
 // FacingAwayFromAdjacentWall returns the facing AWAY from the first wall found
 // scanning (x,z)'s cardinal neighbours N→E→S→W — the way a wall-mounted thing
 // (torch, door) faces into the room. found=false when no adjacent wall.
-func FacingAwayFromAdjacentWall(m AreaDefinition, x, z int) (facing int, found bool) {
+// Takes *AreaDefinition (read-only): the struct is large (many slice/map headers)
+// and this is called per wall-torch per frame in the draw loop — a value copy there
+// is pure waste.
+func FacingAwayFromAdjacentWall(m *AreaDefinition, x, z int) (facing int, found bool) {
 	// A neighbour to back against is a solid obstruction OR a higher tile (walls
 	// are elevation now). Off-map counts via WallAt.
 	here := m.ElevationLevelAt(x, z)

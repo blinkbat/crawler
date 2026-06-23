@@ -148,10 +148,10 @@ func drawGradientBillboard(camera rl.Camera3D, tex rl.Texture2D, pos rl.Vector3,
 }
 
 // shadeRGB scales a color's RGB by f (alpha untouched) — the vertical value ramp's
-// foot multiplier.
+// foot multiplier. Darken-only (f clamped to [0,1]); routes through shadeColor so
+// the RGB-scale math lives in one place (the mapRGB seam).
 func shadeRGB(c rl.Color, f float32) rl.Color {
-	f = core.Clamp(f, 0, 1)
-	return rl.NewColor(uint8(float32(c.R)*f), uint8(float32(c.G)*f), uint8(float32(c.B)*f), c.A)
+	return shadeColor(c, core.Clamp(f, 0, 1))
 }
 
 // lerpToWhite blends from white toward target by t (t=0 → white/no-op, t=1 → target),

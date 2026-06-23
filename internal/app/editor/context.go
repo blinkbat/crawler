@@ -344,7 +344,9 @@ func runContextItem(s *State, item ctxItem) {
 			if idx < 0 {
 				return false
 			}
-			s.area.Locations = append(s.area.Locations[:idx], s.area.Locations[idx+1:]...)
+			// Fresh-slice removal, not in-place append-shift, to avoid mutating a
+			// backing array an undo snapshot could alias (see removeModalListItem).
+			s.area.Locations = removeModalListItem(s.area.Locations, idx)
 			return true
 		})
 	case ctxItemSetWallFaces:

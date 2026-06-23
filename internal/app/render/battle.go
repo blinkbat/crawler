@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"image/color"
 	"math"
-	"strconv"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -101,8 +100,9 @@ var (
 )
 
 // drawEnemyRoster shows the active pack at the top of the screen, laid out as a
-// formation grid: the back rank (up to 5) on top, the front rank (up to 3) below,
-// so the roster mirrors the on-field seating instead of a tall vertical stack.
+// formation grid: the back rank (up to EnemyBackRowCap) on top, the front rank
+// (up to EnemyFrontRowCap) below, so the roster mirrors the on-field seating
+// instead of a tall vertical stack.
 func drawEnemyRoster(g *core.GameState, assets Resources) {
 	if g.Battle.Phase == core.BattleWon || g.Battle.Phase == core.BattleLost {
 		return
@@ -582,10 +582,7 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 	if h >= actionMenuHintMinH {
 		hintY := footerBaselineY(y+h, FontSmall)
 		drawGiltRule(x+18, hintY-12, w-36, 1, 0.3)
-		DrawHintBarLeft(assets.hudFont, []HintSeg{
-			Hint("Confirm", GlyphA),
-			Hint("Back", GlyphB),
-		}, float32(contentX), float32(hintY), FontSmall)
+		DrawHintBarLeft(assets.hudFont, confirmBackHints, float32(contentX), float32(hintY), FontSmall)
 	}
 }
 
@@ -822,7 +819,7 @@ func drawItemMenuList(g *core.GameState, assets Resources, x, y, rightX int32) {
 	for i, slot := range living {
 		def := core.ItemInfo(slot.Kind)
 		label := def.Name
-		suffix := "x" + strconv.Itoa(slot.Count)
+		suffix := panelsItemCountLabel(slot.Count)
 		drawActionRow(assets.hudFont, x, y+int32(i)*uiRowPitch, rightX, label, suffix, g.Battle.ItemMenuIndex == i, false)
 	}
 }

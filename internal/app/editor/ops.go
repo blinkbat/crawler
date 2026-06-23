@@ -487,7 +487,7 @@ func placeDoorAt(s *State, x, z int) {
 // doorFacingForCell defaults a door's facing away from the first adjacent wall
 // (via core.FacingAwayFromAdjacentWall), or StartFacing when none.
 func doorFacingForCell(a *core.AreaDefinition, x, z int) int {
-	if f, ok := core.FacingAwayFromAdjacentWall(*a, x, z); ok {
+	if f, ok := core.FacingAwayFromAdjacentWall(a, x, z); ok {
 		return f
 	}
 	return a.StartFacing

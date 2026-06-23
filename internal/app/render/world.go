@@ -1000,7 +1000,7 @@ func drawWallTorch(assets Resources, m *core.AreaDefinition, x, z int, center rl
 // wallTorchFacing returns the unit (x,z) the torch faces — away from the first
 // adjacent wall (N→E→S→W), or south when the tile has no adjacent wall.
 func wallTorchFacing(m *core.AreaDefinition, x, z int) (float32, float32) {
-	if f, ok := core.FacingAwayFromAdjacentWall(*m, x, z); ok {
+	if f, ok := core.FacingAwayFromAdjacentWall(m, x, z); ok {
 		dx, dz := core.FacingVector(f)
 		return float32(dx), float32(dz)
 	}
@@ -1849,11 +1849,16 @@ func shadeColor(c rl.Color, factor float32) rl.Color {
 // ShadeColor is the exported form of shadeColor for the editor's 3D view.
 func ShadeColor(c rl.Color, factor float32) rl.Color { return shadeColor(c, factor) }
 
+// partyDrawOrderBuf backs partyDrawOrder so the once-per-frame ordering doesn't
+// allocate. Reused across frames (re-sliced [:0]); the result is consumed within
+// the single DrawPartySprites loop before the next frame overwrites it.
+var partyDrawOrderBuf = make([]int, 0, core.PartyMemberCount)
+
 // partyDrawOrder returns party indices ordered far-rank-first — the FRONT rank
 // (farther from the camera) before the nearer BACK rank — for the depth-test-off
 // battle pass, so the nearer rank paints over the farther at any overlap.
 func partyDrawOrder(party []core.PartyMember) []int {
-	order := make([]int, 0, len(party))
+	order := partyDrawOrderBuf[:0]
 	for _, want := range [...]core.Row{core.RowFront, core.RowBack} {
 		for i := range party {
 			if party[i].Row == want {
@@ -1861,6 +1866,7 @@ func partyDrawOrder(party []core.PartyMember) []int {
 			}
 		}
 	}
+	partyDrawOrderBuf = order
 	return order
 }
 
@@ -1967,14 +1973,14 @@ func partySpritePosition(camera rl.Camera3D, party []core.PartyMember, index int
 	forward := horizontalForward(camera)
 	right := horizontalRight(forward)
 	class := core.PartyClass(0)
-	if index >= 0 && index < len(party) {
+	if core.PartyIndexInRange(party, index) {
 		class = party[index].Class
 	}
 	// Layout uses the LIVE combat slot (Row/Col), so ambush rotation and death-driven
 	// swaps physically MOVE the sprite — the front line you see is the one that fights.
 	// The live slot is seated from the home formation at battle start and reverts after.
 	visRow, visCol := core.RowFront, core.ColLeft
-	if index >= 0 && index < len(party) {
+	if core.PartyIndexInRange(party, index) {
 		visRow, visCol = party[index].Row, party[index].Col
 	}
 	// 2×2 trapezoid widening toward the viewer (Debug ▸ Combat Tuning: Party rows):
