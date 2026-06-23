@@ -18,7 +18,7 @@ func DrawDoors(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		if vc.cull(center) {
 			continue
 		}
-		yaw := doorYawDeg(d.Facing)
+		yaw := southFacingYaw(d.Facing)
 		// Out-of-range style falls back to Building (index 0, always present).
 		style := d.Style
 		if style < 0 || int(style) >= len(assets.doorProps) {
@@ -75,19 +75,4 @@ func humanizeMapID(id string) string {
 	}
 	humanizeCacheIn, humanizeCacheOut = id, out
 	return out
-}
-
-// doorYawDeg maps a facing to the doorframe mesh's yaw. Mesh is authored facing +Z (south).
-func doorYawDeg(facing int) float32 {
-	switch core.NormalizeFacing(facing) {
-	case core.North:
-		return 180
-	case core.East:
-		return 90
-	case core.South:
-		return 0
-	case core.West:
-		return 270
-	}
-	return 0
 }

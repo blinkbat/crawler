@@ -51,15 +51,7 @@ func updateShop(g *core.GameState) {
 
 // shopRowCount is the selectable-row count on the active tab, driving the wrap.
 func shopRowCount(g *core.GameState) int {
-	switch g.ShopTab {
-	case core.ShopTabBuy:
-		return len(core.ShopCatalog())
-	case core.ShopTabSell:
-		// No-alloc count — called every frame, needs only the count.
-		return core.SellableCount(g.Inventory)
-	default:
-		panic(fmt.Sprintf("explore: shopRowCount missing case for ShopTab %d", g.ShopTab))
-	}
+	return core.ShopRowCount(g)
 }
 
 // buyShopItem purchases one unit of the cursored item if affordable (miss ping

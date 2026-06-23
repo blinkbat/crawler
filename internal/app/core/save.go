@@ -147,15 +147,19 @@ func SaveGame(g *GameState) error {
 	if err := os.MkdirAll(SaveDir(), AssetDirMode); err != nil {
 		return err
 	}
-	// Atomic write: stage in a sibling temp, then rename over the real save.
-	// os.Rename is atomic on a single volume, so a crash mid-write leaves the
-	// PRIOR save intact instead of a truncated, undecodable blob. Best-effort
-	// temp cleanup on rename failure.
-	tmp := SavePath() + ".tmp"
+	return atomicWriteFile(SavePath(), blob)
+}
+
+// atomicWriteFile stages blob in a sibling ".tmp" then renames it over path.
+// os.Rename is atomic on a single volume, so a crash mid-write leaves the PRIOR
+// file intact instead of a truncated, undecodable blob. Best-effort temp cleanup
+// on rename failure. The parent dir must already exist.
+func atomicWriteFile(path string, blob []byte) error {
+	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, blob, AssetFileMode); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, SavePath()); err != nil {
+	if err := os.Rename(tmp, path); err != nil {
 		os.Remove(tmp)
 		return err
 	}

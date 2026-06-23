@@ -69,23 +69,6 @@ func PackEngagesPlayerAt(g *GameState, p Pack, nx, nz int) bool {
 	return land == g.Player.Level
 }
 
-// cardinalStepsBase is the fixed [dx,dz] table for the four facings, derived
-// once from FacingVector (so AI and player-step code agree on directions).
-// cardinalSteps returns a value-array copy each call, so wanderStep can shuffle
-// it in place without recomputing.
-var cardinalStepsBase = func() [FacingCount][2]int {
-	var out [FacingCount][2]int
-	for i := 0; i < FacingCount; i++ {
-		dx, dz := FacingVector(i)
-		out[i] = [2]int{dx, dz}
-	}
-	return out
-}()
-
-func cardinalSteps() [FacingCount][2]int {
-	return cardinalStepsBase
-}
-
 // packAIStep is one pack's per-step move plan. EngagePlayer set means the pack
 // stepped onto the player's tile: the caller starts a battle with this pack
 // instead of applying the move.
@@ -376,7 +359,7 @@ func fleeStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int, 
 }
 
 func wanderStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int, int, bool) {
-	cardinals := cardinalSteps()
+	cardinals := FacingSteps()
 	// Fisher-Yates shuffle so wander direction is independent of array order.
 	for i := len(cardinals) - 1; i > 0; i-- {
 		j := g.Rand().Intn(i + 1)
@@ -400,21 +383,17 @@ func wanderStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int
 // (chase=true to encode engagement, wander=false). px/pz pass the player tile
 // explicitly rather than as a hidden global.
 func packCanMoveTo(g *GameState, p Pack, occupied map[[2]int]bool, tx, tz int, allowPlayer bool, px, pz int) bool {
-	// Honor the player's cliff/ramp rule (StepElevationOK) so packs don't climb
-	// sheer cliffs. On a voxel map, resolve the landing surface so the entry
-	// check is level-aware; landLevel stays p.Level on a flat map.
+	// Honor the player's cliff/ramp rule so packs don't climb sheer cliffs;
+	// ResolveStepLanding unifies the voxel + heightfield reachability check.
+	// landLevel is only consulted on the voxel branch below (CanEnterTile ignores
+	// level on a heightfield).
 	landLevel := p.Level
-	voxel := g.Area.IsVoxel()
 	if dir, ok := FacingFromDelta(tx-p.TileX, tz-p.TileZ); ok {
-		if voxel {
-			l, stepOK := g.Area.ResolveStep(p.TileX, p.Level, p.TileZ, dir)
-			if !stepOK {
-				return false
-			}
-			landLevel = l
-		} else if !g.Area.StepElevationOK(p.TileX, p.TileZ, dir) {
+		l, reachable := g.Area.ResolveStepLanding(p.TileX, p.Level, p.TileZ, dir)
+		if !reachable {
 			return false
 		}
+		landLevel = l
 	}
 	opts := EnterOpts{
 		AllowDoorTile:   false,
@@ -423,7 +402,7 @@ func packCanMoveTo(g *GameState, p Pack, occupied map[[2]int]bool, tx, tz int, a
 		PlayerTileZ:     pz,
 		OccupiedPacks:   occupied,
 	}
-	if voxel {
+	if g.Area.IsVoxel() {
 		return CanEnterTileAtLevel(g, tx, tz, landLevel, opts)
 	}
 	return CanEnterTile(g, tx, tz, opts)

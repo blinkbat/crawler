@@ -100,6 +100,23 @@ func formationSlotsValid(party []PartyMember) bool {
 	return true
 }
 
+// defaultSlotCol returns the home column for the next member placed in `row`,
+// packing each row into a 2×2 (first member left, second right). frontN/backN
+// track placements so far in each row and are advanced in place. Shared by
+// NewParty and NormalizePartyFormation so the default-seed rule lives in one spot.
+func defaultSlotCol(row Row, frontN, backN *int) Col {
+	n := backN
+	if row == RowFront {
+		n = frontN
+	}
+	col := ColLeft
+	if *n%2 == 1 {
+		col = ColRight
+	}
+	*n++
+	return col
+}
+
 // NormalizePartyFormation guarantees valid 2×2 slots: a clean grid is kept
 // (custom swaps survive save/load); an invalid layout (e.g. a pre-formation save,
 // all zero-value front-left) is re-seeded to the default (row by class, packed left-to-right).
@@ -110,18 +127,7 @@ func NormalizePartyFormation(party []PartyMember) {
 	frontCount, backCount := 0, 0
 	for i := range party {
 		row := DefaultPartyRow(party[i].Class)
-		col := ColLeft
-		if row == RowFront {
-			if frontCount%2 == 1 {
-				col = ColRight
-			}
-			frontCount++
-		} else {
-			if backCount%2 == 1 {
-				col = ColRight
-			}
-			backCount++
-		}
+		col := defaultSlotCol(row, &frontCount, &backCount)
 		party[i].HomeRow = row
 		party[i].HomeCol = col
 		party[i].Row = row

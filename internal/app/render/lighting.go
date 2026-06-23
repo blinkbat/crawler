@@ -3,7 +3,6 @@ package render
 import (
 	"fmt"
 	"log"
-	"math"
 	"strings"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -469,15 +468,7 @@ func (l lightingShader) unload() {
 
 // sunDir is the pre-normalized world-space direction the sun shines toward (the
 // lighting shader's directional vector).
-var sunDir = normalizeVec3(rl.NewVector3(0.42, -0.78, 0.32))
-
-func normalizeVec3(v rl.Vector3) rl.Vector3 {
-	length := float32(math.Sqrt(float64(v.X*v.X + v.Y*v.Y + v.Z*v.Z)))
-	if length == 0 {
-		return rl.NewVector3(0, -1, 0)
-	}
-	return rl.NewVector3(v.X/length, v.Y/length, v.Z/length)
-}
+var sunDir = rl.Vector3Normalize(rl.NewVector3(0.42, -0.78, 0.32))
 
 // lightingUniform* memoize the last profile-derived upload. viewPos always
 // uploads; the ~7 profile-derived uniforms only shift on a phase crossing. Keyed

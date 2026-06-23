@@ -111,7 +111,7 @@ func LivingPartyIndicesInto(buf []int, party []PartyMember) []int {
 }
 
 func PartyMemberAlive(party []PartyMember, index int) bool {
-	return PartyIndexInRange(party, index) && party[index].HP > 0
+	return PartyIndexInRange(party, index) && partyAlive(party[index])
 }
 
 // PartyMemberAvailable reports whether the member can act / be targeted this turn

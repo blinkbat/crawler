@@ -226,25 +226,20 @@ func CursorUpDown(cursor, count int) int {
 	return cursor
 }
 
-// UpPressedArrows / DownPressedArrows are text-entry-safe vertical nav: arrows +
-// pad/stick but NOT W/S, so a row doubling as a text field doesn't scroll when
-// W/S are typed. Identical predicate to the pickpocket Arrow{Up,Down}Pressed — aliased
-// so the "arrows + pad, no WASD" rule lives in one place.
-func UpPressedArrows() bool   { return ArrowUpPressed() }
-func DownPressedArrows() bool { return ArrowDownPressed() }
-
 // CursorUpDownTextSafe is CursorUpDown without W/S, for a list with an active
-// text field. Pad/stick/arrows still navigate.
+// text field: arrows + pad/stick navigate but NOT W/S, so a row doubling as a
+// text field doesn't scroll when W/S are typed. Uses Arrow{Up,Down}Pressed (the
+// "arrows + pad, no WASD" rule) so that vocabulary lives in one place.
 func CursorUpDownTextSafe(cursor, count int) int {
 	if count <= 0 {
 		return cursor
 	}
 	// Same no-press re-clamp as CursorUpDown — see there.
 	cursor = core.Clamp(cursor, 0, count-1)
-	if UpPressedArrows() {
+	if ArrowUpPressed() {
 		cursor = core.WrapIndex(cursor-1, count)
 	}
-	if DownPressedArrows() {
+	if ArrowDownPressed() {
 		cursor = core.WrapIndex(cursor+1, count)
 	}
 	return cursor

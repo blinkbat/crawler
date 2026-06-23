@@ -17,21 +17,21 @@ const (
 	skillTreeColGap  = float32(50)
 	skillTreeSidePad = float32(34)
 	// skillTreeCardInset: content gutter for header/footer/detail; width derives as 2×.
-	skillTreeCardInset = float32(24)
+	skillTreeCardInset    = float32(24)
 	skillTreeHeaderGlyphX = float32(34)
 	skillTreeHeaderTitleX = float32(58)
-	skillNodeColHeaderH = float32(32) // header reserved above the ladder
-	skillNodeGap        = float32(12)
-	skillNodeMaxH       = float32(82) // height cap so short trees don't stretch
-	skillNodeMinH       = float32(8)  // height floor so many nodes can't go negative
+	skillNodeColHeaderH   = float32(32) // header reserved above the ladder
+	skillNodeGap          = float32(12)
+	skillNodeMaxH         = float32(82) // height cap so short trees don't stretch
+	skillNodeMinH         = float32(8)  // height floor so many nodes can't go negative
 	// Ornament size gates: corner pips need a min size, the bottom fleuron a min width.
 	skillNodePipMinW     = float32(96)
 	skillNodePipMinH     = float32(40)
 	skillNodeFleuronMinW = float32(130)
 	// Card sized inline (custom column geometry); chrome routes through drawPickerCardEx
 	// with an opaque backdrop so the glass body composites over solid dark.
-	skillTreeMaxWidthFrac = float32(0.92) // columns shrink to fit rather than overflow
-	skillTreeHeightFrac   = float32(0.74)
+	skillTreeMaxWidthFrac  = float32(0.92) // columns shrink to fit rather than overflow
+	skillTreeHeightFrac    = float32(0.74)
 	skillTreeHeaderTitleY  = float32(24)
 	skillTreeHeaderGlyphY  = float32(38) // crest lower, off the mitre
 	skillTreeHeaderSPY     = float32(28)

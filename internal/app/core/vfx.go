@@ -86,15 +86,6 @@ func EnqueuePartyVFX(g *GameState, kind VFXKind, slot int) {
 	g.VFXQueue = append(g.VFXQueue, VFXRequest{Kind: kind, Anchor: VFXAnchorParty, SlotIdx: slot})
 }
 
-// EnqueueTileVFX appends a request anchored to a world tile.
-// DEFERRED: nothing enqueues one yet (render already materialises VFXAnchorTile); not a live path.
-func EnqueueTileVFX(g *GameState, kind VFXKind, tileX, tileZ int) {
-	if g == nil || kind == VFXNone {
-		return
-	}
-	g.VFXQueue = append(g.VFXQueue, VFXRequest{Kind: kind, Anchor: VFXAnchorTile, TileX: tileX, TileZ: tileZ})
-}
-
 // DrainVFXQueue returns the pending requests and clears the queue. Swaps in a
 // spare back-buffer (not re-sliced) so the returned slice is NOT aliased by
 // g.VFXQueue: a follow-on VFX enqueued during the drain lands in the fresh buffer.

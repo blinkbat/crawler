@@ -78,6 +78,16 @@ func validateCustomEnemyExtras(name string, hp, mp int) error {
 	return nil
 }
 
+// validateCustomEnemy runs BOTH custom-enemy guards (HP/MP extras + shared stat
+// bounds) so the loader and writer can't drift on which checks they apply. The
+// custom path has no PoisonChance, so it passes 0.
+func validateCustomEnemy(name string, hp, mp int, skillCastChance float64, armor, mdef, attackDamage, xpValue, spellPower, tier int) error {
+	if err := validateCustomEnemyExtras(name, hp, mp); err != nil {
+		return err
+	}
+	return validateEnemyStatBounds(name, skillCastChance, 0, armor, mdef, attackDamage, xpValue, spellPower, tier)
+}
+
 // CustomEnemyDefFromMap converts one on-disk custom enemy row into the core definition.
 func CustomEnemyDefFromMap(ce mapfile.MapCustomEnemy) (CustomEnemyDef, error) {
 	base, ok := EnemyKindFromName(ce.BaseKind)
@@ -85,10 +95,7 @@ func CustomEnemyDefFromMap(ce mapfile.MapCustomEnemy) (CustomEnemyDef, error) {
 		return CustomEnemyDef{}, fmt.Errorf("custom enemy %q references unknown base kind %q", ce.Name, ce.BaseKind)
 	}
 	// Refuse bad rows at load (shared with the writer so the two can't drift).
-	if err := validateCustomEnemyExtras(ce.Name, ce.HP, ce.MP); err != nil {
-		return CustomEnemyDef{}, err
-	}
-	if err := validateEnemyStatBounds(ce.Name, ce.SkillCastChance, 0, ce.Armor, ce.MDef, ce.AttackDamage, ce.XPValue, ce.SpellPower, ce.Tier); err != nil {
+	if err := validateCustomEnemy(ce.Name, ce.HP, ce.MP, ce.SkillCastChance, ce.Armor, ce.MDef, ce.AttackDamage, ce.XPValue, ce.SpellPower, ce.Tier); err != nil {
 		return CustomEnemyDef{}, err
 	}
 	skills := make([]SkillID, 0, len(ce.Skills))
@@ -123,11 +130,8 @@ func MapCustomEnemyFromDef(ce CustomEnemyDef) (mapfile.MapCustomEnemy, error) {
 		return mapfile.MapCustomEnemy{}, fmt.Errorf("custom enemy %q has unknown base kind %d", ce.Name, int(ce.BaseKind))
 	}
 	// Validate on the way OUT too: a non-editor writer (importer/script) could otherwise persist a
-	// field the loader would refuse, yielding an unloadable map. Same lockstep for HP/MP below.
-	if err := validateEnemyStatBounds(ce.Name, ce.SkillCastChance, 0, ce.Armor, ce.MDef, ce.AttackDamage, ce.XPValue, ce.SpellPower, ce.Tier); err != nil {
-		return mapfile.MapCustomEnemy{}, err
-	}
-	if err := validateCustomEnemyExtras(ce.Name, ce.HP, ce.MP); err != nil {
+	// field the loader would refuse, yielding an unloadable map.
+	if err := validateCustomEnemy(ce.Name, ce.HP, ce.MP, ce.SkillCastChance, ce.Armor, ce.MDef, ce.AttackDamage, ce.XPValue, ce.SpellPower, ce.Tier); err != nil {
 		return mapfile.MapCustomEnemy{}, err
 	}
 	skillNames := make([]string, 0, len(ce.Skills))

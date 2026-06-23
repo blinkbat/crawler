@@ -106,6 +106,21 @@ func SellableCount(inv []ItemStack) int {
 	return n
 }
 
+// ShopRowCount is the selectable-row count on the active shop tab — the single
+// source the input wrap (explore.shopRowCount) and the renderer's row list both
+// agree on (the latter guarded by TestBuildShopRowsMatchesCatalogOrder).
+func ShopRowCount(g *GameState) int {
+	switch g.ShopTab {
+	case ShopTabBuy:
+		return len(ShopCatalog())
+	case ShopTabSell:
+		// No-alloc count — called every frame, needs only the count.
+		return SellableCount(g.Inventory)
+	default:
+		panic("core: ShopRowCount missing case for ShopTab")
+	}
+}
+
 // AwardBattleLoot grants the defeated pack's gold + drops (gold sums a uniform
 // roll per member, drops roll each Drops table), adds to g, and returns totals.
 // Only DEFEATED members pay out (correctness for a partially-alive pack; at the

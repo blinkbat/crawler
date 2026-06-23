@@ -109,6 +109,17 @@ func FacingVector(facing int) (int, int) {
 	return row.DX, row.DZ
 }
 
+// FacingSteps returns the four [dx,dz] cardinal steps as a fresh value array
+// (callers may shuffle it in place), derived from facingTable so AI and
+// player-step code share one direction source.
+func FacingSteps() [FacingCount][2]int {
+	var out [FacingCount][2]int
+	for i := 0; i < FacingCount; i++ {
+		out[i] = [2]int{facingTable[i].DX, facingTable[i].DZ}
+	}
+	return out
+}
+
 func FacingYaw(facing int) float32 {
 	return facingTable[NormalizeFacing(facing)].Yaw
 }

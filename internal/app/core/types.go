@@ -94,7 +94,8 @@ type CrystalSpawn struct {
 }
 
 // TileXZ is implemented by the authored spawn types (PackSpawn / ChestSpawn /
-// DoorSpawn / CrystalSpawn) so generic "spawn on this tile" helpers range over it.
+// DoorSpawn / CrystalSpawn) AND their runtime counterparts (Chest / Door /
+// Crystal) so the generic "thing on this tile" scan (SpawnIndexAt) ranges over it.
 type TileXZ interface {
 	Tile() (int, int)
 }
@@ -103,6 +104,9 @@ func (s PackSpawn) Tile() (int, int)    { return s.TileX, s.TileZ }
 func (s ChestSpawn) Tile() (int, int)   { return s.TileX, s.TileZ }
 func (s DoorSpawn) Tile() (int, int)    { return s.TileX, s.TileZ }
 func (s CrystalSpawn) Tile() (int, int) { return s.TileX, s.TileZ }
+func (c Chest) Tile() (int, int)        { return c.TileX, c.TileZ }
+func (d Door) Tile() (int, int)         { return d.TileX, d.TileZ }
+func (c Crystal) Tile() (int, int)      { return c.TileX, c.TileZ }
 
 // Door is one runtime door (from DoorSpawns via placeDoors). Blocks neither
 // movement nor vision: stepping onto its tile fires the area transition.

@@ -18,6 +18,18 @@ func textureAndShade(models []rl.Model, shader rl.Shader, tex rl.Texture2D) {
 	}
 }
 
+// skinExceptMoss textures + shades every model EXCEPT mossIdx (moss reads as
+// granite if textured, so it stays untextured and tinted at part level). Shared
+// by the rock boulder/cairn/formation loaders.
+func skinExceptMoss(models []rl.Model, mossIdx int, shader rl.Shader, tex rl.Texture2D) {
+	for i := range models {
+		if i != mossIdx {
+			setModelTexture(&models[i], tex)
+		}
+		attachShader(&models[i], shader)
+	}
+}
+
 // treeModel bundles the meshes for one blocking tree. Unique meshes live in
 // `models`; `parts` reference them by index so a mesh can be reused without
 // double-freeing on unload.
@@ -525,12 +537,7 @@ func loadRockProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 		// Moss cushion — UNtextured (grain would read as granite), tinted at part level.
 		rockMeshMoss: rl.LoadModelFromMesh(rl.GenMeshSphere(0.30, 5, 7)),
 	}
-	for i := range models {
-		if i != rockMeshMoss {
-			setModelTexture(&models[i], rockTex)
-		}
-		attachShader(&models[i], shader)
-	}
+	skinExceptMoss(models, rockMeshMoss, shader, rockTex)
 
 	warm, cool, dark, light := stonePaletteWarm, stonePaletteCool, stonePaletteDark, stonePaletteLight
 
@@ -577,12 +584,7 @@ func loadRockCairnProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 		cairnMeshTop:    rl.LoadModelFromMesh(rl.GenMeshSphere(0.22, 4, 5)),
 		cairnMeshMoss:   rl.LoadModelFromMesh(rl.GenMeshSphere(0.30, 5, 7)), // moss cushion (untextured)
 	}
-	for i := range models {
-		if i != cairnMeshMoss {
-			setModelTexture(&models[i], rockTex)
-		}
-		attachShader(&models[i], shader)
-	}
+	skinExceptMoss(models, cairnMeshMoss, shader, rockTex)
 	warm, cool, dark, light := stonePaletteWarm, stonePaletteCool, stonePaletteDark, stonePaletteLight
 	return propModel{
 		models: models,
@@ -618,12 +620,7 @@ func loadRockFormationProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 		formationMeshCrown:    rl.LoadModelFromMesh(rl.GenMeshSphere(0.40, 4, 5)),
 		formationMeshMoss:     rl.LoadModelFromMesh(rl.GenMeshSphere(0.34, 5, 7)), // moss cushion (untextured)
 	}
-	for i := range models {
-		if i != formationMeshMoss {
-			setModelTexture(&models[i], rockTex)
-		}
-		attachShader(&models[i], shader)
-	}
+	skinExceptMoss(models, formationMeshMoss, shader, rockTex)
 	warm, cool, dark, light := stonePaletteWarm, stonePaletteCool, stonePaletteDark, stonePaletteLight
 	return propModel{
 		models: models,

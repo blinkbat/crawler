@@ -505,6 +505,19 @@ func indexByName[T any](table []T, s string, name func(T) string) (int, bool) {
 	return 0, false
 }
 
+// findByValue is the forward (value→row) mirror of indexByName: the first row
+// whose value(row) equals want, ok=false on no match. Shared by the enum→row
+// decoders whose registry carries an explicit value field (material/facing).
+func findByValue[T any, V comparable](table []T, want V, value func(T) V) (T, bool) {
+	for _, row := range table {
+		if value(row) == want {
+			return row, true
+		}
+	}
+	var zero T
+	return zero, false
+}
+
 // materialDef is one material registry row: on-disk name + traits. `indoor`
 // (enclosed interior vs. outdoor biome) drives minimap tone, lighting, and
 // resource fallbacks — a new material is one row, not a `== MaterialDungeon` grep.
@@ -544,12 +557,7 @@ func init() {
 // findMaterialDef is the forward (enum→row) scan, shared by MaterialName /
 // MaterialIsIndoor. ok=false when out of range.
 func findMaterialDef(m MaterialSet) (materialDef, bool) {
-	for _, d := range materialDefs {
-		if d.value == m {
-			return d, true
-		}
-	}
-	return materialDef{}, false
+	return findByValue(materialDefs, m, func(d materialDef) MaterialSet { return d.value })
 }
 
 // MaterialName returns the on-disk name for the material set; ok=false when out
@@ -612,13 +620,8 @@ var FacingShortLabels = func() [FacingCount]string {
 // FacingName returns the on-disk name for a facing (ok=false only on an
 // out-of-range value, impossible for the four legit enum values).
 func FacingName(f int) (string, bool) {
-	want := NormalizeFacing(f)
-	for _, d := range facingDefs {
-		if d.value == want {
-			return d.name, true
-		}
-	}
-	return "", false
+	d, ok := findByValue(facingDefs, NormalizeFacing(f), func(d facingDef) int { return d.value })
+	return d.name, ok
 }
 
 func facingFromName(s string) (int, bool) {

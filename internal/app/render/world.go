@@ -382,15 +382,10 @@ func DrawSkyBackground(assets Resources, g *core.GameState) {
 // would show against its 85%-clamped tail.
 const behindCullSlack = float32(-2.5)
 
-// behindCull reports whether p sits far enough behind the camera to skip. camPos
-// + forward are hoisted out of per-item loops so this stays a cheap dot. Shared by
+// behindCullXZ reports whether p sits far enough behind the camera to skip, with
+// X/Z passed as scalars to avoid a throwaway Vector3 in the hottest loop. camPos +
+// forward are hoisted out of per-item loops so this stays a cheap dot. Shared by
 // the tile/chest/door draws so they cull consistently.
-func behindCull(camPos, forward, p rl.Vector3) bool {
-	return behindCullXZ(camPos, forward, p.X, p.Z)
-}
-
-// behindCullXZ is behindCull with X/Z as scalars, avoiding a throwaway Vector3 in
-// the hottest loop.
 func behindCullXZ(camPos, forward rl.Vector3, px, pz float32) bool {
 	dx := px - camPos.X
 	dz := pz - camPos.Z
@@ -773,7 +768,7 @@ func drawCliffFaces(camPos rl.Vector3, material worldMaterialResources, assets R
 		if sc := grid[z*w+x].faceSkins[d]; assets.faceVariantTable.present[sc] {
 			skin = assets.faceVariantTable.model[sc]
 		}
-		drawCliffFace(skin, cx, core.ElevationWorldY(nLevel), cz, faceYaw(d), float32(myLevel-nLevel))
+		drawCliffFace(skin, cx, core.ElevationWorldY(nLevel), cz, southFacingYaw(d), float32(myLevel-nLevel))
 		drawn++
 	}
 	return drawn
@@ -781,8 +776,11 @@ func drawCliffFaces(camPos rl.Vector3, material worldMaterialResources, assets R
 
 // faceYaw maps the dropping-edge direction to the Y-rotation orienting the
 // face-quad (built on +Z/south) outward. +Z→(sinθ,cosθ): 0=S, 90=E, 180=N, 270=W.
-func faceYaw(d int) float32 {
-	switch d {
+// southFacingYaw maps a facing to the Y-rotation that points a +Z/south-authored
+// mesh that way (S=0, E=90, N=180, W=270). Shared by the cliff face-quads and the
+// doorframe mesh (doorYawDeg), which use the same +Z base orientation.
+func southFacingYaw(d int) float32 {
+	switch core.NormalizeFacing(d) {
 	case core.South:
 		return 0
 	case core.East:
@@ -799,10 +797,7 @@ func faceYaw(d int) float32 {
 // baseY, yaw-rotated to the dropping edge and scaled vertically by the level
 // delta so the single LevelStep-tall model covers the whole cliff.
 func drawCliffFace(model rl.Model, cx, baseY, cz, yaw, levels float32) {
-	rl.DrawModelEx(model,
-		rl.NewVector3(cx, baseY, cz),
-		rl.NewVector3(0, 1, 0), yaw,
-		rl.NewVector3(1, levels, 1), rl.White)
+	drawYawedModel(model, cx, baseY, cz, yaw, rl.NewVector3(1, levels, 1))
 }
 
 // triNormal returns the unit normal of triangle (a,b,c) by the right-hand rule
@@ -837,10 +832,7 @@ func rampFacingYaw(facing int) float32 {
 // drawRampWedge draws the solid ramp wedge at (cx,cz) with its low edge at lowY,
 // ascending toward `facing`; the high edge lands one LevelStep up, flush.
 func drawRampWedge(model rl.Model, cx, cz, lowY float32, facing int) {
-	rl.DrawModelEx(model,
-		rl.NewVector3(cx, lowY, cz),
-		rl.NewVector3(0, 1, 0), rampFacingYaw(facing),
-		rl.NewVector3(1, 1, 1), rl.White)
+	drawYawedModel(model, cx, lowY, cz, rampFacingYaw(facing), rl.NewVector3(1, 1, 1))
 }
 
 // drawDecor renders a tile's floor-layer decoration. DecorAuto hash-scatters;
@@ -1298,16 +1290,21 @@ func faceBackfaceCulled(camPos rl.Vector3, cx, cz, fdx, fdz, half float32) bool 
 	return (camPos.X-(cx+fdx*half))*fdx+(camPos.Z-(cz+fdz*half))*fdz <= 0
 }
 
+// drawYawedModel draws model at (cx,cy,cz) rotated yawDeg about the vertical axis
+// and scaled by `scale`, untinted. Shared by drawTileCube / drawCliffFace /
+// drawRampWedge, which differ only in the scale vector.
+func drawYawedModel(model rl.Model, cx, cy, cz, yawDeg float32, scale rl.Vector3) {
+	rl.DrawModelEx(model,
+		rl.NewVector3(cx, cy, cz),
+		rl.NewVector3(0, 1, 0), yawDeg,
+		scale, rl.White)
+}
+
 // drawTileCube draws a square-footprint cube at (cx,cy,cz) yaw-rotated about its
 // vertical axis — 90° steps spin the texture to break tiling without changing the
 // silhouette.
 func drawTileCube(model rl.Model, cx, cy, cz, yawDeg float32) {
-	rl.DrawModelEx(model,
-		rl.NewVector3(cx, cy, cz),
-		rl.NewVector3(0, 1, 0),
-		yawDeg,
-		rl.NewVector3(1, 1, 1),
-		rl.White)
+	drawYawedModel(model, cx, cy, cz, yawDeg, rl.NewVector3(1, 1, 1))
 }
 
 // tileHash is the stable per-tile uint32 mixer for orientation/variant selection.
@@ -2214,4 +2211,3 @@ func horizontalForward(camera rl.Camera3D) rl.Vector3 {
 	horizForwardCache.primed = true
 	return result
 }
-

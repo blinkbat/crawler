@@ -227,6 +227,41 @@ func makeRockCrumblingPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
+// bevelParams tunes bevelCell: per-edge (base, falloff) shade strengths, the lit
+// (top/left) and dark (bottom/right) tints, the edge widths under which each side
+// is shaded, and a per-cell jitter multiplier (1 = none).
+type bevelParams struct {
+	lit, dark            color.RGBA
+	topBase, topFall     float64
+	leftBase, leftFall   float64
+	botBase, botFall     float64
+	rightBase, rightFall float64
+	litWidth, darkWidth  int
+	jitter               float64
+}
+
+// bevelCell shades c for a high-left key light: lit on the top/left edges, dark on
+// bottom/right, falling off across the edge width. localX/localY are the position
+// within a cellW×cellH cell whose mortar/grout inset is `inset`. Shared by the
+// stone brick + floor painters.
+func bevelCell(c color.RGBA, localX, localY, cellW, cellH, inset int, p bevelParams) color.RGBA {
+	distTop := localY - inset
+	distLeft := localX - inset
+	distBottom := cellH - 1 - localY
+	distRight := cellW - 1 - localX
+	if distTop <= p.litWidth {
+		c = core.MixColor(c, p.lit, (p.topBase-float64(distTop)*p.topFall)*p.jitter)
+	} else if distLeft <= p.litWidth {
+		c = core.MixColor(c, p.lit, (p.leftBase-float64(distLeft)*p.leftFall)*p.jitter)
+	}
+	if distBottom <= p.darkWidth {
+		c = core.MixColor(c, p.dark, (p.botBase-float64(distBottom)*p.botFall)*p.jitter)
+	} else if distRight <= p.darkWidth {
+		c = core.MixColor(c, p.dark, (p.rightBase-float64(distRight)*p.rightFall)*p.jitter)
+	}
+	return c
+}
+
 func makeStoneBrickPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	brickW := 32
@@ -290,20 +325,12 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 			// Directional bevel: top lip brightest, left dimmer; bottom shadowed,
 			// right less. Per-brick hash jitters lip strength.
 			bevelJitter := 0.85 + float64(hashByteXY(brickX*5, row*11)%64)/210.0
-			distTop := localY - mortar
-			distLeft := localX - mortar
-			distBottom := brickH - 1 - localY
-			distRight := brickW - 1 - localX
-			if distTop <= 1 {
-				c = core.MixColor(c, lip, (0.44-float64(distTop)*0.18)*bevelJitter)
-			} else if distLeft <= 1 {
-				c = core.MixColor(c, lip, (0.28-float64(distLeft)*0.12)*bevelJitter)
-			}
-			if distBottom <= 1 {
-				c = core.MixColor(c, pitDark, (0.46-float64(distBottom)*0.18)*bevelJitter)
-			} else if distRight <= 1 {
-				c = core.MixColor(c, pitDark, (0.26-float64(distRight)*0.10)*bevelJitter)
-			}
+			c = bevelCell(c, localX, localY, brickW, brickH, mortar, bevelParams{
+				lit: lip, dark: pitDark,
+				topBase: 0.44, topFall: 0.18, leftBase: 0.28, leftFall: 0.12,
+				botBase: 0.46, botFall: 0.18, rightBase: 0.26, rightFall: 0.10,
+				litWidth: 1, darkWidth: 1, jitter: bevelJitter,
+			})
 
 			if hashByteXY(brickX*17+localX/3, row*31+localY/3)%80 < 4 {
 				c = adjust(c, -36)
@@ -412,20 +439,12 @@ func makeStoneFloorPixels(w, h int) []color.RGBA {
 			}
 
 			// Directional bevel (high-left key): lit top/left, shadowed bottom/right.
-			distTop := localY - grout
-			distLeft := localX - grout
-			distBottom := slab - 1 - localY
-			distRight := slab - 1 - localX
-			if distTop <= 1 {
-				c = core.MixColor(c, highlight, 0.30-float64(distTop)*0.12)
-			} else if distLeft <= 1 {
-				c = core.MixColor(c, highlight, 0.20-float64(distLeft)*0.08)
-			}
-			if distBottom <= 2 {
-				c = core.MixColor(c, groutColor, 0.40-float64(distBottom)*0.12)
-			} else if distRight <= 2 {
-				c = core.MixColor(c, groutColor, 0.28-float64(distRight)*0.09)
-			}
+			c = bevelCell(c, localX, localY, slab, slab, grout, bevelParams{
+				lit: highlight, dark: groutColor,
+				topBase: 0.30, topFall: 0.12, leftBase: 0.20, leftFall: 0.08,
+				botBase: 0.40, botFall: 0.12, rightBase: 0.28, rightFall: 0.09,
+				litWidth: 1, darkWidth: 2, jitter: 1,
+			})
 			if hashByteXY(slabX*11+localX/4, slabY*19+localY/4)%72 < 3 {
 				c = adjust(c, -32)
 			}
@@ -645,38 +664,43 @@ func makePlankPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeWaterPixels paints shallow water: banded blue gradient with FBM ripples + peaks, light enough to read as wadeable.
-func makeWaterPixels(w, h int) []color.RGBA {
-	pixels := make([]color.RGBA, w*h)
-	// Pastel aqua water.
-	deep := color.RGBA{R: 96, G: 168, B: 192, A: 255}
-	mid := color.RGBA{R: 150, G: 204, B: 214, A: 255}
-	shine := color.RGBA{R: 220, G: 238, B: 232, A: 255}
-	sand := color.RGBA{R: 214, G: 190, B: 144, A: 255}
-	weed := color.RGBA{R: 108, G: 170, B: 110, A: 255}
+// waterParams tunes makeWaterBase per variant. sand with zero alpha disables the
+// sandy bottom; sunGlints adds shallow-only horizontal dashes.
+type waterParams struct {
+	deep, mid, shine, weed color.RGBA
+	sand                   color.RGBA // zero A → no sandy bottom (the deep-water "can't wade" cue)
+	peakCut, peakGain      float64    // crest threshold + brightness gain
+	weedMod, weedHit       int        // weed scatter: hashByteXY(x/2,y*3)%weedMod < weedHit
+	weedMix                float64
+	sunGlints              bool
+}
 
+// makeWaterBase paints the shared banded-blue water field (FBM gradient + crest
+// peaks + weed scatter); makeWaterPixels / makeDeepWaterPixels differ only by p.
+func makeWaterBase(w, h int, p waterParams) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			n := fbmNoise(float64(x), float64(y), 0.04, 4)
 			band := math.Sin(float64(y)*0.08 + n*1.8)
-			c := core.MixColor(deep, mid, 0.45+band*0.35+n*0.20)
+			c := core.MixColor(p.deep, p.mid, 0.45+band*0.35+n*0.20)
 
 			// Bright crests at noise peaks.
 			peak := fbmNoise(float64(x)*1.3+311, float64(y)*1.3-91, 0.10, 3)
-			if peak > 0.55 {
-				c = core.MixColor(c, shine, (peak-0.55)*1.4)
+			if peak > p.peakCut {
+				c = core.MixColor(c, p.shine, (peak-p.peakCut)*p.peakGain)
 			}
 			// Sun glints — short horizontal near-white dashes (x/7 = 7-px streak), crest-gated to the lit side.
-			if band > 0.25 && hashByteXY(x/7, y)%170 < 2 {
-				c = core.MixColor(c, shine, 0.85)
+			if p.sunGlints && band > 0.25 && hashByteXY(x/7, y)%170 < 2 {
+				c = core.MixColor(c, p.shine, 0.85)
 			}
 			// Sandy bottom where the FBM dips deep.
-			if n < -0.45 {
-				c = core.MixColor(c, sand, (-n-0.45)*0.5)
+			if p.sand.A != 0 && n < -0.45 {
+				c = core.MixColor(c, p.sand, (-n-0.45)*0.5)
 			}
 			// Rare weed strands.
-			if hashByteXY(x/2, y*3)%560 < 4 {
-				c = core.MixColor(c, weed, 0.45)
+			if hashByteXY(x/2, y*3)%p.weedMod < p.weedHit {
+				c = core.MixColor(c, p.weed, p.weedMix)
 			}
 			pixels[y*w+x] = c
 		}
@@ -684,32 +708,30 @@ func makeWaterPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
+// makeWaterPixels paints shallow water: banded blue gradient with FBM ripples + peaks, light enough to read as wadeable.
+func makeWaterPixels(w, h int) []color.RGBA {
+	return makeWaterBase(w, h, waterParams{
+		deep:    color.RGBA{R: 96, G: 168, B: 192, A: 255}, // pastel aqua
+		mid:     color.RGBA{R: 150, G: 204, B: 214, A: 255},
+		shine:   color.RGBA{R: 220, G: 238, B: 232, A: 255},
+		weed:    color.RGBA{R: 108, G: 170, B: 110, A: 255},
+		sand:    color.RGBA{R: 214, G: 190, B: 144, A: 255},
+		peakCut: 0.55, peakGain: 1.4,
+		weedMod: 560, weedHit: 4, weedMix: 0.45,
+		sunGlints: true,
+	})
+}
+
 // makeDeepWaterPixels paints the blocking deep-water variant: like makeWaterPixels but darker/cooler, no sandy bottom (the "can't wade" cue).
 func makeDeepWaterPixels(w, h int) []color.RGBA {
-	pixels := make([]color.RGBA, w*h)
-	// Pastel teal, colder/more saturated than shallow water.
-	deep := color.RGBA{R: 92, G: 138, B: 160, A: 255}
-	mid := color.RGBA{R: 124, G: 168, B: 184, A: 255}
-	shine := color.RGBA{R: 196, G: 220, B: 222, A: 255}
-	weed := color.RGBA{R: 96, G: 148, B: 120, A: 255}
-
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			n := fbmNoise(float64(x), float64(y), 0.04, 4)
-			band := math.Sin(float64(y)*0.08 + n*1.8)
-			c := core.MixColor(deep, mid, 0.45+band*0.35+n*0.20)
-
-			peak := fbmNoise(float64(x)*1.3+311, float64(y)*1.3-91, 0.10, 3)
-			if peak > 0.62 {
-				c = core.MixColor(c, shine, (peak-0.62)*0.9)
-			}
-			if hashByteXY(x/2, y*3)%620 < 3 {
-				c = core.MixColor(c, weed, 0.40)
-			}
-			pixels[y*w+x] = c
-		}
-	}
-	return pixels
+	return makeWaterBase(w, h, waterParams{
+		deep:    color.RGBA{R: 92, G: 138, B: 160, A: 255}, // pastel teal, colder/more saturated
+		mid:     color.RGBA{R: 124, G: 168, B: 184, A: 255},
+		shine:   color.RGBA{R: 196, G: 220, B: 222, A: 255},
+		weed:    color.RGBA{R: 96, G: 148, B: 120, A: 255},
+		peakCut: 0.62, peakGain: 0.9,
+		weedMod: 620, weedHit: 3, weedMix: 0.40,
+	})
 }
 
 // makeSandPixels paints dry dune sand: warm cream with gentle dune-roll noise and very sparse pebbles.

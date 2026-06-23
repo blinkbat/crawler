@@ -90,12 +90,19 @@ func drawShadedBillboard(camera rl.Camera3D, tex rl.Texture2D, pos rl.Vector3, s
 // just behind the sprite, to ring it with a dark rim. Cardinal (not scale-up) so it
 // reads as an even edge and doesn't fill interior gaps. Offset scales with sprite size
 // so the rim stays ~constant in screen pixels near vs far.
+// billboardBasis returns the camera-facing forward + right axes shared by the
+// billboard draws (matches raylib's DrawBillboardRec basis: world-up vertical).
+func billboardBasis(camera rl.Camera3D) (fwd, right rl.Vector3) {
+	fwd = rl.Vector3Normalize(rl.Vector3Subtract(camera.Position, camera.Target))
+	right = rl.Vector3Normalize(rl.Vector3CrossProduct(camera.Up, fwd))
+	return fwd, right
+}
+
 func drawSpriteOutline(camera rl.Camera3D, tex rl.Texture2D, pos rl.Vector3, size rl.Vector2, px float32, alpha uint8) {
 	if alpha == 0 || px <= 0 {
 		return
 	}
-	fwd := rl.Vector3Normalize(rl.Vector3Subtract(camera.Position, camera.Target))
-	right := rl.Vector3Normalize(rl.Vector3CrossProduct(camera.Up, fwd))
+	fwd, right := billboardBasis(camera)
 	// Convert the target screen thickness (px) into a world offset at this sprite's
 	// depth, so the rim stays ~px wide near or far — a fixed world pad would balloon up
 	// close (the old sprite-size scaling did exactly that).
@@ -120,8 +127,7 @@ func drawSpriteOutline(camera rl.Camera3D, tex rl.Texture2D, pos rl.Vector3, siz
 // axis, camera right, centered on pos. Corner args are top-left, top-right, bottom-
 // right, bottom-left.
 func drawGradientBillboard(camera rl.Camera3D, tex rl.Texture2D, pos rl.Vector3, size rl.Vector2, tl, tr, br, bl rl.Color) {
-	fwd := rl.Vector3Normalize(rl.Vector3Subtract(camera.Position, camera.Target))
-	right := rl.Vector3Normalize(rl.Vector3CrossProduct(camera.Up, fwd))
+	_, right := billboardBasis(camera)
 	rx := rl.Vector3Scale(right, size.X/2)
 	uy := rl.NewVector3(0, size.Y/2, 0)
 	p0 := rl.Vector3Subtract(rl.Vector3Subtract(pos, rx), uy) // bottom-left

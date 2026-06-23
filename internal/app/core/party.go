@@ -529,7 +529,7 @@ func HealWholeParty(g *GameState, amount int) {
 		return
 	}
 	for i := range g.Party {
-		if g.Party[i].HP > 0 {
+		if partyAlive(g.Party[i]) {
 			HealMember(&g.Party[i], amount)
 		}
 	}

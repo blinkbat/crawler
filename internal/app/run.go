@@ -302,11 +302,15 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	// through the shader, so the WORLD crunches while sprites/HUD/weather stay
 	// crisp. Skybox exemption ("Filter Skybox"): the sky is drawn CRISP up front
 	// and the capture cleared TRANSPARENT, so the environment composites over it.
-	skyCrisp := core.AnyRetroFilterActive(&game.RetroFilters) && !game.RetroFilterSky
-	if skyCrisp {
-		// Doubles as the backbuffer depth wipe for the crisp-sky arm.
+	// drawSky pairs the load-bearing backbuffer depth wipe (ClearBackground) with
+	// the sky draw; the two arms below must not let them diverge (see AGENTS.md).
+	drawSky := func() {
 		rl.ClearBackground(render.SkyClearColor)
 		render.DrawSkyBackground(assets, game)
+	}
+	skyCrisp := core.AnyRetroFilterActive(&game.RetroFilters) && !game.RetroFilterSky
+	if skyCrisp {
+		drawSky()
 	}
 	filtered := render.BeginRetroCapture(game)
 	// Explicit clear is REQUIRED (bisect-confirmed): without it geometry flickers
@@ -316,8 +320,7 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	if filtered && skyCrisp {
 		rl.ClearBackground(rl.Blank)
 	} else if !skyCrisp {
-		rl.ClearBackground(render.SkyClearColor)
-		render.DrawSkyBackground(assets, game)
+		drawSky()
 	}
 	// Sprite exemption ("Filter Sprites"): when exempt, billboards draw crisp on
 	// top (DrawCrispSpritePass) so their baked FX shows through; else inline.

@@ -155,9 +155,9 @@ func drawClassGlyphCleric(cx, cy, r float32, col color.RGBA) {
 	if capThick < 1.5 {
 		capThick = 1.5
 	}
-	rl.DrawRectangle(int32(cx-capHalf), int32(cy-r), int32(capHalf*2), int32(capThick), col)        // top
+	rl.DrawRectangle(int32(cx-capHalf), int32(cy-r), int32(capHalf*2), int32(capThick), col)          // top
 	rl.DrawRectangle(int32(cx-capHalf), int32(cy+r-capThick), int32(capHalf*2), int32(capThick), col) // bottom
-	rl.DrawRectangle(int32(cx-r), int32(cy-capHalf), int32(capThick), int32(capHalf*2), col)         // left
+	rl.DrawRectangle(int32(cx-r), int32(cy-capHalf), int32(capThick), int32(capHalf*2), col)          // left
 	rl.DrawRectangle(int32(cx+r-capThick), int32(cy-capHalf), int32(capThick), int32(capHalf*2), col) // right
 	// Centre disc + bright pip.
 	rl.DrawCircleV(rl.NewVector2(cx, cy), r*0.30, col)

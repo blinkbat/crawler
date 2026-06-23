@@ -237,7 +237,7 @@ var vfxKinds = [core.VFXKindCount]vfxKind{
 	core.VFXScan:      {spawnScan, glyphNone},
 }
 
-// vfxKindsSpawnPresent flags the kinds that intentionally carry NO spawn pattern,
+// vfxKindsSpawnlessOK flags the kinds that intentionally carry NO spawn pattern,
 // so init can tell a deliberate particle-less kind from a forgotten wiring gap.
 var vfxKindsSpawnlessOK = map[core.VFXKind]bool{
 	core.VFXNone: true, // sentinel; never spawned

@@ -24,15 +24,15 @@ const (
 var (
 	// Panels/backgrounds, ascending in lightness. bgFieldInset (deepest) backs
 	// editable text fields and the grid pane.
-	bgFieldInset  = rl.NewColor(14, 16, 22, 255)
-	bgWindow      = rl.NewColor(20, 22, 30, 255)
-	bgPaletteCol  = rl.NewColor(24, 28, 38, 255)
-	bgPanel       = rl.NewColor(28, 32, 44, 255)
-	bgEntry       = rl.NewColor(36, 40, 52, 255)
-	bgEntryHover  = rl.NewColor(40, 46, 58, 255)
-	bgButton      = rl.NewColor(48, 54, 70, 255)
-	bgRowHover    = rl.NewColor(60, 70, 90, 255)
-	bgActive      = rl.NewColor(72, 88, 130, 255)
+	bgFieldInset = rl.NewColor(14, 16, 22, 255)
+	bgWindow     = rl.NewColor(20, 22, 30, 255)
+	bgPaletteCol = rl.NewColor(24, 28, 38, 255)
+	bgPanel      = rl.NewColor(28, 32, 44, 255)
+	bgEntry      = rl.NewColor(36, 40, 52, 255)
+	bgEntryHover = rl.NewColor(40, 46, 58, 255)
+	bgButton     = rl.NewColor(48, 54, 70, 255)
+	bgRowHover   = rl.NewColor(60, 70, 90, 255)
+	bgActive     = rl.NewColor(72, 88, 130, 255)
 	// panelBackingColor is the near-black backing behind floating canvas overlays
 	// (minimap, brush-recents); each site applies its own alpha via withAlpha.
 	panelBackingColor = rl.NewColor(12, 14, 20, 255)

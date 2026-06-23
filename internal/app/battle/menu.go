@@ -144,9 +144,10 @@ func updateSkillMenu(g *core.GameState) {
 		setBattleStatus(g, msgNoSkillReady)
 		return
 	}
-	// MP gate via canAffordSkill so it matches chargeMP's deduct-time check.
+	// MP gate via canAffordSkill so it matches chargeMP's deduct-time check; shares
+	// mpRefusalMessage so the pre-gate and chargeMP can't word the refusal differently.
 	if !g.DebugAllSkills && !canAffordSkill(&g.Party[g.Battle.CurrentParty], skill) {
-		setBattleStatus(g, fmt.Sprintf("%s needs %d MP.", core.SkillName(skill), core.SkillCost(skill)))
+		setBattleStatus(g, mpRefusalMessage(skill))
 		return
 	}
 	// Back-row melee (single-target or AoE cleave) reaches nothing — gate before

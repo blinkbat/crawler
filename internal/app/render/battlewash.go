@@ -175,7 +175,7 @@ func drawWipePixelate(t float32) {
 		return
 	}
 	e := wipeEase(t)
-	stride := int32((1-e)*5) + 1               // 6 cells/block → 1 (fine)
+	stride := int32((1-e)*5) + 1                    // 6 cells/block → 1 (fine)
 	alpha := uint8(255 * core.Clamp(2*(1-e), 0, 1)) // opaque first half, fades second
 	for gy := int32(0); gy < wipeGridRows; gy += stride {
 		bh := stride * wipeBlockW

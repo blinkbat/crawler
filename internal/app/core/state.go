@@ -2,7 +2,6 @@ package core
 
 import (
 	"math/rand"
-	"slices"
 	"time"
 )
 
@@ -200,7 +199,7 @@ func placeDoors(a AreaDefinition) []Door {
 
 // DoorIndexAt returns the index of the door at (x,z), or -1. Mirrors ChestIndexAt.
 func DoorIndexAt(doors []Door, x, z int) int {
-	return slices.IndexFunc(doors, func(d Door) bool { return d.TileX == x && d.TileZ == z })
+	return SpawnIndexAt(doors, x, z)
 }
 
 // DoorByName returns the named door, or nil. Used at transition resolution to
@@ -303,7 +302,7 @@ func DefaultEntranceCrystalSpawns(a AreaDefinition) []CrystalSpawn {
 
 // CrystalIndexAt returns the index of the crystal on (x,z), or -1.
 func CrystalIndexAt(crystals []Crystal, x, z int) int {
-	return slices.IndexFunc(crystals, func(c Crystal) bool { return c.TileX == x && c.TileZ == z })
+	return SpawnIndexAt(crystals, x, z)
 }
 
 // AdjacentChargedCrystalIndex returns a CHARGED crystal within Manhattan
@@ -383,18 +382,7 @@ func NewParty() []PartyMember {
 	for _, def := range partyClassDefinitions {
 		maxHP := MaxHPFor(def.Stats)
 		row := DefaultPartyRow(def.Class)
-		col := ColLeft
-		if row == RowFront {
-			if frontCount%2 == 1 {
-				col = ColRight
-			}
-			frontCount++
-		} else {
-			if backCount%2 == 1 {
-				col = ColRight
-			}
-			backCount++
-		}
+		col := defaultSlotCol(row, &frontCount, &backCount)
 		party = append(party, PartyMember{
 			Class: def.Class,
 			Name:  def.Name,

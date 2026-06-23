@@ -373,6 +373,18 @@ func init() {
 			panic("core: addSkillEffectDelta does not fold SkillEffectDelta." + f.Name + " — add an `eff." + f.Name + " += d." + f.Name + "` step")
 		}
 	}
+	// Guard the tier-only set itself: each listed name must be a real
+	// SkillEffectDelta field with NO SkillEffect twin (a twin means it should be
+	// folded by addSkillEffectDelta, not ride SkillTierMod). Catches a typo/rename
+	// or an accidental promotion that would silently mis-handle the field.
+	for name := range deltaTierOnlyFields {
+		if _, ok := deltaType.FieldByName(name); !ok {
+			panic("core: deltaTierOnlyFields lists " + name + " which is not a SkillEffectDelta field — fix the name")
+		}
+		if _, ok := effType.FieldByName(name); ok {
+			panic("core: deltaTierOnlyFields lists " + name + " but SkillEffect has a same-name field — drop it from deltaTierOnlyFields so addSkillEffectDelta folds it")
+		}
+	}
 }
 
 // setDeltaSentinel writes a distinct non-zero value into a SkillEffectDelta field so folding it

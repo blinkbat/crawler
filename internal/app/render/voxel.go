@@ -102,7 +102,7 @@ func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets 
 			continue
 		}
 		nx, nz := x+dx, z+dz
-		yaw := faceYaw(d)
+		yaw := southFacingYaw(d)
 		// Per-direction skin (FaceSkinForDir falls back to base), resolved lazily so a fully-buried edge pays no lookup.
 		skin := material.faceModel
 		skinResolved := false

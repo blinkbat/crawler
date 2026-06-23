@@ -395,7 +395,7 @@ func ItemHelpsTarget(def ItemDefinition, m PartyMember) bool {
 // HP-only mirror of ItemHelpsTarget (no MP axis), so an HP-only heal picker
 // doesn't accept an ally who's only low on MP.
 func MemberCanBeHealed(m PartyMember) bool {
-	return m.HP > 0 && !m.Ingested && m.HP < m.MaxHP
+	return partyAvailable(m) && m.HP < m.MaxHP
 }
 
 // LiveConsumables returns the positive-count consumable entries — the battle

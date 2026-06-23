@@ -154,10 +154,10 @@ func measurePartyNameWithSpace(font rl.Font, name string) rl.Vector2 {
 
 const (
 	// Wide short cards in a 2×2 grid: left = sigil + name + status, right = HP/MP bars.
-	partyCardW   = float32(300)
-	partyCardH   = float32(72)
-	partyCardGap = float32(14)
-	partyRowGap  = float32(10) // vertical gap between the two card rows
+	partyCardW    = float32(300)
+	partyCardH    = float32(72)
+	partyCardGap  = float32(14)
+	partyRowGap   = float32(10) // vertical gap between the two card rows
 	partyCardCols = 2
 	partyCardBarH = float32(22) // shorter gauge so HP+MP stack in the right column
 	// cardGlowMargin: per-side inset shared by active halo + selected outline.

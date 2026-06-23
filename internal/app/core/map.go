@@ -829,9 +829,10 @@ func MarkChestLootedIfEmpty(c *Chest) {
 }
 
 // ChestIndexAt returns the index of the chest on (x,z), or -1. Linear scan
-// (chest counts per map are tiny); DoorIndexAt / PackIndexAtTile share the idiom.
+// (chest counts per map are tiny) via the shared SpawnIndexAt; DoorIndexAt /
+// CrystalIndexAt share the idiom.
 func ChestIndexAt(chests []Chest, x, z int) int {
-	return slices.IndexFunc(chests, func(c Chest) bool { return c.TileX == x && c.TileZ == z })
+	return SpawnIndexAt(chests, x, z)
 }
 
 // AdjacentChestIndex returns the index of a chest one cardinal step from (x,z),

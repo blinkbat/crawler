@@ -1147,9 +1147,18 @@ func acceptDigit(r rune) bool { return r >= '0' && r <= '9' }
 // numericFieldMaxLen caps the resize numeric buffer (map dims ≤ 4 digits).
 const numericFieldMaxLen = 4
 
+// isNumericFocus reports whether f is one of the digit-only dimension fields that
+// route through updateNumericInput (map + new-map width/height).
+func isNumericFocus(f focusField) bool {
+	switch f {
+	case focusWidth, focusHeight, focusNewWidth, focusNewHeight:
+		return true
+	}
+	return false
+}
+
 func updateTextInput(s *State) {
-	if s.focus == focusWidth || s.focus == focusHeight ||
-		s.focus == focusNewWidth || s.focus == focusNewHeight {
+	if isNumericFocus(s.focus) {
 		updateNumericInput(s)
 		return
 	}

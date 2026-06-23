@@ -50,7 +50,7 @@ func ObjectPreviewItems() []ObjectPreviewItem {
 func CloseObjectPreview() { objectPreviewRT.close() }
 
 // objectPreviewDir is the fixed three-quarter view direction (eye = target + dir*distance).
-var objectPreviewDir = normalizeVec3(rl.NewVector3(0.55, 0.62, 1.0))
+var objectPreviewDir = rl.Vector3Normalize(rl.NewVector3(0.55, 0.62, 1.0))
 
 // objectPreviewGroundSize is the thumbnail floor extent (tighter than visualizerGroundSize).
 const objectPreviewGroundSize = float32(12)

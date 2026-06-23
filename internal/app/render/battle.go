@@ -232,7 +232,7 @@ func drawEnemyRosterCell(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targ
 	drawTextWithShadow(font, condition, nameX, condY, condSize, condCol)
 	if known {
 		condW := rosterCondMeasureCache.measure(font, condition, condSize, canonicalSpacing(condSize)).X
-		drawTextWithShadow(font, enemyHPLabel(enemy.HP, enemy.MaxHP), nameX+condW+8, condY, condSize, barEnemyHP)
+		drawTextWithShadow(font, formatBarValue(enemy.HP, enemy.MaxHP), nameX+condW+8, condY, condSize, barEnemyHP)
 	}
 
 	// Status pills in the top-right corner, stacking left, walking the init-asserted visual table.
@@ -265,25 +265,6 @@ func statusTurnsLabel(turns int) string {
 
 // rosterCondMeasureCache memoizes MeasureTextEx for the wound-state words the HP readout offsets against.
 var rosterCondMeasureCache measureCache
-
-// enemyHPLabelCache memoizes "HP/MaxHP" per (hp,max). Capped so a long session
-// can't grow it without bound; on overflow we drop the cache and rebuild.
-var enemyHPLabelCache = map[[2]int]string{}
-
-const enemyHPLabelCacheCap = 512
-
-func enemyHPLabel(hp, max int) string {
-	k := [2]int{hp, max}
-	if s, ok := enemyHPLabelCache[k]; ok {
-		return s
-	}
-	if len(enemyHPLabelCache) >= enemyHPLabelCacheCap {
-		enemyHPLabelCache = map[[2]int]string{}
-	}
-	s := fmt.Sprintf("%d/%d", hp, max)
-	enemyHPLabelCache[k] = s
-	return s
-}
 
 // drawStatusPill paints the shared status-pill silhouette (fill + outline + FontSmall label),
 // used by the enemy roster and the Stats-tab chip. centered true centers the label (+2 top);

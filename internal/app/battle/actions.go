@@ -433,8 +433,14 @@ func canAffordSkill(actor *core.PartyMember, skill core.SkillID) bool {
 	return core.CanAffordSkill(actor, skill)
 }
 
-// chargeMP spends the skill's MP cost or refuses, flashing "{skill} needs more MP."
-// (label from core.SkillName so it can't drift). The single MP chokepoint.
+// mpRefusalMessage is the one "not enough MP" wording, shared by the skill-menu
+// pre-gate and chargeMP's deduct-time refusal so the two can't drift.
+func mpRefusalMessage(skill core.SkillID) string {
+	return fmt.Sprintf("%s needs %d MP.", core.SkillName(skill), core.SkillCost(skill))
+}
+
+// chargeMP spends the skill's MP cost or refuses, flashing mpRefusalMessage. The
+// single MP chokepoint.
 func chargeMP(g *core.GameState, skill core.SkillID) bool {
 	// Debug "all skills" makes every cast free; one bypass covers every skill.
 	if g.DebugAllSkills {
@@ -448,7 +454,7 @@ func chargeMP(g *core.GameState, skill core.SkillID) bool {
 	}
 	actor := &g.Party[g.Battle.CurrentParty]
 	if !core.SpendSkillMP(actor, skill) {
-		setBattleStatus(g, core.SkillName(skill)+" needs more MP.")
+		setBattleStatus(g, mpRefusalMessage(skill))
 		return false
 	}
 	return true
@@ -621,21 +627,24 @@ func ensureAlivePartyTargetOrCancel(g *core.GameState, refundSkill core.SkillID)
 // beginSingleTargetSkill is the shared head of every single-enemy-target damaging
 // skill: refund-on-dead gate, actor lookup, attack-bump, raw-damage roll, and a
 // pre-hit target snapshot (message builders want the foe's state before it dies).
-// ok=false means cancelled (MP already refunded). rawDamage is pre-armor; callers
-// may mutate it (crit doublers) before damageEnemy. effect is the tier-folded skill
-// effect, resolved once here so per-skill handlers don't re-fetch it.
-func beginSingleTargetSkill(g *core.GameState, skill core.SkillID, quality int) (actor *core.PartyMember, target core.Enemy, rawDamage, resistWIS int, effect core.SkillEffect, ok bool) {
+// ok=false means cancelled (MP already refunded). `live` is the write-through
+// pointer to the targeted enemy (for status procs / armor edits) — valid through
+// the handler since damageEnemy never reallocates the pack; `target` is its pre-hit
+// snapshot. rawDamage is pre-armor; callers may mutate it (crit doublers) before
+// damageEnemy. effect is the tier-folded skill effect, resolved once here.
+func beginSingleTargetSkill(g *core.GameState, skill core.SkillID, quality int) (actor *core.PartyMember, live *core.Enemy, target core.Enemy, rawDamage, resistWIS int, effect core.SkillEffect, ok bool) {
 	if !ensureAliveTargetOrCancel(g, skill) {
-		return nil, core.Enemy{}, 0, 0, core.SkillEffect{}, false
+		return nil, nil, core.Enemy{}, 0, 0, core.SkillEffect{}, false
 	}
 	actor = &g.Party[g.Battle.CurrentParty]
 	actor.AttackBump = core.BumpDuration
 	rawDamage = applyShadowStep(g, actor, scaleSkillDamage(actor, skill, quality))
-	target = *core.BattleMemberAt(g, g.Battle.EnemyIndex)
+	live = core.BattleMemberAt(g, g.Battle.EnemyIndex)
+	target = *live
 	// resistWIS hoisted here so status-proc callers don't re-derive it.
 	resistWIS = core.EffectiveEnemyStats(&target).WIS
 	effect = core.EffectiveSkillEffect(actor, skill)
-	return actor, target, rawDamage, resistWIS, effect, true
+	return actor, live, target, rawDamage, resistWIS, effect, true
 }
 
 // beginPartyAction is the shared head of self / ally / AoE / utility apply
@@ -789,9 +798,9 @@ func applyAttack(g *core.GameState, quality int) bool {
 	if !ensureAliveTargetOrCancel(g, core.SkillNone) {
 		return false
 	}
-	attacker := &g.Party[g.Battle.CurrentParty]
-	// AttackBump fires unconditionally — the swing plays even on a whiff.
-	attacker.AttackBump = core.BumpDuration
+	// AttackBump fires unconditionally (beginPartyAction stamps it) — the swing
+	// plays even on a whiff.
+	attacker := beginPartyAction(g)
 	target := *core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	// Accuracy roll (basic attack only): DEX + timing drive hit chance, clamped past
 	// 1.0 so high-DEX/high-grade essentially never whiff. The swing + timing popup
@@ -1035,13 +1044,12 @@ func applyCripple(g *core.GameState, quality int) bool {
 // applyFrostbite deals frost damage and, on a surviving target, ALWAYS chills it
 // (SPD debuff, like Cripple — no proc roll, not WIS-resistible). Re-cast overwrites.
 func applyFrostbite(g *core.GameState, quality int) bool {
-	actor, target, rawDamage, _, effect, ok := beginSingleTargetSkill(g, core.SkillFrostbite, quality)
+	actor, enemy, target, rawDamage, _, effect, ok := beginSingleTargetSkill(g, core.SkillFrostbite, quality)
 	if !ok {
 		return false
 	}
 	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillFrostbite, rawDamage, quality)
 	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillFrostbite), g.Battle.EnemyIndex)
-	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	// Chill only on a survivor (no debuffing a corpse); guaranteed when alive.
 	chilled := !defeated && core.StampEnemyDebuff(enemy, core.SkillFrostbite, effect)
 	setBattleMessage(g, appendCrit(frostbiteMessage(actor.Name, target, damage, quality, defeated, chilled), crit))
@@ -1081,7 +1089,7 @@ func applyCorrosiveVial(g *core.GameState, quality int) bool {
 // --- Firebolt (Wizard, ramps damage and burn chance with quality) ---
 
 func applyFirebolt(g *core.GameState, quality int) bool {
-	actor, target, rawDamage, resistWIS, effect, ok := beginSingleTargetSkill(g, core.SkillFirebolt, quality)
+	actor, enemy, target, rawDamage, resistWIS, effect, ok := beginSingleTargetSkill(g, core.SkillFirebolt, quality)
 	if !ok {
 		return false
 	}
@@ -1093,7 +1101,6 @@ func applyFirebolt(g *core.GameState, quality int) bool {
 	}
 	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillFirebolt, rawDamage, quality)
 	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillFirebolt), g.Battle.EnemyIndex)
-	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	burned := tryProcStatus(g.Rand(), &enemy.BurnTurns, defeated, effect.BurnChance, quality, 0, effect.BurnDuration, resistWIS)
 	setBattleMessage(g, appendCrit(fireboltMessage(actor.Name, target, damage, quality, defeated, burned, enemy.BurnTurns), crit))
 	if overloaded {
@@ -1109,21 +1116,11 @@ func applyFirebolt(g *core.GameState, quality int) bool {
 
 // --- Crushing Blow (Warrior, charge phys hit with Stun proc on Great+) ---
 
+// Crushing Blow T3 doubles damage on an Excellent timing roll (preStrike,
+// INDEPENDENT of the universal crit — both stack, CritMultiplier × 2 = 4×, like
+// Backstab T2), then a Great+ stun proc. vfxKindFor(CrushingBlow) is VFXSlash.
 func applyCrushingBlow(g *core.GameState, quality int) bool {
-	actor, target, rawDamage, resistWIS, effect, ok := beginSingleTargetSkill(g, core.SkillCrushingBlow, quality)
-	if !ok {
-		return false
-	}
-	// Crushing Blow T3 doubles damage on an Excellent timing roll, INDEPENDENT of
-	// the universal crit below — both stack (CritMultiplier × 2 = 4×), like Backstab T2.
-	rawDamage = applyTierDouble(rawDamage, actor, core.SkillCrushingBlow, quality)
-	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillCrushingBlow, rawDamage, quality)
-	core.EnqueueEnemyVFX(g, core.VFXSlash, g.Battle.EnemyIndex)
-	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
-	stunned := tryProcStatus(g.Rand(), &enemy.StunTurns, defeated, effect.StunChance, quality, core.TimingQualityGreat, effect.StunDuration, resistWIS)
-	setBattleMessage(g, appendCrit(crushingBlowMessage(actor.Name, target, damage, quality, defeated, stunned), crit))
-	finishActorTurn(g)
-	return true
+	return applyProcStrike(g, core.SkillCrushingBlow, quality, stunProc(crushingBlowArms, applyTierDouble))
 }
 
 // --- Whirlwind (Warrior, charge AoE phys) ---
@@ -1174,25 +1171,15 @@ func applyBless(g *core.GameState, quality int) bool {
 
 // --- Smite (Cleric, press-tap magic damage) ---
 
+// Smite T3 adds a Great+ stun proc (StunChance is 0 at T0..2, so it short-circuits).
 func applySmite(g *core.GameState, quality int) bool {
-	actor, target, rawDamage, resistWIS, effect, ok := beginSingleTargetSkill(g, core.SkillSmite, quality)
-	if !ok {
-		return false
-	}
-	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillSmite, rawDamage, quality)
-	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillSmite), g.Battle.EnemyIndex)
-	// Smite T3 adds a Great+ stun proc (StunChance is 0 at T0..2, so it short-circuits).
-	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
-	stunned := tryProcStatus(g.Rand(), &enemy.StunTurns, defeated, effect.StunChance, quality, core.TimingQualityGreat, effect.StunDuration, resistWIS)
-	setBattleMessage(g, appendCrit(smiteMessage(actor.Name, target, damage, quality, defeated, stunned), crit))
-	finishActorTurn(g)
-	return true
+	return applyProcStrike(g, core.SkillSmite, quality, stunProc(smiteArms, nil))
 }
 
 // --- Backstab (Thief, charge phys with crit on Excellent) ---
 
 func applyBackstab(g *core.GameState, quality int) bool {
-	actor, target, rawDamage, _, _, ok := beginSingleTargetSkill(g, core.SkillBackstab, quality)
+	actor, _, target, rawDamage, _, _, ok := beginSingleTargetSkill(g, core.SkillBackstab, quality)
 	if !ok {
 		return false
 	}
@@ -1208,17 +1195,21 @@ func applyBackstab(g *core.GameState, quality int) bool {
 	return true
 }
 
-// dotStrike describes a "phys hit + single-target DoT" skill (Venom Strike,
-// Rend, Lacerate). Closures select the counter and chance/duration fields so
-// applyDoTStrike stays status-agnostic; `arms` narrates.
-type dotStrike struct {
-	counter func(*core.Enemy) *int
-	chance  func(core.SkillEffect) float64
-	dur     func(core.SkillEffect) func(*rand.Rand) int
-	arms    procMessageArms
+// procStrike describes a "hit + single-target status proc" skill (Venom Strike,
+// Rend, Lacerate, Smite, Frost Lance, Crushing Blow). Closures select the counter
+// and chance/duration fields so applyProcStrike stays status-agnostic; minGrade is
+// the timing floor the proc needs (0 = any); preStrike (optional) pre-mutates raw
+// damage (Crushing Blow's tier double); `arms` narrates.
+type procStrike struct {
+	counter   func(*core.Enemy) *int
+	chance    func(core.SkillEffect) float64
+	dur       func(core.SkillEffect) func(*rand.Rand) int
+	minGrade  int
+	preStrike func(raw int, actor *core.PartyMember, skill core.SkillID, quality int) int
+	arms      procMessageArms
 }
 
-var venomStrikeDoT = dotStrike{
+var venomStrikeDoT = procStrike{
 	counter: func(e *core.Enemy) *int { return &e.PoisonTurns },
 	chance:  func(eff core.SkillEffect) float64 { return eff.PoisonChance },
 	dur:     func(eff core.SkillEffect) func(*rand.Rand) int { return eff.PoisonDuration },
@@ -1226,12 +1217,25 @@ var venomStrikeDoT = dotStrike{
 }
 
 // bleedDoT builds the Bleed descriptor for Rend / Lacerate (only arms differs).
-func bleedDoT(arms procMessageArms) dotStrike {
-	return dotStrike{
+func bleedDoT(arms procMessageArms) procStrike {
+	return procStrike{
 		counter: func(e *core.Enemy) *int { return &e.BleedTurns },
 		chance:  func(eff core.SkillEffect) float64 { return eff.BleedChance },
 		dur:     func(eff core.SkillEffect) func(*rand.Rand) int { return eff.BleedDuration },
 		arms:    arms,
+	}
+}
+
+// stunProc builds the Great+ Stun descriptor for Smite / Frost Lance / Crushing
+// Blow (preStrike nil unless the skill pre-mutates raw damage); arms narrates.
+func stunProc(arms procMessageArms, preStrike func(int, *core.PartyMember, core.SkillID, int) int) procStrike {
+	return procStrike{
+		counter:   func(e *core.Enemy) *int { return &e.StunTurns },
+		chance:    func(eff core.SkillEffect) float64 { return eff.StunChance },
+		dur:       func(eff core.SkillEffect) func(*rand.Rand) int { return eff.StunDuration },
+		minGrade:  core.TimingQualityGreat,
+		preStrike: preStrike,
+		arms:      arms,
 	}
 }
 
@@ -1261,18 +1265,21 @@ func sweepCritDamage(g *core.GameState, actor *core.PartyMember, skill core.Skil
 	return applyCritMultiplier(damage, crit, false), crit
 }
 
-// applyDoTStrike is the single body for every phys-hit-plus-DoT skill: a hit that,
-// on a survivor, rolls the DoT (dot.chance) onto dot.counter via tryProcStatus.
-func applyDoTStrike(g *core.GameState, skill core.SkillID, quality int, dot dotStrike) bool {
-	actor, target, rawDamage, resistWIS, effect, ok := beginSingleTargetSkill(g, skill, quality)
+// applyProcStrike is the single body for every hit-plus-status-proc skill: a hit
+// that, on a survivor, rolls the status (ps.chance) onto ps.counter via
+// tryProcStatus at ps.minGrade. ps.preStrike (if set) pre-mutates raw damage.
+func applyProcStrike(g *core.GameState, skill core.SkillID, quality int, ps procStrike) bool {
+	actor, enemy, target, rawDamage, resistWIS, effect, ok := beginSingleTargetSkill(g, skill, quality)
 	if !ok {
 		return false
 	}
+	if ps.preStrike != nil {
+		rawDamage = ps.preStrike(rawDamage, actor, skill, quality)
+	}
 	damage, defeated, crit := strikeWithCrit(g, actor, skill, rawDamage, quality)
 	core.EnqueueEnemyVFX(g, vfxKindFor(skill), g.Battle.EnemyIndex)
-	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
-	procced := tryProcStatus(g.Rand(), dot.counter(enemy), defeated, dot.chance(effect), quality, 0, dot.dur(effect), resistWIS)
-	setBattleMessage(g, appendCrit(procSkillMessage(dot.arms, actor.Name, target, damage, quality, defeated, procced), crit))
+	procced := tryProcStatus(g.Rand(), ps.counter(enemy), defeated, ps.chance(effect), quality, ps.minGrade, ps.dur(effect), resistWIS)
+	setBattleMessage(g, appendCrit(procSkillMessage(ps.arms, actor.Name, target, damage, quality, defeated, procced), crit))
 	finishActorTurn(g)
 	return true
 }
@@ -1280,35 +1287,25 @@ func applyDoTStrike(g *core.GameState, skill core.SkillID, quality int, dot dotS
 // --- Venom Strike (Thief, sequence phys + Poison apply) ---
 
 func applyVenomStrike(g *core.GameState, quality int) bool {
-	return applyDoTStrike(g, core.SkillVenomStrike, quality, venomStrikeDoT)
+	return applyProcStrike(g, core.SkillVenomStrike, quality, venomStrikeDoT)
 }
 
 // --- Rend (Warrior) / Lacerate (Thief): phys hit + Bleed DoT apply ---
 
 func applyRend(g *core.GameState, quality int) bool {
-	return applyDoTStrike(g, core.SkillRend, quality, bleedDoT(rendArms))
+	return applyProcStrike(g, core.SkillRend, quality, bleedDoT(rendArms))
 }
 
 func applyLacerate(g *core.GameState, quality int) bool {
-	return applyDoTStrike(g, core.SkillLacerate, quality, bleedDoT(lacerateArms))
+	return applyProcStrike(g, core.SkillLacerate, quality, bleedDoT(lacerateArms))
 }
 
 // --- Frost Lance (Wizard, charge magic with reliable Stun on Great+) ---
 
+// FrostLance is "freeze" flavor but uses the canonical StunTurns counter (no
+// separate frozen status); the log keeps "Frozen!" via frostLanceArms.
 func applyFrostLance(g *core.GameState, quality int) bool {
-	actor, target, rawDamage, resistWIS, effect, ok := beginSingleTargetSkill(g, core.SkillFrostLance, quality)
-	if !ok {
-		return false
-	}
-	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillFrostLance, rawDamage, quality)
-	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillFrostLance), g.Battle.EnemyIndex)
-	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
-	// FrostLance is "freeze" flavor but uses the canonical StunTurns counter (no
-	// separate frozen status); the log keeps "Frozen!" via frostLanceMessage.
-	stunned := tryProcStatus(g.Rand(), &enemy.StunTurns, defeated, effect.StunChance, quality, core.TimingQualityGreat, effect.StunDuration, resistWIS)
-	setBattleMessage(g, appendCrit(frostLanceMessage(actor.Name, target, damage, quality, defeated, stunned), crit))
-	finishActorTurn(g)
-	return true
+	return applyProcStrike(g, core.SkillFrostLance, quality, stunProc(frostLanceArms, nil))
 }
 
 // --- Arc Bolt (Wizard, sequence-tap AoE magic) ---
@@ -1394,7 +1391,7 @@ func applyConeOfCold(g *core.GameState, quality int) bool {
 // applySunder deals phys damage and, on a survivor, shoves its ATB gauge back
 // (effect.ATBPush) — a one-shot tempo swing, not a status. No shove on a kill.
 func applySunder(g *core.GameState, quality int) bool {
-	actor, target, rawDamage, _, effect, ok := beginSingleTargetSkill(g, core.SkillSunder, quality)
+	actor, _, target, rawDamage, _, effect, ok := beginSingleTargetSkill(g, core.SkillSunder, quality)
 	if !ok {
 		return false
 	}
@@ -2328,20 +2325,8 @@ var (
 	}
 )
 
-func crushingBlowMessage(name string, target core.Enemy, damage, quality int, defeated, stunned bool) string {
-	return procSkillMessage(crushingBlowArms, name, target, damage, quality, defeated, stunned)
-}
-
-func smiteMessage(name string, target core.Enemy, damage, quality int, defeated, stunned bool) string {
-	return procSkillMessage(smiteArms, name, target, damage, quality, defeated, stunned)
-}
-
 func backstabMessage(name string, target core.Enemy, damage, quality int, defeated, crit bool) string {
 	return procSkillMessage(backstabArms, name, target, damage, quality, defeated, crit)
-}
-
-func frostLanceMessage(name string, target core.Enemy, damage, quality int, defeated, stunned bool) string {
-	return procSkillMessage(frostLanceArms, name, target, damage, quality, defeated, stunned)
 }
 
 // aoeSkillMessage / aoeEmptyMessage format the AoE log lines (hit + empty fallback).
