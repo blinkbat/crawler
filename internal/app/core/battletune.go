@@ -28,7 +28,13 @@ type BattleTuning struct {
 	FoeFrontDepth, FoeBackDepth float32 // per-rank depth offset from center
 	FoeZigzag                   float32 // alternate-slot fore/aft step
 	FoeFrontScale, FoeBackScale float32 // per-rank sprite size multiplier (1 = authored)
-	FoeBackDarken               float32 // back-rank tint darken 0..1 (depth cue; 0 = off)
+	FoeBackDarken               float32 // back-rank atmospheric recede 0..1: desaturate+cool+darken wash (0 = off)
+
+	// Fake billboard lighting (sprites bypass the world lit shader). SpriteShade darkens
+	// feet vs head (vertical value ramp); SpriteWarmCool splits a warm key / cool fill
+	// across the sprite; SpriteOutline is the dark rim alpha that detaches it from the
+	// backdrop. All 0..1; zero = flat sprite. Applies to both foes and party.
+	SpriteShade, SpriteWarmCool, SpriteOutline float32
 
 	PartyFrontFwd, PartyBackFwd     float32 // per-rank distance forward of camera
 	PartyFrontGapX, PartyBackGapX   float32 // per-rank horizontal column spacing
@@ -47,6 +53,7 @@ func DefaultBattleTuning() BattleTuning {
 		FoeFrontMaxW: 3.0, FoeBackMaxW: 4.8,
 		FoeFrontDepth: 0.28, FoeBackDepth: 0.98, FoeZigzag: 0.12,
 		FoeFrontScale: 0.85, FoeBackScale: 0.85, FoeBackDarken: 0.35,
+		SpriteShade: 0.35, SpriteWarmCool: 0.12, SpriteOutline: 0.9,
 		PartyFrontFwd: 1.1, PartyBackFwd: 0.85,
 		PartyFrontGapX: 0.4, PartyBackGapX: 0.72,
 		PartyBaseY: 0.32,
@@ -81,6 +88,9 @@ var battleTuneSliders = []BattleTuneSlider{
 	{"Foe front size", 0.4, 2.0, 0.05, func(t *BattleTuning) *float32 { return &t.FoeFrontScale }},
 	{"Foe back size", 0.4, 2.0, 0.05, func(t *BattleTuning) *float32 { return &t.FoeBackScale }},
 	{"Foe back darken", 0, 0.8, 0.05, func(t *BattleTuning) *float32 { return &t.FoeBackDarken }},
+	{"Sprite shade", 0, 0.8, 0.05, func(t *BattleTuning) *float32 { return &t.SpriteShade }},
+	{"Sprite warm/cool", 0, 0.5, 0.02, func(t *BattleTuning) *float32 { return &t.SpriteWarmCool }},
+	{"Sprite outline", 0, 1.0, 0.05, func(t *BattleTuning) *float32 { return &t.SpriteOutline }},
 	{"Party front fwd", 0.4, 2.5, 0.05, func(t *BattleTuning) *float32 { return &t.PartyFrontFwd }},
 	{"Party back fwd", 0.3, 2.5, 0.05, func(t *BattleTuning) *float32 { return &t.PartyBackFwd }},
 	{"Party front gap", 0.4, 2.0, 0.04, func(t *BattleTuning) *float32 { return &t.PartyFrontGapX }},
@@ -144,6 +154,7 @@ func BattleTuneGoLiteral(t *BattleTuning) string {
 	FoeFrontMaxW: %g, FoeBackMaxW: %g,
 	FoeFrontDepth: %g, FoeBackDepth: %g, FoeZigzag: %g,
 	FoeFrontScale: %g, FoeBackScale: %g, FoeBackDarken: %g,
+	SpriteShade: %g, SpriteWarmCool: %g, SpriteOutline: %g,
 	PartyFrontFwd: %g, PartyBackFwd: %g,
 	PartyFrontGapX: %g, PartyBackGapX: %g,
 	PartyBaseY: %g,
@@ -153,6 +164,7 @@ func BattleTuneGoLiteral(t *BattleTuning) string {
 		t.FoeFrontGapX, t.FoeBackGapX, t.FoeFrontMaxW, t.FoeBackMaxW,
 		t.FoeFrontDepth, t.FoeBackDepth, t.FoeZigzag,
 		t.FoeFrontScale, t.FoeBackScale, t.FoeBackDarken,
+		t.SpriteShade, t.SpriteWarmCool, t.SpriteOutline,
 		t.PartyFrontFwd, t.PartyBackFwd, t.PartyFrontGapX, t.PartyBackGapX, t.PartyBaseY,
 		t.PartyFrontScale, t.PartyBackScale)
 }

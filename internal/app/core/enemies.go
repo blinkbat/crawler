@@ -472,8 +472,7 @@ func TheEnemy(def EnemyDefinition) string {
 	return theNoun(def.SingularNoun)
 }
 
-// theNoun binds the definite article to a bare enemy noun (one place so
-// TheEnemy and ThePlural can't drift).
+// theNoun binds the definite article to a bare enemy noun (one place for the article).
 func theNoun(noun string) string {
 	return "The " + noun
 }
@@ -481,11 +480,6 @@ func theNoun(noun string) string {
 // EnemyDisplayName returns the "The <noun>" display string for a live instance.
 func EnemyDisplayName(e *Enemy) string {
 	return TheEnemy(EnemyInfoFor(*e))
-}
-
-// ThePlural is TheEnemy's plural sibling ("The <plural>").
-func ThePlural(def EnemyDefinition) string {
-	return theNoun(def.PluralNoun)
 }
 
 // EnemyInfoOk is the validating sibling of EnemyInfo: (def, true) for a
@@ -649,33 +643,42 @@ func BattleEnemyTargetStatus(g *GameState, ordinal, total int) string {
 	return fmt.Sprintf("Targeting %s %d of %d.", def.SingularNoun, ordinal, total)
 }
 
+// BattleEncounterMessage is the action-log line when a fight opens — generic ("foe"),
+// matching the generic splash title; the spelled count title-cases for sentence start.
 func BattleEncounterMessage(g *GameState) string {
 	count := LivingBattleCount(g)
-	def := BattleEnemyInfo(g)
 	if count <= 1 {
-		return fmt.Sprintf("A %s blocks the way.", def.SingularNoun)
+		return "A foe blocks the way."
 	}
-	return fmt.Sprintf("%d %s close in.", count, def.PluralNoun)
+	return fmt.Sprintf("%s foes close in.", countWordTitle(count))
 }
 
-func BattleEncounterTitle(g *GameState) string {
-	count := len(BattleMembers(g))
-	def := BattleEnemyInfo(g)
-	if count <= 1 {
-		return fmt.Sprintf("%s Encounter!", def.Name)
+// countWordTitle spells a small count as a title-cased word (sentence-start friendly),
+// digits fallback past the table. Packs cap at EnemyPackCap, so 2–5 cover real use.
+func countWordTitle(n int) string {
+	words := [...]string{"Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"}
+	if n >= 0 && n < len(words) {
+		return words[n]
 	}
-	return fmt.Sprintf("%s x%d!", def.GroupName, count)
+	return fmt.Sprintf("%d", n)
+}
+
+// BattleEncounterTitle is the splash headline: a plain "Battle!", or "Ambushed!" when
+// the fight was entered from the side/back (any non-front engage).
+func BattleEncounterTitle(g *GameState) string {
+	if g.Battle.EngageSide != EngageFront {
+		return "Ambushed!"
+	}
+	return "Battle!"
 }
 
 func LastBattleEnemyFallsMessage(g *GameState) string {
-	return fmt.Sprintf("The last %s falls.", BattleEnemyInfo(g).SingularNoun)
+	return "The last foe falls."
 }
 
 func BattleLossMessage(g *GameState) string {
-	count := LivingBattleCount(g)
-	def := BattleEnemyInfo(g)
-	if count <= 1 {
-		return fmt.Sprintf("%s drives the party back. Press to recover.", TheEnemy(def))
+	if LivingBattleCount(g) <= 1 {
+		return "The foe drives the party back. Press to recover."
 	}
-	return fmt.Sprintf("%s drive the party back. Press to recover.", ThePlural(def))
+	return "The foes drive the party back. Press to recover."
 }

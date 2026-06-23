@@ -48,6 +48,7 @@ func Start(g *core.GameState, packIndex, fleeReturnX, fleeReturnZ int, engageSid
 	g.Battle.EnemyIndex = core.NextLivingBattleEnemy(g)
 	g.Battle.PartyTarget = core.FirstLivingPartyMember(g.Party)
 	g.Battle.Splash = core.BattleSplashDuration
+	g.Battle.EngageSide = engageSide
 	// ActionLog is a continuous in/out-of-combat buffer, so a fight no longer resets it.
 	// resetBattleTransients clears every per-fight transient so a Start after an
 	// unclean exit can't leak stale combat state. EnemyIndex / EnemyAttackCursor /

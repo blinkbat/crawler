@@ -1523,7 +1523,9 @@ func drawFieldPacks(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		if visual.yOffset != 0 {
 			billboardPos.Y += enemyFieldLift
 		}
-		drawTextureBillboard(camera, visual.texture, billboardPos, visual.size, visual.resolveTint())
+		// Same fake-light treatment as battle (rim + volume) so field foes read solid
+		// against the lit world, not flat cutouts.
+		drawShadedBillboard(camera, visual.texture, billboardPos, visual.size, visual.resolveTint(), battleSpriteLight(g))
 	}
 }
 
@@ -1620,19 +1622,21 @@ func drawBattleFoe(camera rl.Camera3D, g *core.GameState, assets Resources, enem
 		}
 		// Fold in the per-kind base tint last (untinted = White, no-op).
 		tint = tintMul(tint, visual.resolveTint())
-		// Back-rank depth cue: darken the back row toward black (Debug ▸ Combat Tuning)
-		// so it reads as set behind the front. Multiplicative, alpha untouched.
-		if p.row == core.RowBack && battleTune.FoeBackDarken > 0 {
-			d := uint8(255 * (1 - battleTune.FoeBackDarken))
-			tint = tintMul(tint, rl.NewColor(d, d, d, 255))
-		}
 		// Contact disc before the billboard, only for opt-in kinds. Keeps the
 		// default shader so the billboard-fog pass doesn't tint it.
 		if visual.shadowRadius > 0 {
 			drawGroundShadow(place.shadowX, place.shadowZ, visual.shadowRadius)
 		}
-		// Distance fog comes from the billboard-fog shader, not a CPU tint.
-		drawTextureBillboard(camera, visual.texture, place.sprite, visual.size, tint)
+		// Back-rank atmospheric recede (Debug ▸ Combat Tuning "Foe back darken"):
+		// darken + cool the tint so the back row reads as set behind the front. Folded
+		// into the tint (multiplicative) so the sprite stays fully opaque.
+		if p.row == core.RowBack && battleTune.FoeBackDarken > 0 {
+			tint = tintMul(tint, recedeMul(battleTune.FoeBackDarken))
+		}
+		// Fake directional light (vertical value ramp + warm/cool split + dark rim)
+		// gives the flat sprite volume and detaches it from the busy backdrop. Distance
+		// fog still rides the billboard-fog shader.
+		drawShadedBillboard(camera, visual.texture, place.sprite, visual.size, tint, battleSpriteLight(g))
 	}
 }
 
@@ -1925,7 +1929,8 @@ func DrawPartySprites(camera rl.Camera3D, g *core.GameState, assets Resources) {
 			downed.Y -= (size.Y - size.X) / 2
 			drawTextureBillboardRotated(camera, visual.texture, downed, size, downedToppleDegrees, tint)
 		} else {
-			drawTextureBillboard(camera, visual.texture, place.sprite, size, tint)
+			// Same fake-light treatment as the foes so both sides read with volume.
+			drawShadedBillboard(camera, visual.texture, place.sprite, size, tint, battleSpriteLight(g))
 		}
 		// Friendly marker only in the menu phase, not the timing bar that follows
 		// (inPlayerTurn includes BattleAttackTiming and would linger it).

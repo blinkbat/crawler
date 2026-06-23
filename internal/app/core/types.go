@@ -955,6 +955,9 @@ type Battle struct {
 	Phase             BattlePhase
 	Timer             float32
 	Splash            float32
+	// EngageSide is how the fight was entered — front walk-in vs side/back ambush.
+	// Drives the splash title ("Battle!" vs "Ambushed!"). Battle-lifetime.
+	EngageSide EngageSide
 
 	// Mixed-initiative turn queue, built per round (SPD desc, ties by side then
 	// index), consumed front-to-back; cursor exhausted → new round. Dead actors

@@ -917,36 +917,22 @@ func drawBattleSplash(g *core.GameState, assets Resources) {
 	overall := exitT
 
 	text := core.BattleEncounterTitle(g)
-	subtitle := splashSubtitle(g)
-	// FontTitle name / FontBody subtitle (highest-emphasis transient surface, UI_STANDARDS.md).
+	// FontTitle name (highest-emphasis transient surface, UI_STANDARDS.md).
 	titleSize := FontTitle
-	subSize := FontBody
 	spacing := FontSpacingTitle
 
-	// Strings stable across the ~40-frame splash, so measure once (at base size) and scale.
+	// Title is stable across the ~40-frame splash, so measure once (at base size) and scale.
 	titleMeasure := splashTitleMeasureCache.measure(assets.hudFont, text, titleSize, spacing)
-	subMeasure := rl.NewVector2(0, 0)
-	if subtitle != "" {
-		subMeasure = splashSubMeasureCache.measure(assets.hudFont, subtitle, subSize, 1)
-	}
 
 	scale := 0.86 + 0.14*intro
 	titleW := titleMeasure.X * scale
 	titleH := titleMeasure.Y * scale
-	contentW := titleW
-	if subMeasure.X > contentW {
-		contentW = subMeasure.X
-	}
 
 	padX := float32(40)
 	padY := float32(22)
-	gap := float32(0)
-	if subtitle != "" {
-		gap = 8
-	}
 
-	bgW := contentW + padX*2
-	bgH := titleH + subMeasure.Y + gap + padY*2
+	bgW := titleW + padX*2
+	bgH := titleH + padY*2
 
 	sw, sh := screenSizeF()
 	cx := sw / 2
@@ -957,7 +943,6 @@ func drawBattleSplash(g *core.GameState, assets Resources) {
 
 	bgAlpha := uint8(220 * overall)
 	titleAlpha := uint8(255 * overall)
-	subAlpha := uint8(220 * overall)
 
 	drawPanel(int32(bgX), int32(bgY), int32(bgW), int32(bgH), colorWithAlpha(splashBgColor, bgAlpha))
 	drawPanelOutline(int32(bgX), int32(bgY), int32(bgW), int32(bgH), fadeColor(borderEnemy, overall))
@@ -967,47 +952,10 @@ func drawBattleSplash(g *core.GameState, assets Resources) {
 	// Fade-driven shadow alpha + heavier 3px drop + title spacing via drawTextWithShadowStyle.
 	drawTextWithShadowStyle(assets.hudFont, text, titleX, titleY, titleSize*scale, spacing*scale,
 		colorWithAlpha(splashTitleColor, titleAlpha), colorWithAlpha(shadowBase, titleAlpha), 3, 3)
-
-	if subtitle != "" {
-		subX := cx - subMeasure.X/2
-		subY := titleY + titleH + gap
-		// Gilt rule + centred fleuron between title and subtitle; width 60% of subtitle, alpha rides the fade.
-		ruleW := subMeasure.X * 0.6
-		ruleY := subY - 4
-		ruleCol := fadeColor(giltDim, overall)
-		drawSplitRule(cx-ruleW/2, cx+ruleW/2, cx, ruleY, 8, ruleCol)
-		drawFleuron(cx, ruleY, 3, fadeColor(giltBright, overall))
-		drawTextWithShadowStyle(assets.hudFont, subtitle, subX, subY, subSize, 1,
-			colorWithAlpha(borderEnemy, subAlpha), colorWithAlpha(shadowBase, subAlpha), 1, 1)
-	}
 }
 
-// splashTitleMeasureCache / splashSubMeasureCache memoize the title + subtitle measures.
-var (
-	splashTitleMeasureCache measureCache
-	splashSubMeasureCache   measureCache
-)
-
-// splashSubtitleCache memoizes the subtitle by (count, noun) to skip per-frame Sprintf.
-var splashSubtitleCache struct {
-	count int
-	noun  string
-	text  string
-}
-
-func splashSubtitle(g *core.GameState) string {
-	count := len(core.BattleMembers(g))
-	if count <= 1 {
-		return "Hostile encounter"
-	}
-	def := core.BattleEnemyInfo(g)
-	if splashSubtitleCache.count != count || splashSubtitleCache.noun != def.PluralNoun {
-		splashSubtitleCache.count = count
-		splashSubtitleCache.noun = def.PluralNoun
-		splashSubtitleCache.text = fmt.Sprintf("%d %s closing in", count, def.PluralNoun)
-	}
-	return splashSubtitleCache.text
-}
+// splashTitleMeasureCache memoizes the splash title measure across the splash window.
+var splashTitleMeasureCache measureCache
 
 func easeOutBack(t float32) float32 {
 	if t <= 0 {
