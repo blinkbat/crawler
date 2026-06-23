@@ -111,24 +111,29 @@ var (
 	wipeGridCols   int32
 	wipeGridRows   int32
 	wipeBlockW     int32 // px per cell on screen
+	wipeGridW      int32 // screen size the snapshot was captured at (resize → recapture)
+	wipeGridH      int32
 	wipeGridValid  bool
 )
 
 // syncWipeGrid (re)captures the pixelate snapshot when the effect needs it and frees
-// it otherwise. Capture is the one-time readback; cells are sampled once here.
+// it otherwise. Capture is the one-time readback; cells are sampled once here. A
+// mid-effect window resize re-captures so the cached grid never reads at a stale size.
 func syncWipeGrid(g *core.GameState, active bool) {
 	want := active && g.BattleWipe == core.WipePixelate
-	if want == wipeGridValid {
-		return
-	}
 	if !want {
-		wipeGridColors = wipeGridColors[:0]
-		wipeGridValid = false
+		if wipeGridValid {
+			wipeGridColors = wipeGridColors[:0]
+			wipeGridValid = false
+		}
 		return
 	}
 	sw, sh := screenSize()
 	if sw <= 0 || sh <= 0 {
 		return
+	}
+	if wipeGridValid && sw == wipeGridW && sh == wipeGridH {
+		return // already captured at the current size
 	}
 	wipeBlockW = sw / wipePixelGridCols
 	if wipeBlockW < 1 {
@@ -159,6 +164,7 @@ func syncWipeGrid(g *core.GameState, active bool) {
 		}
 	}
 	rl.UnloadImage(img)
+	wipeGridW, wipeGridH = sw, sh
 	wipeGridValid = true
 }
 

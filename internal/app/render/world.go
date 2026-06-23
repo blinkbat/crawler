@@ -245,10 +245,10 @@ func tintMul(a, b rl.Color) rl.Color {
 // perspective distortion (battle eases toward the narrower battleTune.CamFOV).
 const exploreFOV = float32(100)
 
-// exploreCamDrop lowers the walking eye (~a third of EyeHeight) for a grounded
+// exploreCamDrop lowers the walking eye (~a quarter of EyeHeight) for a grounded
 // over-the-shoulder feel. Applied only out of battle — it fades out as battleCamBlend
 // rises, so the battle's own tuned eye-lift isn't disturbed.
-const exploreCamDrop = float32(-0.44)
+const exploreCamDrop = float32(-0.34)
 
 // battleCamBlendRate eases the explore↔battle camera blend at ~1/TurnDuration per
 // second, so every battle camera param (tilt, eye-lift, FOV) transitions together in
@@ -303,6 +303,16 @@ func Camera(g *core.GameState) rl.Camera3D {
 	// fades out and the tuned eye-lift fades in — both ride the one blend.
 	eyeY := core.EyeHeight + groundY + exploreCamDrop*(1-battleCamBlend) + battleTune.CamLift*battleCamBlend
 	position := rl.NewVector3(p.X, eyeY, p.Z)
+	// Camera-relative truck/dolly (battle framing). Translating only `position` moves
+	// the whole frustum — the look-target (position+direction) rides along, so the view
+	// pans without rotating. Ground-plane only (X/Z); vertical framing is CamLift.
+	if battleTune.CamShiftX != 0 || battleTune.CamShiftZ != 0 {
+		right := rl.Vector3Normalize(rl.Vector3CrossProduct(direction, rl.NewVector3(0, 1, 0)))
+		shiftX := battleTune.CamShiftX * battleCamBlend
+		shiftZ := battleTune.CamShiftZ * battleCamBlend
+		position.X += right.X*shiftX + direction.X*shiftZ
+		position.Z += right.Z*shiftX + direction.Z*shiftZ
+	}
 	// Combat screen shake: positional jitter eased out by ShakeTimer. Wall-clock-
 	// driven (two incommensurate freqs) so it's visible even while hit-stop freezes
 	// the sim. Battle-only.

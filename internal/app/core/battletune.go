@@ -14,6 +14,12 @@ type BattleTuning struct {
 	CamPitch float32 // battle camera downward tilt, radians (negative looks down)
 	CamLift  float32 // battle camera eye lift, world units up
 	CamFOV   float32 // battle field-of-view, degrees (lower = zoomed in)
+	// Camera-relative position truck/dolly (eye AND look-target translate together, so
+	// the view pans without rotating). CamShiftX slides screen-right (+) / left (−),
+	// CamShiftZ dollies forward (+) / back (−) along the ground. Vertical framing is
+	// CamLift above. Both fade in on the battle blend like the rest of the camera.
+	CamShiftX float32
+	CamShiftZ float32
 
 	FoeDistance float32 // foe formation center, forward of the camera
 	FoeFloorY   float32 // foe foot line — feet rest here (foot-anchored)
@@ -34,12 +40,13 @@ type BattleTuning struct {
 // the values dialed in via Debug ▸ Combat Tuning ▸ Dump.
 func DefaultBattleTuning() BattleTuning {
 	return BattleTuning{
-		CamPitch: -0.3, CamLift: -0.2, CamFOV: 55,
+		CamPitch: -0.35, CamLift: -0.2, CamFOV: 58,
+		CamShiftX: 0, CamShiftZ: -0.55,
 		FoeDistance: 1.95, FoeFloorY: 0.04,
-		FoeFrontGapX: 0.7, FoeBackGapX: 0.8,
+		FoeFrontGapX: 0.7, FoeBackGapX: 0.75,
 		FoeFrontMaxW: 3.0, FoeBackMaxW: 4.8,
-		FoeFrontDepth: 0.28, FoeBackDepth: 0.84, FoeZigzag: 0.12,
-		FoeFrontScale: 0.7, FoeBackScale: 0.9, FoeBackDarken: 0.3,
+		FoeFrontDepth: 0.28, FoeBackDepth: 0.98, FoeZigzag: 0.12,
+		FoeFrontScale: 0.85, FoeBackScale: 0.85, FoeBackDarken: 0.35,
 		PartyFrontFwd: 1.1, PartyBackFwd: 0.85,
 		PartyFrontGapX: 0.4, PartyBackGapX: 0.72,
 		PartyBaseY: 0.32,
@@ -59,6 +66,8 @@ type BattleTuneSlider struct {
 var battleTuneSliders = []BattleTuneSlider{
 	{"Cam tilt", -0.7, 0.1, 0.01, func(t *BattleTuning) *float32 { return &t.CamPitch }},
 	{"Cam height", -0.5, 2.0, 0.05, func(t *BattleTuning) *float32 { return &t.CamLift }},
+	{"Cam shift X", -2.5, 2.5, 0.05, func(t *BattleTuning) *float32 { return &t.CamShiftX }},
+	{"Cam shift Z (fwd)", -2.5, 2.5, 0.05, func(t *BattleTuning) *float32 { return &t.CamShiftZ }},
 	{"Cam zoom (FOV)", 30, 110, 1, func(t *BattleTuning) *float32 { return &t.CamFOV }},
 	{"Foe distance", 1.0, 4.0, 0.05, func(t *BattleTuning) *float32 { return &t.FoeDistance }},
 	{"Foe floor Y", -0.5, 1.0, 0.02, func(t *BattleTuning) *float32 { return &t.FoeFloorY }},
@@ -129,6 +138,7 @@ func AdjustBattleTuneSlider(t *BattleTuning, i, dir int) {
 func BattleTuneGoLiteral(t *BattleTuning) string {
 	return fmt.Sprintf(`return BattleTuning{
 	CamPitch: %g, CamLift: %g, CamFOV: %g,
+	CamShiftX: %g, CamShiftZ: %g,
 	FoeDistance: %g, FoeFloorY: %g,
 	FoeFrontGapX: %g, FoeBackGapX: %g,
 	FoeFrontMaxW: %g, FoeBackMaxW: %g,
@@ -139,7 +149,7 @@ func BattleTuneGoLiteral(t *BattleTuning) string {
 	PartyBaseY: %g,
 	PartyFrontScale: %g, PartyBackScale: %g,
 }`,
-		t.CamPitch, t.CamLift, t.CamFOV, t.FoeDistance, t.FoeFloorY,
+		t.CamPitch, t.CamLift, t.CamFOV, t.CamShiftX, t.CamShiftZ, t.FoeDistance, t.FoeFloorY,
 		t.FoeFrontGapX, t.FoeBackGapX, t.FoeFrontMaxW, t.FoeBackMaxW,
 		t.FoeFrontDepth, t.FoeBackDepth, t.FoeZigzag,
 		t.FoeFrontScale, t.FoeBackScale, t.FoeBackDarken,

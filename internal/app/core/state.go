@@ -101,7 +101,7 @@ func NewGameState(area AreaDefinition) GameState {
 		RetroFilterSky:     DefaultRetroFilterSky,
 		RetroFilterSprites: DefaultRetroFilterSprites,
 		BattleTuning:       DefaultBattleTuning(),
-		BattleWipe:         WipeTint,
+		BattleWipe:         WipeNone,
 		Inventory:          starterInventory(),
 		Quests:             StarterQuests(),
 		// Empty foe knowledge; fills via RecordBattleKills / MarkScanned. A save
