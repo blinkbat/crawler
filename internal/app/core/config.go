@@ -23,6 +23,10 @@ const (
 	TurnDuration  = 0.14
 	BumpDuration  = 0.18
 	FlashDuration = 0.16
+	// SwapSlideDuration is the in-battle formation Swap glide: the two members ease
+	// between their old and new slots so the trade reads as movement, not a teleport.
+	// Deliberately longer than a bump so the cross is legible.
+	SwapSlideDuration = float32(0.32)
 	// TurnRepeatDelay paces HELD turn AUTO-REPEAT only (additive rest between
 	// turns, not during the turn animation); a single tap/press is unaffected.
 	TurnRepeatDelay = float32(0.25)
@@ -128,10 +132,11 @@ const (
 	PanelMapZoomMin     = 8
 	PanelMapZoomMax     = 64
 	PanelMapZoomStep    = 8
-	// Pan step scales with zoom (PanelsMapZoom / PanelMapPanDivisor), floored at
-	// PanelMapPanStepMin cells.
-	PanelMapPanDivisor = 6
-	PanelMapPanStepMin = 2
+	// Analog pan/zoom rates (per second at full stick deflection). Pan scales by the
+	// current zoom (cells on screen) so a flick covers a similar fraction of the view
+	// at any scale; zoom advances PanelMapZoomStep cells per accumulated unit.
+	PanelMapPanRateFrac   = float32(0.9) // tiles/sec per cell-of-zoom, full deflection
+	PanelMapZoomStickRate = float32(5.0) // zoom steps/sec at full right-stick deflection
 
 	// Pack AI (junkyard-dog leash). Packs wander on player steps, never leaving
 	// their leash; step closer if the player is inside it, else a random in-leash cardinal.

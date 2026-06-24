@@ -275,6 +275,11 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		if area.BlockedAt(c.TileX, c.TileZ) {
 			return AreaDefinition{}, fmt.Errorf("crystal at (%d,%d) sits on a blocked tile (wall/prop/deep water)", c.TileX, c.TileZ)
 		}
+		// Crystals now block their tile, so one on the player start would embed the
+		// spawn — reject loudly (mirrors the chest-on-start rule).
+		if c.TileX == mf.StartX && c.TileZ == mf.StartZ {
+			return AreaDefinition{}, fmt.Errorf("crystal at (%d,%d) sits on the player start", c.TileX, c.TileZ)
+		}
 		key := [2]int{c.TileX, c.TileZ}
 		if seenCrystal[key] {
 			return AreaDefinition{}, fmt.Errorf("duplicate crystal at (%d,%d)", c.TileX, c.TileZ)

@@ -210,10 +210,10 @@ type Chest struct {
 	Looted bool
 }
 
-// Crystal is a Grimrock-style healing crystal. While Charged, stepping onto/beside
-// it fully restores HP+MP AND autosaves, then goes dormant. Recharges +1 per
-// landed step up to CrystalRechargeSteps (re-arms). Non-blocking. Charge state
-// persists in SaveData.
+// Crystal is a Grimrock-style healing crystal. BLOCKS its tile (a solid object);
+// while Charged, standing BESIDE it and pressing Confirm fully restores HP+MP AND
+// autosaves, then it goes dormant. Recharges +1 per landed step up to
+// CrystalRechargeSteps (re-arms). Charge state persists in SaveData.
 type Crystal struct {
 	TileX   int
 	TileZ   int
@@ -715,6 +715,13 @@ type PartyMember struct {
 	// and JSON-flatten so the save keys are unchanged. Party-received hits pass
 	// TimingQualityMiss → no "!"; set in applyPartyDamage.
 	HitAnim
+
+	// SwapSlide animates the formation Swap: a countdown (from SwapSlideDuration)
+	// during which the sprite eases from its SwapFrom{Row,Col} slot to its current
+	// live slot. Render-only transient; 0 = resting in the live slot.
+	SwapSlide   float32
+	SwapFromRow Row
+	SwapFromCol Col
 
 	// Defending (set by the Defend action) cuts incoming damage, cleared at the
 	// start of the member's NEXT turn — so a slow defender soaks more enemy turns

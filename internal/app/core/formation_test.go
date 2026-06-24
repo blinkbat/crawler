@@ -289,6 +289,66 @@ func TestPeekNextMeleeEnemyTarget(t *testing.T) {
 	}
 }
 
+// TestPeekEnemyAttackerTarget_FrontGateSkillReachTaunt locks the shared forecast/
+// commit peek: a basic swing is front-gated, a pending skill reaches any row, and a
+// live Taunt overrides the gate. Regression for the incoming-hit marker pointing at
+// a covered back-row member a melee foe can't actually reach.
+func TestPeekEnemyAttackerTarget_FrontGateSkillReachTaunt(t *testing.T) {
+	newG := func() *GameState {
+		g := &GameState{Party: []PartyMember{
+			{HP: 10, Row: RowFront},
+			{HP: 10, Row: RowBack},
+			{HP: 10, Row: RowFront},
+		}}
+		g.Battle.EnemyAttackCursor = 0 // next pick scans from slot 1
+		return g
+	}
+	// Basic attack (SkillNone) is melee → must skip the back-row slot 1.
+	g := newG()
+	g.Battle.EnemyPendingSkill = SkillNone
+	if got := PeekEnemyAttackerTarget(g); got != 2 {
+		t.Errorf("basic-attack target = %d, want 2 (front-gated, skip back-row slot 1)", got)
+	}
+	// A pending skill casts at any row → the back-row slot 1 is reachable.
+	g = newG()
+	g.Battle.EnemyPendingSkill = SkillFirebolt
+	if got := PeekEnemyAttackerTarget(g); got != 1 {
+		t.Errorf("skill target = %d, want 1 (any row)", got)
+	}
+	// A live Taunt forces even a melee attacker onto the back-row taunter.
+	g = newG()
+	g.Battle.EnemyPendingSkill = SkillNone
+	g.Packs = []Pack{{Members: []Enemy{{Alive: true, HP: 5, TauntTurns: 2, TauntedBy: 1}}}}
+	g.Battle.ActivePack = 0
+	g.Battle.EnemyAttacker = 0
+	if got := PeekEnemyAttackerTarget(g); got != 1 {
+		t.Errorf("taunted target = %d, want 1 (taunt overrides front gate)", got)
+	}
+}
+
+// TestAoEReachesEnemy_MeleeFrontGatedRangedAll locks the shared AoE reach predicate
+// behind the Swipe chevron/hit: a melee AoE is front-gated, a ranged/magic AoE
+// sweeps any row, dead foes never count. Regression for Swipe chevroning the back row.
+func TestAoEReachesEnemy_MeleeFrontGatedRangedAll(t *testing.T) {
+	members := []Enemy{
+		{Alive: true, Row: RowFront},
+		{Alive: true, Row: RowBack},
+	}
+	if !AoEReachesEnemy(members, SkillSwipe, 0) {
+		t.Error("melee AoE (Swipe) should reach the front-row foe")
+	}
+	if AoEReachesEnemy(members, SkillSwipe, 1) {
+		t.Error("melee AoE (Swipe) must not reach the covered back-row foe")
+	}
+	if !AoEReachesEnemy(members, SkillFireball, 1) {
+		t.Error("ranged AoE (Fireball) should reach the back-row foe (any row)")
+	}
+	members[0].Alive = false
+	if AoEReachesEnemy(members, SkillFireball, 0) {
+		t.Error("a dead foe must not be reachable")
+	}
+}
+
 func TestEnemyEffectiveFront(t *testing.T) {
 	members := []Enemy{
 		{Alive: true, Row: RowFront},

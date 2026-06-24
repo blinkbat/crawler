@@ -924,18 +924,9 @@ func drawTallyBar(t core.TimingState, barX, barY, barW, barH float32, isDefend b
 			rl.DrawRectangle(int32(pipX-pipW*0.5), int32(barY), int32(pipW), int32(barH), pip)
 		}
 	}
-	// Commit zone — orange tail. Pressing here ends the bar with the current tally.
-	if t.CommitStart < t.Duration {
-		commitX := barX + (t.CommitStart/t.Duration)*barW
-		commitW := barX + barW - commitX
-		commitCol := timingCommitColor
-		// Throb when the cursor's inside, matching the unhit-window preview.
-		if cursorElapsed >= t.CommitStart {
-			throb := 0.78 + 0.22*pulse(2.6)
-			commitCol = fadeColor(commitCol, throb)
-		}
-		rl.DrawRectangle(int32(commitX), int32(barY), int32(commitW), int32(barH), commitCol)
-	}
+	// The commit zone (CommitStart..Duration) stays UNDRAWN: a press there still
+	// resolves early in pressTally, but rendering its orange tail read as a third
+	// hit hotspot. The bar shows exactly its scoring windows.
 }
 
 // flashAlpha returns the flash strength ([0,1]), peaking after the press and decaying

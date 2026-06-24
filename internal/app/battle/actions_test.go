@@ -453,11 +453,50 @@ func TestResolveEnemyAttacker_ExcellentBlockCanZeroDamage(t *testing.T) {
 	}
 }
 
+// TestPerformSwap_ArmsSlideAndTradesSlots: the formation Swap glides — both members
+// get a SwapSlide armed from their pre-swap slot, and their live slots trade.
+func TestPerformSwap_ArmsSlideAndTradesSlots(t *testing.T) {
+	g := newTestState()
+	g.Battle.CurrentParty = 0
+	g.Battle.PartyTarget = 2 // living Thief
+	beforeRow0, beforeCol0 := g.Party[0].Row, g.Party[0].Col
+	beforeRow2, beforeCol2 := g.Party[2].Row, g.Party[2].Col
+
+	performSwap(g)
+
+	if g.Party[0].SwapSlide != core.SwapSlideDuration || g.Party[2].SwapSlide != core.SwapSlideDuration {
+		t.Fatalf("both members should arm a full slide, got %v / %v", g.Party[0].SwapSlide, g.Party[2].SwapSlide)
+	}
+	if g.Party[0].SwapFromRow != beforeRow0 || g.Party[0].SwapFromCol != beforeCol0 {
+		t.Error("actor's SwapFrom should record its pre-swap slot")
+	}
+	if g.Party[0].Row != beforeRow2 || g.Party[0].Col != beforeCol2 {
+		t.Error("actor should now occupy the partner's old slot")
+	}
+}
+
+// TestUnreachableMeleeTargetMsg_FlyingVsBackRow: the buzz message names the real
+// reason — a flyer is melee-immune (flying message), a grounded foe is the back-row one.
+func TestUnreachableMeleeTargetMsg_FlyingVsBackRow(t *testing.T) {
+	g := newTestState()
+	g.Packs[0].Members = []core.Enemy{
+		core.NewEnemy(core.EnemyBat), // flying
+		core.NewEnemy(core.EnemyRat), // grounded
+	}
+	g.Battle.ActivePack = 0
+	if got := unreachableMeleeTargetMsg(g, 0); got != msgFlyingMeleeTarget {
+		t.Errorf("flying foe msg = %q, want %q", got, msgFlyingMeleeTarget)
+	}
+	if got := unreachableMeleeTargetMsg(g, 1); got != msgBackRowMeleeTarget {
+		t.Errorf("grounded foe msg = %q, want %q", got, msgBackRowMeleeTarget)
+	}
+}
+
 func TestPickEnemyAttackTarget_SkipsDeadPartyMembers(t *testing.T) {
 	g := newTestState()
 	g.Party[1].HP = 0
 	g.Battle.EnemyAttackCursor = 0 // next pick should skip the dead slot 1
-	pick := pickEnemyAttackTarget(g, false)
+	pick := pickEnemyAttackTarget(g)
 	if pick == 1 {
 		t.Fatalf("pickEnemyAttackTarget shouldn't pick a dead member")
 	}

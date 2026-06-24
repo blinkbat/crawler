@@ -276,10 +276,10 @@ func placeCrystals(a AreaDefinition) []Crystal {
 }
 
 // DefaultEntranceCrystalSpawns returns the auto-placed entrance crystal position
-// (one-element slice, or nil when nowhere is clear). Scans the four cardinal
-// neighbors for a standable non-door tile, falling back to the start tile itself
-// unless the start IS a door (then prefers any standable neighbor). Shared by
-// placeCrystals (legacy fallback) and the editor.
+// (one-element slice, or nil when nowhere is clear). Crystals BLOCK their tile, so
+// the entrance crystal must sit BESIDE the spawn, never on it: prefer a standable
+// non-door cardinal neighbor, then any standable neighbor, else no crystal. Shared
+// by placeCrystals (legacy fallback) and the editor.
 func DefaultEntranceCrystalSpawns(a AreaDefinition) []CrystalSpawn {
 	sx, sz := a.ClampedStart()
 	isDoorTile := func(x, z int) bool {
@@ -293,26 +293,21 @@ func DefaultEntranceCrystalSpawns(a AreaDefinition) []CrystalSpawn {
 		return [2]int{dx, dz}
 	}
 	neighbors := [...][2]int{step(North), step(South), step(West), step(East)}
-	cx, cz, found := sx, sz, false
 	for _, d := range neighbors {
 		nx, nz := sx+d[0], sz+d[1]
 		if a.InBounds(nx, nz) && !a.BlockedAt(nx, nz) && !isDoorTile(nx, nz) {
-			cx, cz, found = nx, nz, true
-			break
+			return []CrystalSpawn{{TileX: nx, TileZ: nz}}
 		}
 	}
-	// Fallback is the start tile, UNLESS it's a door (the transition could fire
-	// first): then prefer any standable neighbor, else skip the crystal entirely.
-	if !found && isDoorTile(sx, sz) {
-		for _, d := range neighbors {
-			nx, nz := sx+d[0], sz+d[1]
-			if a.InBounds(nx, nz) && !a.BlockedAt(nx, nz) {
-				return []CrystalSpawn{{TileX: nx, TileZ: nz}}
-			}
+	// No clear non-door neighbor — accept a door-adjacent standable one rather than
+	// the start tile (which a blocking crystal can't occupy); else skip entirely.
+	for _, d := range neighbors {
+		nx, nz := sx+d[0], sz+d[1]
+		if a.InBounds(nx, nz) && !a.BlockedAt(nx, nz) {
+			return []CrystalSpawn{{TileX: nx, TileZ: nz}}
 		}
-		return nil
 	}
-	return []CrystalSpawn{{TileX: cx, TileZ: cz}}
+	return nil
 }
 
 // CrystalIndexAt returns the index of the crystal on (x,z), or -1.

@@ -49,23 +49,19 @@ func TestAdjacentChargedCrystalIndex(t *testing.T) {
 	}
 }
 
-// TestRestorePartyFully tops living members to full HP+MP, skipping dead/ingested.
+// TestRestorePartyFully fully restores every member to max HP+MP, REVIVING the dead.
 func TestRestorePartyFully(t *testing.T) {
 	g := &GameState{Party: []PartyMember{
 		{HP: 1, MaxHP: 10, MP: 0, MaxMP: 5},
-		{HP: 0, MaxHP: 10, MP: 0, MaxMP: 5},
-		{HP: 3, MaxHP: 8, MP: 2, MaxMP: 9, Ingested: true},
+		{HP: 0, MaxHP: 10, MP: 0, MaxMP: 5}, // downed → revived
 	}}
-	if n := RestorePartyFully(g); n != 1 {
-		t.Fatalf("restored %d members, want 1 (living, non-ingested only)", n)
+	if n := RestorePartyFully(g); n != 2 {
+		t.Fatalf("restored %d members, want 2 (all, including the downed)", n)
 	}
-	if g.Party[0].HP != 10 || g.Party[0].MP != 5 {
-		t.Errorf("living member not fully restored: HP=%d MP=%d", g.Party[0].HP, g.Party[0].MP)
-	}
-	if g.Party[1].HP != 0 {
-		t.Errorf("a downed member was revived (HP=%d)", g.Party[1].HP)
-	}
-	if g.Party[2].HP != 3 || g.Party[2].MP != 2 {
-		t.Errorf("an ingested member was healed: HP=%d MP=%d", g.Party[2].HP, g.Party[2].MP)
+	for i := range g.Party {
+		m := g.Party[i]
+		if m.HP != m.MaxHP || m.MP != m.MaxMP {
+			t.Errorf("member %d not fully restored: HP=%d/%d MP=%d/%d", i, m.HP, m.MaxHP, m.MP, m.MaxMP)
+		}
 	}
 }

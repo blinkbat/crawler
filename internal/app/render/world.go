@@ -269,6 +269,22 @@ var battleCamBlend float32
 // sync. The combat FOV, camera tilt/lift, and foe/party placement all read it.
 var battleTune = core.DefaultBattleTuning()
 
+// Chest peek: while a chest modal is open the camera eases down + toward the chest
+// to peer inside, easing back out on close. chestPeekYaw caches the chest's world
+// bearing so the ease-OUT (after ChestOpen clears) keeps aiming the right way.
+const (
+	chestPeekRate  = float32(1.0 / 0.22) // ease in/out over ~0.22s
+	chestPeekPitch = float32(-0.62)      // downward tilt to look into the box
+	chestPeekLean  = float32(0.28)       // forward dolly toward the chest
+	chestPeekDrop  = float32(-0.12)      // small eye drop (lean over the rim)
+)
+
+var (
+	chestPeekBlend float32
+	chestPeekYaw   float32
+	chestPeekHave  bool
+)
+
 func Camera(g *core.GameState) rl.Camera3D {
 	// Sync the live combat tuning before any battle geometry (incl. this camera)
 	// reads it. Guard against a zero-value GameState (struct-literal in a test) so a
@@ -285,8 +301,28 @@ func Camera(g *core.GameState) rl.Camera3D {
 	battleCamBlend = core.Approach(battleCamBlend, battleTarget, battleCamBlendRate*rl.GetFrameTime())
 
 	p := g.Player
+	// Chest peek: aim the view down + toward the open chest. Cache the bearing while
+	// open so the ease-out keeps aiming after ChestOpen clears.
+	peekTarget := float32(0)
+	if g.ChestOpen >= 0 && g.ChestOpen < len(g.Chests) {
+		ch := g.Chests[g.ChestOpen]
+		cpos := tileWorldPos(ch.TileX, ch.TileZ, 0)
+		chestPeekYaw = float32(math.Atan2(float64(cpos.Z-p.Z), float64(cpos.X-p.X)))
+		chestPeekHave = true
+		peekTarget = 1
+	}
+	chestPeekBlend = core.Approach(chestPeekBlend, peekTarget, chestPeekRate*rl.GetFrameTime())
+	if chestPeekBlend <= 0.001 {
+		chestPeekHave = false
+	}
+
 	yaw := p.Yaw + p.LookYaw
 	pitch := p.LookPitch + battleTune.CamPitch*battleCamBlend
+	if chestPeekHave {
+		// Ease yaw the short way toward the chest bearing; tilt down to look in.
+		yaw += chestPeekBlend * core.WrapAngle(chestPeekYaw-yaw)
+		pitch += chestPeekBlend * chestPeekPitch
+	}
 	cp := float32(math.Cos(float64(pitch)))
 	direction := rl.NewVector3(
 		cp*float32(math.Cos(float64(yaw))),
@@ -307,6 +343,14 @@ func Camera(g *core.GameState) rl.Camera3D {
 	// fades out and the tuned eye-lift fades in — both ride the one blend.
 	eyeY := core.EyeHeight + groundY + exploreCamDrop*(1-battleCamBlend) + battleTune.CamLift*battleCamBlend
 	position := rl.NewVector3(p.X, eyeY, p.Z)
+	// Chest peek: lean the eye toward the chest and dip it slightly so the tilt reads
+	// as peering over the rim into the box.
+	if chestPeekHave {
+		lean := chestPeekBlend * chestPeekLean
+		position.X += float32(math.Cos(float64(chestPeekYaw))) * lean
+		position.Z += float32(math.Sin(float64(chestPeekYaw))) * lean
+		position.Y += chestPeekBlend * chestPeekDrop
+	}
 	// Camera-relative truck/dolly (battle framing). Translating only `position` moves
 	// the whole frustum — the look-target (position+direction) rides along, so the view
 	// pans without rotating. Ground-plane only (X/Z); vertical framing is CamLift.
@@ -1597,8 +1641,9 @@ func drawBattleFoe(camera rl.Camera3D, g *core.GameState, assets Resources, enem
 		}
 		// Yellow chevron + tint only in the enemy-target picker (targetingEnemy
 		// gates on Phase==BattlePlayer so it drops when the timing bar arms). The
-		// AoE preview chevrons EVERY living enemy so the line read is clear.
-		if enemy.Alive && ((targetingEnemy(g) && i == g.Battle.EnemyIndex) || aoeEnemyTargetPreview(g)) {
+		// AoE preview chevrons every REACHABLE living enemy (a melee AoE like Swipe
+		// is front-gated, so back-row/Flying foes get no chevron).
+		if enemy.Alive && ((targetingEnemy(g) && i == g.Battle.EnemyIndex) || aoeEnemyTargetPreview(g, i)) {
 			tint = tintEnemyTargeted
 			drawTargetChevron(camera, place.chevron, visual.effectiveMarkerScale())
 		}
@@ -1630,10 +1675,11 @@ func drawBattleFoe(camera rl.Camera3D, g *core.GameState, assets Resources, enem
 	}
 }
 
-// aoeEnemyTargetPreview reports whether an all-enemy AoE skill is highlighted in
-// the Skill submenu (the cue to chevron every living enemy). Gated on
-// Phase==BattlePlayer + ActionSkillMenu, reading the live SkillMenuList.
-func aoeEnemyTargetPreview(g *core.GameState) bool {
+// aoeEnemyTargetPreview reports whether an all-enemy AoE skill highlighted in the
+// Skill submenu would land on the enemy at `slot` (the cue to chevron that foe).
+// Gated on Phase==BattlePlayer + ActionSkillMenu, reading the live SkillMenuList;
+// the per-slot reach check keeps a melee AoE (Swipe) off back-row/Flying foes.
+func aoeEnemyTargetPreview(g *core.GameState, slot int) bool {
 	if g.Battle.Phase != core.BattlePlayer || g.Battle.ActionMode != core.ActionSkillMenu {
 		return false
 	}
@@ -1648,7 +1694,8 @@ func aoeEnemyTargetPreview(g *core.GameState) bool {
 	if idx < 0 || idx >= len(skills) {
 		return false
 	}
-	return core.SkillTargetsAllEnemies(skills[idx])
+	skill := skills[idx]
+	return core.SkillTargetsAllEnemies(skill) && core.AoEReachesEnemy(core.BattleMembers(g), skill, slot)
 }
 
 // isEnemyAttackerSlot reports whether `slot` is the one lunging at the party
@@ -1662,13 +1709,21 @@ func isEnemyAttackerSlot(g *core.GameState, slot int) bool {
 
 // enemyAttackTarget returns the party slot the lunging enemy will hit (ok=false
 // when no marker should show), driving the red "incoming hit" marker during
-// BattleEnemyTiming. Shares core.PeekNextEnemyTarget with the commit path so the
-// marker can't drift from who's actually hit.
+// BattleEnemyTiming. Shares core.PeekEnemyAttackerTarget with the commit path so
+// the marker honors the same melee front-row gate + Taunt override and can't drift
+// from who's actually hit.
 func enemyAttackTarget(g *core.GameState) (int, bool) {
 	if g.Battle.Phase != core.BattleEnemyTiming {
 		return -1, false
 	}
-	target := core.PeekNextEnemyTarget(g)
+	// AoE/summon casts have no single target — no incoming-hit marker.
+	if g.Battle.EnemyPendingSkill != core.SkillNone {
+		effect := core.SkillEffectFor(g.Battle.EnemyPendingSkill)
+		if effect.AppliesAOEParty || effect.AppliesSummonSkeleton {
+			return -1, false
+		}
+	}
+	target := core.PeekEnemyAttackerTarget(g)
 	if target < 0 {
 		return -1, false
 	}
@@ -1973,24 +2028,34 @@ func partySpritePosition(camera rl.Camera3D, party []core.PartyMember, index int
 	if core.PartyIndexInRange(party, index) {
 		visRow, visCol = party[index].Row, party[index].Col
 	}
-	// 2×2 trapezoid widening toward the viewer (Debug ▸ Combat Tuning: Party rows):
-	// front tight/further, back wide/nearer. baseY is the sprite center height.
+	// slotXZ resolves a (row,col) to its world X/Z on the 2×2 trapezoid widening
+	// toward the viewer (Debug ▸ Combat Tuning: Party rows): front tight/further,
+	// back wide/nearer.
 	baseY := battleTune.PartyBaseY
-	rowForward, rowSpacing := battleTune.PartyFrontFwd, battleTune.PartyFrontGapX
-	if visRow == core.RowBack {
-		rowForward, rowSpacing = battleTune.PartyBackFwd, battleTune.PartyBackGapX
+	slotXZ := func(row core.Row, col core.Col) (x, z float32) {
+		rowForward, rowSpacing := battleTune.PartyFrontFwd, battleTune.PartyFrontGapX
+		if row == core.RowBack {
+			rowForward, rowSpacing = battleTune.PartyBackFwd, battleTune.PartyBackGapX
+		}
+		colSign := float32(-0.5)
+		if col == core.ColRight {
+			colSign = 0.5
+		}
+		offset := colSign * rowSpacing
+		return camera.Position.X + forward.X*rowForward + right.X*offset,
+			camera.Position.Z + forward.Z*rowForward + right.Z*offset
 	}
-	base := rl.NewVector3(
-		camera.Position.X+forward.X*rowForward,
-		baseY,
-		camera.Position.Z+forward.Z*rowForward,
-	)
-	// Left/right column around the formation axis.
-	colSign := float32(-0.5)
-	if visCol == core.ColRight {
-		colSign = 0.5
+	slotX, slotZ := slotXZ(visRow, visCol)
+	// Formation-Swap glide: ease from the pre-swap slot to the live slot over the
+	// SwapSlide countdown so the trade reads as movement, not a teleport.
+	if core.PartyIndexInRange(party, index) && party[index].SwapSlide > 0 {
+		fromX, fromZ := slotXZ(party[index].SwapFromRow, party[index].SwapFromCol)
+		t := core.Smoothstep(core.Clamp(1-party[index].SwapSlide/core.SwapSlideDuration, 0, 1))
+		slotX = core.Lerp(fromX, slotX, t)
+		slotZ = core.Lerp(fromZ, slotZ, t)
 	}
-	offset := colSign * rowSpacing
+	base := rl.NewVector3(slotX, baseY, slotZ)
+	offset := float32(0) // column offset already folded into base via slotXZ
 	depth := float32(0)
 	danceSide, danceDepth, danceHeight, _ := victoryDanceMotion(class, victoryDance)
 	bumpDepth := core.BumpOffset(bump, 0.22)

@@ -157,19 +157,29 @@ func TestCrystalAuthoringAndValidation(t *testing.T) {
 		}
 	}
 
-	// Authored crystal round-trips, honored verbatim.
+	// Authored crystal round-trips, honored verbatim. Off the start tile (2,2 vs
+	// start 1,1) — a blocking crystal can't sit on the spawn.
 	mf := base()
 	mf.CrystalsDefined = true
-	mf.Crystals = []mapfile.MapCrystal{{X: 1, Z: 1}}
+	mf.Crystals = []mapfile.MapCrystal{{X: 2, Z: 2}}
 	area, err := AreaFromMapFile(mf, "maps/c.map")
 	if err != nil {
 		t.Fatalf("AreaFromMapFile (authored): %v", err)
 	}
-	if !area.CrystalsAuthored || len(area.CrystalSpawns) != 1 || area.CrystalSpawns[0] != (CrystalSpawn{TileX: 1, TileZ: 1}) {
+	if !area.CrystalsAuthored || len(area.CrystalSpawns) != 1 || area.CrystalSpawns[0] != (CrystalSpawn{TileX: 2, TileZ: 2}) {
 		t.Fatalf("authored crystal not carried through: %+v authored=%v", area.CrystalSpawns, area.CrystalsAuthored)
 	}
 	if got := placeCrystals(area); len(got) != 1 || !got[0].Charged {
 		t.Fatalf("authored crystal should place one charged crystal, got %+v", got)
+	}
+
+	// Crystal on the player start is rejected at load (a blocking crystal would
+	// embed the spawn).
+	onStart := base()
+	onStart.CrystalsDefined = true
+	onStart.Crystals = []mapfile.MapCrystal{{X: 1, Z: 1}} // == StartX/StartZ
+	if _, err := AreaFromMapFile(onStart, "maps/c.map"); err == nil {
+		t.Fatal("expected error for crystal on the player start, got nil")
 	}
 
 	// Explicit empty set = deliberately zero crystals (no entrance fallback).
@@ -212,6 +222,30 @@ func TestCrystalAuthoringAndValidation(t *testing.T) {
 	dup.Crystals = []mapfile.MapCrystal{{X: 1, Z: 1}, {X: 1, Z: 1}}
 	if _, err := AreaFromMapFile(dup, "maps/c.map"); err == nil {
 		t.Fatal("expected error for duplicate crystal tile, got nil")
+	}
+}
+
+// TestCanEnterTile_CrystalBlocks: a crystal is a solid object — its tile refuses
+// entry (heal by stepping beside it), while a clear floor tile stays enterable.
+func TestCanEnterTile_CrystalBlocks(t *testing.T) {
+	mf := mapfile.MapFile{
+		Name: "Cr", Materials: "dungeon", Width: 3, Height: 3,
+		StartX: 1, StartZ: 1, StartFace: "east",
+		Walls: []string{"...", "...", "..."},
+		Floor: []string{"...", "...", "..."},
+		Decor: []string{"...", "...", "..."},
+		Props: []string{"...", "...", "..."},
+	}
+	area, err := AreaFromMapFile(mf, "maps/cr.map")
+	if err != nil {
+		t.Fatalf("AreaFromMapFile: %v", err)
+	}
+	g := &GameState{Area: area, Crystals: []Crystal{{TileX: 2, TileZ: 2, Charged: true}}}
+	if CanEnterTile(g, 2, 2, EnterOpts{}) {
+		t.Error("a crystal tile must block entry")
+	}
+	if !CanEnterTile(g, 0, 0, EnterOpts{}) {
+		t.Error("a clear floor tile should be enterable")
 	}
 }
 

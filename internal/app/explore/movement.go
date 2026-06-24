@@ -39,7 +39,7 @@ func Update(g *core.GameState) {
 		updateLevelUpModal(g)
 		return
 	case core.ModalPanels:
-		updatePanels(g)
+		updatePanels(g, dt)
 		return
 	case core.ModalChest:
 		updateChestModal(g)
@@ -442,9 +442,9 @@ func tryUseAdjacentCrystal(g *core.GameState) bool {
 	)
 }
 
-// fireHealingCrystal restores the party to full HP+MP, makes the crystal
-// dormant, and AUTOSAVEs. Heal+discharge always land; the save is best-effort
-// (refused on an unsaved editor-playtest map, Area.Path == "").
+// fireHealingCrystal fully restores the party (HP+MP, REVIVING the dead), makes
+// the crystal dormant, and AUTOSAVEs. Restore+discharge always land; the save is
+// best-effort (refused on an unsaved editor-playtest map, Area.Path == "").
 func fireHealingCrystal(g *core.GameState, idx int) {
 	core.RestorePartyFully(g)
 	g.Crystals[idx].Charged = false

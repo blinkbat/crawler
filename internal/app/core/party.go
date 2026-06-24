@@ -535,23 +535,19 @@ func HealWholeParty(g *GameState, amount int) {
 	}
 }
 
-// RestorePartyFully tops every LIVING member to full HP AND MP (the healing
-// crystal's effect). Returns the number restored.
+// RestorePartyFully fully restores every member to MaxHP + MaxMP, REVIVING the
+// dead — the healing crystal's full party reset. Sets HP/MP directly (HealMember
+// never revives). Returns the number restored. Crystal-use is out of combat, so
+// no member is Ingested here.
 func RestorePartyFully(g *GameState) int {
 	if g == nil {
 		return 0
 	}
-	restored := 0
 	for i := range g.Party {
-		m := &g.Party[i]
-		if !partyAvailable(*m) {
-			continue
-		}
-		HealMember(m, m.MaxHP)
-		RestoreMP(m, m.MaxMP)
-		restored++
+		g.Party[i].HP = g.Party[i].MaxHP
+		g.Party[i].MP = g.Party[i].MaxMP
 	}
-	return restored
+	return len(g.Party)
 }
 
 // TickCrystalRecharge advances every dormant crystal's charge one step, re-arming

@@ -46,7 +46,7 @@ func closePanels(g *core.GameState) {
 // (close / tab paging) live here; per-tab cursors dispatch through the switch.
 // Nav model: shoulders + triggers page TABS, freeing the d-pad / stick to be an
 // in-tab cursor (Left/Right = member column, Up/Down = slot row or zoom).
-func updatePanels(g *core.GameState) {
+func updatePanels(g *core.GameState, dt float32) {
 	// The use-target picker (Items/Skills) and the Equipment slot picker are modal
 	// sub-dialogs: while one is open it owns every panel input (Back closes just
 	// the picker, paging/shortcuts suppressed). Handle them first and return.
@@ -188,20 +188,27 @@ func updatePanels(g *core.GameState) {
 		}
 		g.PanelsRowCursor = input.CursorUpDown(g.PanelsRowCursor, rows)
 	case core.PanelTabMap:
-		// Up/Down zoom (Up = closer), Left/Right pan. The pan step scales with
-		// zoom so a tap scrolls a meaningful chunk at any scale.
-		step := g.PanelsMapZoom / core.PanelMapPanDivisor
-		if step < core.PanelMapPanStepMin {
-			step = core.PanelMapPanStepMin
-		}
-		if dx := input.CursorLeftRight(); dx != 0 {
-			g.PanelsMapPanX += dx * step
-		}
-		if input.UpPressed() {
+		// Pan: left stick / d-pad / arrows / WASD (analog, both axes). Zoom: right
+		// stick / mouse wheel. Analog input accumulates into the integer tile-pan +
+		// stepped zoom. Pan speed scales with zoom so a flick covers a similar fraction
+		// of the view at any scale.
+		px, pz := input.MapPanInput()
+		panRate := float32(g.PanelsMapZoom) * core.PanelMapPanRateFrac
+		mapPanAccumX += px * panRate * dt
+		mapPanAccumZ += pz * panRate * dt
+		g.PanelsMapPanX += stepAccum(&mapPanAccumX)
+		g.PanelsMapPanZ += stepAccum(&mapPanAccumZ)
+
+		// Right stick up (negative) zooms in; wheel up (positive) zooms in. Both feed
+		// one accumulator; each whole unit steps the zoom by PanelMapZoomStep.
+		mapZoomAccum += -input.MapZoomAxis()*core.PanelMapZoomStickRate*dt + input.MapZoomWheel()
+		for mapZoomAccum >= 1 {
 			g.PanelsMapZoom -= core.PanelMapZoomStep
+			mapZoomAccum -= 1
 		}
-		if input.DownPressed() {
+		for mapZoomAccum <= -1 {
 			g.PanelsMapZoom += core.PanelMapZoomStep
+			mapZoomAccum += 1
 		}
 		g.PanelsMapZoom = core.Clamp(g.PanelsMapZoom, core.PanelMapZoomMin, core.PanelMapZoomMax)
 		// Clamp the pan to a map's span off the player — enough to inspect any
@@ -241,9 +248,27 @@ func setPanelTab(g *core.GameState, t core.PanelTab) {
 	recenterPanelMap(g)
 }
 
-// recenterPanelMap clears the Map tab's pan offset (a transient inspect offset)
-// so the view re-centers on the player.
+// Map tab analog pan/zoom accumulators: stick/key input drains here into the
+// integer tile-pan + stepped zoom. Transient (reset on open / recenter).
+var (
+	mapPanAccumX float32
+	mapPanAccumZ float32
+	mapZoomAccum float32
+)
+
+// stepAccum drains whole units from an analog accumulator, returning the integer
+// step and leaving the sub-unit remainder for the next frame (truncates toward 0,
+// so it handles both directions).
+func stepAccum(acc *float32) int {
+	n := int(*acc)
+	*acc -= float32(n)
+	return n
+}
+
+// recenterPanelMap clears the Map tab's pan offset (a transient inspect offset) so
+// the view re-centers on the player, and zeroes the analog accumulators.
 func recenterPanelMap(g *core.GameState) {
 	g.PanelsMapPanX = 0
 	g.PanelsMapPanZ = 0
+	mapPanAccumX, mapPanAccumZ, mapZoomAccum = 0, 0, 0
 }

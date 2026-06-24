@@ -23,8 +23,10 @@ const (
 	// logs a terse named-unit line (msgBackRowMeleeAttackFmt) and buzzes instead.
 	msgBackRowMeleeSkill     = "Can't reach from the back row — reposition or use a ranged/magic skill."
 	msgBackRowMeleeAttackFmt = "%s cannot reach from the back row!"
-	// msgBackRowMeleeTarget: confirming an unreachable (greyed back-row) foe buzzes + logs this.
+	// msgBackRowMeleeTarget / msgFlyingMeleeTarget: confirming an unreachable (greyed)
+	// foe buzzes + logs the reason — a covered back-row foe vs a melee-immune flyer.
 	msgBackRowMeleeTarget = "Cannot use current weapon from the back row"
+	msgFlyingMeleeTarget  = "Cannot reach a flying foe with the current weapon"
 )
 
 // Start begins a battle against the pack at packIndex (the whole roster becomes
@@ -1049,8 +1051,9 @@ func resolveEnemySpell(g *core.GameState, slot int, skill core.SkillID) {
 	// summon. Single-target casts keep the gate (nothing to do without a target).
 	target := -1
 	if !effect.AppliesAOEParty && !effect.AppliesSummonSkeleton {
-		// Single-target enemy casts are magic (any row), never front-gated.
-		target = pickEnemyAttackTarget(g, false)
+		// Single-target enemy casts are magic (any row), never front-gated —
+		// PeekEnemyAttackerTarget keys off EnemyPendingSkill (non-None here).
+		target = pickEnemyAttackTarget(g)
 		if target < 0 {
 			// No target (e.g. the last reachable ally was just swallowed). Surface
 			// the no-op so the advancing forecast isn't mistaken for a frozen battle.
@@ -1437,6 +1440,7 @@ func updateBattleEffects(g *core.GameState, dt float32, members []core.Enemy) {
 	for i := range g.Party {
 		tickHitTimers(&g.Party[i].AttackBump, &g.Party[i].DamageFlash, &g.Party[i].HitKnockback, dt)
 		g.Party[i].DamagePopupTimer = core.ApproachZero(g.Party[i].DamagePopupTimer, dt)
+		g.Party[i].SwapSlide = core.ApproachZero(g.Party[i].SwapSlide, dt)
 	}
 	for i := range members {
 		tickHitTimers(&members[i].AttackBump, &members[i].DamageFlash, &members[i].HitKnockback, dt)

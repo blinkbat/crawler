@@ -2,7 +2,6 @@ package render
 
 import (
 	"crawler/internal/app/core"
-	"math"
 	"strconv"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -19,12 +18,16 @@ var chestGeo = chestGeometry{
 	LidHeight:  0.18,
 }
 
-// Looted-lid pose: lift above body top + backward tilt to read as "thrown open".
+// Open-box "mouth": a dark recessed slab flush with the body top so an opened or
+// looted chest reads as a hole inside (no lid for now). Inset within the body
+// footprint (0.62 × 0.50) so a wood rim frames the opening; the camera peek tilts
+// down to look into it. chestMouthLift sits the top face a hair above the wood to
+// avoid z-fighting.
 const (
-	chestLidLootedLift    = float32(0.34)
-	chestLidLootedTiltDeg = float32(-58)
-	// chestLidHingeZOffset: lid pivot Z relative to chest centre. Referenced twice (hinge anchor + per-part Z); one const keeps them in lockstep.
-	chestLidHingeZOffset = float32(-0.25)
+	chestMouthW    = float32(0.46)
+	chestMouthD    = float32(0.34)
+	chestMouthH    = float32(0.10)
+	chestMouthLift = float32(0.005)
 )
 
 // Chest modal geometry.
@@ -36,11 +39,14 @@ const (
 	chestRowInsetY  = int32(28)        // first row top inset from the card top
 )
 
-// DrawChests renders each chest as a two-piece prop (body + lid; closed = flush, looted = hinged open).
-// Must be called after DrawWorld so the lighting shader is still bound.
+// DrawChests renders each chest body, then either a closed lid or — when the chest
+// is the one being viewed (ChestOpen) or already looted — an open box with a dark
+// hole inside (no lid for now). Must be called after DrawWorld so the lighting
+// shader is still bound.
 func DrawChests(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	vc := newViewCull(camera)
-	for _, ch := range g.Chests {
+	for i := range g.Chests {
+		ch := g.Chests[i]
 		base := tileWorldPos(ch.TileX, ch.TileZ, g.Area.StandGroundY(ch.TileX, ch.TileZ))
 		if vc.cull(base) {
 			continue
@@ -49,36 +55,21 @@ func DrawChests(camera rl.Camera3D, g *core.GameState, assets Resources) {
 
 		assets.chestBody.draw(base, 1.0, 0)
 
-		lidCentreY := base.Y + chestGeo.BodyHeight
-		if ch.Looted {
-			drawChestLidLooted(assets, base, lidCentreY)
+		if i == g.ChestOpen || ch.Looted {
+			drawChestOpenMouth(base)
 		} else {
-			lidPos := rl.NewVector3(base.X, lidCentreY, base.Z)
+			lidPos := rl.NewVector3(base.X, base.Y+chestGeo.BodyHeight, base.Z)
 			assets.chestLid.draw(lidPos, 1.0, 0)
 		}
 	}
 }
 
-// drawChestLidLooted paints the lid pivoted around the body's rear top edge ("thrown open"), each part tilted by chestLidLootedTiltDeg about world-X.
-func drawChestLidLooted(assets Resources, base rl.Vector3, lidCentreY float32) {
-	hingeZ := base.Z + chestLidHingeZOffset
-	tiltRad := float64(chestLidLootedTiltDeg) * math.Pi / 180
-	cosT := float32(math.Cos(tiltRad))
-	sinT := float32(math.Sin(tiltRad))
-	for _, part := range assets.chestLid.parts {
-		offX := part.offset.X
-		offY := part.offset.Y
-		offZ := part.offset.Z
-		relY := offY + chestLidLootedLift
-		relZ := offZ - chestLidHingeZOffset
-		// Rotate (y,z) around X through the hinge; negative tilt pivots the lid backward.
-		ry := relY*cosT - relZ*sinT
-		rz := relY*sinT + relZ*cosT
-		position := rl.NewVector3(base.X+offX, lidCentreY+ry, hingeZ+rz)
-		drawScale := part.scale
-		// raylib's rotation applies only the per-part rotation; the lid tilt is baked into position above.
-		rl.DrawModelEx(assets.chestLid.models[part.modelIdx], position, partRotationAxis(part), part.rotation, drawScale, part.tint)
-	}
+// drawChestOpenMouth paints the dark inset opening flush with the body top so an
+// open chest reads as a hollow box (no lid). The slab sinks into the body; only its
+// top face shows, framed by the wood rim — the camera peek looks down into it.
+func drawChestOpenMouth(base rl.Vector3) {
+	center := rl.NewVector3(base.X, base.Y+chestGeo.BodyHeight-chestMouthH*0.5+chestMouthLift, base.Z)
+	rl.DrawCubeV(center, rl.NewVector3(chestMouthW, chestMouthH, chestMouthD), chestInteriorColor)
 }
 
 // DrawChestPrompt paints the floating "open" cue over an adjacent unlooted chest. Must be called after rl.EndMode3D (screen space).

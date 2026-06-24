@@ -39,7 +39,8 @@ type Resources struct {
 	rockProp     propModel
 	bushProp     propModel
 	mushroomProp propModel
-	// chestBody / chestLid: two parts so the looted path lifts+tilts the lid without re-posing the body.
+	// chestBody / chestLid: two parts — the lid draws only on a closed chest; an
+	// open/looted chest drops it for a dark open mouth (drawChestOpenMouth).
 	chestBody propModel
 	chestLid  propModel
 

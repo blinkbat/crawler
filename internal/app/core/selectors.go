@@ -411,6 +411,21 @@ func MeleeReachableBattleEnemyIndices(g *GameState) []int {
 	return out
 }
 
+// AoEReachesEnemy reports whether an all-enemy skill's sweep actually lands on the
+// enemy at `slot`: a melee AoE (Swipe/Whirlwind) is front-gated and skips Flying
+// foes; a ranged/magic AoE (Fireball/Arc Bolt) sweeps the whole pack. Shared by the
+// battle apply (forEachTargetableEnemy) and the render AoE chevron preview so the
+// markers match who's actually hit.
+func AoEReachesEnemy(members []Enemy, skill SkillID, slot int) bool {
+	if slot < 0 || slot >= len(members) || !members[slot].Alive {
+		return false
+	}
+	if SkillAttackClassFor(skill).IsMelee() {
+		return EnemyMeleeReachable(members, slot)
+	}
+	return true
+}
+
 // BattlePendingAttackIsMelee reports whether the targeted action is MELEE (basic
 // attack off the equipped weapon, skill off its reach class). Core mirror of
 // battle.battlePendingAttackMelee so the renderer doesn't import battle.
@@ -451,6 +466,40 @@ func PeekNextMeleeEnemyTarget(g *GameState) int {
 	return wrapNextWhere(g.Party, g.Battle.EnemyAttackCursor+1, func(m PartyMember) bool {
 		return partyAvailable(m) && (m.Row == RowFront || !frontHasLiving)
 	})
+}
+
+// tauntedAttackerTarget returns the slot a live Taunt forces the current enemy
+// attacker (g.Battle.EnemyAttacker) onto — any row — or ok=false. A defeated or
+// ingested taunter releases the lock.
+func tauntedAttackerTarget(g *GameState) (int, bool) {
+	enemy := BattleMemberAt(g, g.Battle.EnemyAttacker)
+	if enemy == nil || enemy.TauntTurns <= 0 {
+		return -1, false
+	}
+	t := enemy.TauntedBy
+	if t < 0 || t >= len(g.Party) {
+		return -1, false
+	}
+	if g.Party[t].HP <= 0 || g.Party[t].Ingested {
+		return -1, false
+	}
+	return t, true
+}
+
+// PeekEnemyAttackerTarget returns the party slot the current enemy attacker will
+// hit, WITHOUT advancing the round-robin cursor. Precedence mirrors the commit
+// path: a live Taunt overrides any row; else a basic attack (EnemyPendingSkill ==
+// SkillNone) is melee and front-gated, while a pending skill casts at any row.
+// Shared by the battle commit (pickEnemyAttackTarget) and the render forecast so
+// the incoming-hit marker can't drift from who's actually struck. -1 = no target.
+func PeekEnemyAttackerTarget(g *GameState) int {
+	if forced, ok := tauntedAttackerTarget(g); ok {
+		return forced
+	}
+	if g.Battle.EnemyPendingSkill == SkillNone {
+		return PeekNextMeleeEnemyTarget(g)
+	}
+	return PeekNextEnemyTarget(g)
 }
 
 func LivingBattleCount(g *GameState) int {

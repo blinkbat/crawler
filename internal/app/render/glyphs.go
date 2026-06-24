@@ -10,20 +10,22 @@ import (
 type InputGlyph int
 
 const (
-	GlyphA         InputGlyph = iota // confirm        (A / Cross)
-	GlyphB                           // back / cancel   (B / Circle)
-	GlyphX                           // use            (Square / X face)
-	GlyphY                           // panels / Tome   (Y / Triangle)
-	GlyphLB                          // page tab back   (L1 / LB)
-	GlyphRB                          // page tab fwd    (R1 / RB)
-	GlyphStart                       // pause / apply   (Start / Options)
-	GlyphSelect                      // quit / share    (Select / View)
-	GlyphUp                          // d-pad up
-	GlyphDown                        // d-pad down
-	GlyphLeft                        // d-pad left
-	GlyphRight                       // d-pad right
-	GlyphUpDown                      // d-pad vertical pair
-	GlyphLeftRight                   // d-pad horizontal pair
+	GlyphA          InputGlyph = iota // confirm        (A / Cross)
+	GlyphB                            // back / cancel   (B / Circle)
+	GlyphX                            // use            (Square / X face)
+	GlyphY                            // panels / Tome   (Y / Triangle)
+	GlyphLB                           // page tab back   (L1 / LB)
+	GlyphRB                           // page tab fwd    (R1 / RB)
+	GlyphStart                        // pause / apply   (Start / Options)
+	GlyphSelect                       // quit / share    (Select / View)
+	GlyphUp                           // d-pad up
+	GlyphDown                         // d-pad down
+	GlyphLeft                         // d-pad left
+	GlyphRight                        // d-pad right
+	GlyphUpDown                       // d-pad vertical pair
+	GlyphLeftRight                    // d-pad horizontal pair
+	GlyphLeftStick                    // left analog stick (Map pan)
+	GlyphRightStick                   // right analog stick (Map zoom / free-look)
 )
 
 // HintSeg is one control affordance: button glyph(s) plus an action word. No glyphs = plain text; no label = icon-only.
@@ -195,6 +197,10 @@ func drawInputGlyph(font rl.Font, g InputGlyph, x, y, size, alpha float32) float
 		return drawStartSelect(true, x, cy, gh, alpha)
 	case GlyphSelect:
 		return drawStartSelect(false, x, cy, gh, alpha)
+	case GlyphLeftStick:
+		return drawStickGlyph(font, "L", x, cy, gh, alpha)
+	case GlyphRightStick:
+		return drawStickGlyph(font, "R", x, cy, gh, alpha)
 	default:
 		return drawDpadGlyph(g, x, cy, gh, alpha)
 	}
@@ -202,24 +208,26 @@ func drawInputGlyph(font rl.Font, g InputGlyph, x, y, size, alpha float32) float
 
 // inputGlyphCoverage tags each glyph as explicitly handled (true) or routed through the d-pad default (false). The init() guard asserts full iota coverage so a new glyph can't silently fall through. Ledger only; no runtime effect.
 var inputGlyphCoverage = map[InputGlyph]bool{
-	GlyphA:         true,
-	GlyphB:         true,
-	GlyphX:         true,
-	GlyphY:         true,
-	GlyphLB:        true,
-	GlyphRB:        true,
-	GlyphStart:     true,
-	GlyphSelect:    true,
-	GlyphUp:        false, // d-pad default
-	GlyphDown:      false, // d-pad default
-	GlyphLeft:      false, // d-pad default
-	GlyphRight:     false, // d-pad default
-	GlyphUpDown:    false, // d-pad default
-	GlyphLeftRight: false, // d-pad default
+	GlyphA:          true,
+	GlyphB:          true,
+	GlyphX:          true,
+	GlyphY:          true,
+	GlyphLB:         true,
+	GlyphRB:         true,
+	GlyphStart:      true,
+	GlyphSelect:     true,
+	GlyphUp:         false, // d-pad default
+	GlyphDown:       false, // d-pad default
+	GlyphLeft:       false, // d-pad default
+	GlyphRight:      false, // d-pad default
+	GlyphUpDown:     false, // d-pad default
+	GlyphLeftRight:  false, // d-pad default
+	GlyphLeftStick:  true,
+	GlyphRightStick: true,
 }
 
 // glyphCount is one past the last InputGlyph const, for the init coverage guard.
-const glyphCount = GlyphLeftRight + 1
+const glyphCount = GlyphRightStick + 1
 
 func init() {
 	if len(inputGlyphCoverage) != int(glyphCount) {
@@ -285,6 +293,19 @@ func drawStartSelect(start bool, x, cy, gh, alpha float32) float32 {
 		rl.DrawRectangleLinesEx(rl.NewRectangle(cx-s*0.2, cy-s*0.1, s*1.2, s*1.2), 1.4, ink)
 	}
 	return w
+}
+
+// drawStickGlyph draws an analog-stick icon: a rounded tile, a housing ring, a
+// thumb disc, and the L/R label — distinguishing the two sticks in Map hints.
+func drawStickGlyph(font rl.Font, label string, x, cy, gh, alpha float32) float32 {
+	drawGlyphPill(rl.NewRectangle(x+1, cy-gh/2+1, gh-2, gh-2), glyphPadRoundness, alpha)
+	cx := x + gh/2
+	r := gh * 0.28
+	rl.DrawCircleLines(int32(cx), int32(cy), r+2, fadeColor(glyphRim, alpha*0.8))
+	rl.DrawCircle(int32(cx), int32(cy), r, fadeColor(glyphBody, alpha))
+	rl.DrawCircleLines(int32(cx), int32(cy), r, fadeColor(giltBright, alpha))
+	drawGlyphLetter(font, label, cx, cy, gh*0.42, fadeColor(giltBright, alpha))
+	return gh
 }
 
 // drawDpadGlyph draws a d-pad tile with chevrons; requested direction(s) bright, the rest dim.

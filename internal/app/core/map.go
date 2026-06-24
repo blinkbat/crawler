@@ -808,6 +808,9 @@ func canEnterRuntimeBlockers(g *GameState, tx, tz int, opts EnterOpts) bool {
 	if ChestIndexAt(g.Chests, tx, tz) >= 0 {
 		return false
 	}
+	if CrystalIndexAt(g.Crystals, tx, tz) >= 0 {
+		return false
+	}
 	if !opts.AllowDoorTile && DoorIndexAt(g.Doors, tx, tz) >= 0 {
 		return false
 	}

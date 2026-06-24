@@ -80,6 +80,19 @@ func TileCenter(tile int) float32 {
 	return (float32(tile) + 0.5) * TileSize
 }
 
+// WrapAngle folds a radian angle into [-π, π] — the shortest signed form, so a
+// difference of two yaws eases the short way around (no 350° spins).
+func WrapAngle(a float32) float32 {
+	const twoPi = 2 * math.Pi
+	for a > math.Pi {
+		a -= twoPi
+	}
+	for a < -math.Pi {
+		a += twoPi
+	}
+	return a
+}
+
 // ClampFrameTime clips a per-frame dt to [0, MaxFrameStep] so a stall can't
 // leap the sim forward and a negative dt can't step it backward.
 func ClampFrameTime(dt float32) float32 {

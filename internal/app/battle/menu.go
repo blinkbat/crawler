@@ -484,9 +484,15 @@ func performSwap(g *core.GameState) {
 		return
 	}
 	actorName, partnerName := actor.Name, g.Party[partner].Name
+	// Capture each member's pre-swap slot so the sprites GLIDE between positions
+	// (StampSwapSlide) instead of teleporting once the live slots flip.
+	fromRowA, fromColA := g.Party[a].Row, g.Party[a].Col
+	fromRowB, fromColB := g.Party[partner].Row, g.Party[partner].Col
 	// Tactical, live-only: trade the on-screen (live) slots for this fight. The
 	// preferred Home formation is untouched and restored next battle.
 	core.SwapLiveSlots(g.Party, a, partner)
+	core.StampSwapSlide(&g.Party[a], fromRowA, fromColA)
+	core.StampSwapSlide(&g.Party[partner], fromRowB, fromColB)
 	setBattleMessage(g, core.SwapPlacesMessage(actorName, partnerName))
 	finishActorTurn(g)
 }
@@ -526,6 +532,9 @@ func performFlee(g *core.GameState) {
 		core.SnapPlayerToTile(&g.Player)
 		g.Player.Anim = core.Animation{}
 	}
+	// Fleeing forfeits all progress against the pack: fully heal + revive its
+	// members so re-engaging starts fresh (escape from death, not attrition).
+	core.RestorePackFull(pack)
 	leaveBattle(g, fmt.Sprintf("%s leads the party in a hasty retreat!", member.Name))
 }
 
@@ -534,15 +543,26 @@ func updateEnemyTargeting(g *core.GameState) {
 }
 
 // confirmEnemyTarget commits the pending action on the cursor's foe — an
-// unreachable one (greyed back-row) buzzes + logs rather than burning the turn.
+// unreachable one (greyed) buzzes + logs the reason rather than burning the turn.
 // Top-level (not a closure) so updateTargetPicker stays alloc-free.
 func confirmEnemyTarget(g *core.GameState) {
-	if !core.BattleEnemyTargetReachable(g, g.Battle.EnemyIndex) {
+	slot := g.Battle.EnemyIndex
+	if !core.BattleEnemyTargetReachable(g, slot) {
 		audio.Play(audio.SoundInputMiss)
-		setBattleMessage(g, msgBackRowMeleeTarget)
+		setBattleMessage(g, unreachableMeleeTargetMsg(g, slot))
 		return
 	}
 	beginPendingAction(g)
+}
+
+// unreachableMeleeTargetMsg explains WHY a melee attack can't hit the cursor's foe:
+// a flying foe is melee-immune (needs a ranged weapon), else it's a covered back-row foe.
+func unreachableMeleeTargetMsg(g *core.GameState, slot int) string {
+	members := core.BattleMembers(g)
+	if slot >= 0 && slot < len(members) && core.EnemyInfoFor(members[slot]).Flying {
+		return msgFlyingMeleeTarget
+	}
+	return msgBackRowMeleeTarget
 }
 
 func updatePartyTargeting(g *core.GameState) {

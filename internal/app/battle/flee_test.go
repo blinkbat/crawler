@@ -69,6 +69,42 @@ func TestPerformFlee_SuccessSkipsRepositionWhenTileOccupied(t *testing.T) {
 	}
 }
 
+// TestPerformFlee_SuccessRestoresPack: a successful flee fully heals + revives the
+// abandoned pack so re-engaging starts fresh (fleeing forfeits all progress).
+func TestPerformFlee_SuccessRestoresPack(t *testing.T) {
+	g := newTestState()
+	for i := range g.Party {
+		g.Party[i].Level = 5 // high flee chance vs level-1 rats
+	}
+	g.Player.TileX, g.Player.TileZ = 2, 2
+	g.Battle.FleeReturnX, g.Battle.FleeReturnZ = 5, 6
+
+	pack := core.ActivePack(g)
+	// Wound one rat and down the other, plus stick a status on the survivor.
+	pack.Members[0].HP = 1
+	pack.Members[0].PoisonTurns = 3
+	pack.Members[1].HP = 0
+	pack.Members[1].Alive = false
+
+	chance := core.FleeChance(core.PartyAverageLevel(g.Party), core.PackAverageLevel(*pack))
+	g.RNG = forceFleeSeed(chance, true)
+
+	performFlee(g)
+
+	for i := range pack.Members {
+		m := pack.Members[i]
+		if !m.Alive {
+			t.Errorf("member %d still downed after flee — should be revived", i)
+		}
+		if m.HP != m.MaxHP {
+			t.Errorf("member %d HP = %d after flee, want full %d", i, m.HP, m.MaxHP)
+		}
+		if m.PoisonTurns != 0 {
+			t.Errorf("member %d kept PoisonTurns=%d after flee, want 0", i, m.PoisonTurns)
+		}
+	}
+}
+
 // TestPerformFlee_FailureKeepsBattleAndPosition: a failed flee burns the turn — battle continues, party unmoved.
 func TestPerformFlee_FailureKeepsBattleAndPosition(t *testing.T) {
 	g := newTestState()

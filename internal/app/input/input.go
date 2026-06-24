@@ -17,6 +17,10 @@ const stickEdgeThreshold = float32(0.55)
 // resting drift doesn't pan; < stickEdgeThreshold because free-look is analog.
 const lookStickDeadzone = float32(0.15)
 
+// mapStickDeadzone is the left-stick centered band for the Map tab's analog pan —
+// same idea as lookStickDeadzone so resting drift doesn't creep the view.
+const mapStickDeadzone = float32(0.18)
+
 // stickEdgeKey identifies one of the four stick directions for the edge memory.
 type stickEdgeKey int
 
@@ -518,6 +522,54 @@ func LookStick() (float32, float32) {
 	y := applyDeadzone(rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisRightY), lookStickDeadzone)
 	return x, y
 }
+
+// MapPanInput is the Map tab's pan vector (+X right, +Y toward +Z/south): the left
+// stick (analog, deadzoned) plus held d-pad and arrow/WASD keys, each axis summed
+// then clamped to [-1, 1]. The caller scales by zoom + dt and accumulates into tiles.
+func MapPanInput() (float32, float32) {
+	var x, y float32
+	if gamepadConnected() {
+		x += applyDeadzone(rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisLeftX), mapStickDeadzone)
+		y += applyDeadzone(rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisLeftY), mapStickDeadzone)
+		if rl.IsGamepadButtonDown(gamepadID, rl.GamepadButtonLeftFaceLeft) {
+			x -= 1
+		}
+		if rl.IsGamepadButtonDown(gamepadID, rl.GamepadButtonLeftFaceRight) {
+			x += 1
+		}
+		if rl.IsGamepadButtonDown(gamepadID, rl.GamepadButtonLeftFaceUp) {
+			y -= 1
+		}
+		if rl.IsGamepadButtonDown(gamepadID, rl.GamepadButtonLeftFaceDown) {
+			y += 1
+		}
+	}
+	if rl.IsKeyDown(rl.KeyLeft) || rl.IsKeyDown(rl.KeyA) {
+		x -= 1
+	}
+	if rl.IsKeyDown(rl.KeyRight) || rl.IsKeyDown(rl.KeyD) {
+		x += 1
+	}
+	if rl.IsKeyDown(rl.KeyUp) || rl.IsKeyDown(rl.KeyW) {
+		y -= 1
+	}
+	if rl.IsKeyDown(rl.KeyDown) || rl.IsKeyDown(rl.KeyS) {
+		y += 1
+	}
+	return core.Clamp(x, -1, 1), core.Clamp(y, -1, 1)
+}
+
+// MapZoomAxis is the right-stick vertical for Map zoom (deadzoned); negative = up =
+// zoom in. (0 when no pad.)
+func MapZoomAxis() float32 {
+	if !gamepadConnected() {
+		return 0
+	}
+	return applyDeadzone(rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisRightY), lookStickDeadzone)
+}
+
+// MapZoomWheel is the mouse-wheel zoom notch (+ = scroll up = zoom in).
+func MapZoomWheel() float32 { return rl.GetMouseWheelMove() }
 
 // --- Mouse / pointer (secondary input) ---------------------------------------
 // Drives only Equipment slot-picker clicks and right-drag free-look, funneled

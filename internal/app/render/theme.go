@@ -242,11 +242,9 @@ var (
 	timingHeldColor   = rl.NewColor(255, 244, 144, 255)
 	seqOkColor        = mute(rl.NewColor(140, 232, 168, 255))
 	seqFailColor      = mute(rl.NewColor(228, 96, 96, 255))
-	// timingWarnColor: low-time amber before red; timingCommitColor: late
-	// commit-zone orange; timingTickColor: charge-segment separator.
-	timingWarnColor   = rl.NewColor(232, 196, 92, 235)
-	timingCommitColor = rl.NewColor(255, 168, 96, 200)
-	timingTickColor   = rl.NewColor(28, 32, 44, 235)
+	// timingWarnColor: low-time amber before red; timingTickColor: charge-segment separator.
+	timingWarnColor = rl.NewColor(232, 196, 92, 235)
+	timingTickColor = rl.NewColor(28, 32, 44, 235)
 
 	// Timing-grade ramps — attack (warm red→cream) and defend (cool red→ice)
 	// flash tones, indexed Miss..Excellent by qualityVisuals. NOT muted (the
@@ -351,6 +349,8 @@ var (
 	// borderActive.)
 	chestBodyColor = rl.NewColor(168, 116, 70, 255)
 	chestLidColor  = rl.NewColor(196, 148, 92, 255)
+	// chestInteriorColor — the dark "hole" inside an opened/looted chest (no lid).
+	chestInteriorColor = rl.NewColor(26, 18, 12, 255)
 	// chestMetalDark/Bright — the chest's band + lockplate tints (3D prop). Body and
 	// lid MUST share them, so the literals live here beside the chest body/lid tokens.
 	chestMetalDark   = rl.NewColor(140, 108, 64, 255)

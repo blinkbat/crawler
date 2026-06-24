@@ -495,13 +495,9 @@ func forEachLivingEnemy(g *core.GameState, fn func(slot int, enemy *core.Enemy))
 // magic AoE (Fireball / Arc Bolt / Cone of Cold) sweeps the whole pack. One source so
 // every sweep respects reach.
 func forEachTargetableEnemy(g *core.GameState, skill core.SkillID, fn func(slot int, enemy *core.Enemy)) {
-	meleeOnly := core.SkillAttackClassFor(skill).IsMelee()
 	members := core.BattleMembers(g)
 	for slot := range members {
-		if !members[slot].Alive {
-			continue
-		}
-		if meleeOnly && !core.EnemyMeleeReachable(members, slot) {
+		if !core.AoEReachesEnemy(members, skill, slot) {
 			continue
 		}
 		fn(slot, core.BattleMemberAt(g, slot))
@@ -1598,23 +1594,6 @@ func tickEnemyTauntAfterTurn(g *core.GameState, actor core.ActorRef) {
 	enemy.TauntTurns--
 }
 
-// forcedTauntTarget returns the slot the attacking enemy is taunted onto, if the
-// pull is live AND the taunter is still reachable. ok=false falls back to round-robin.
-func forcedTauntTarget(g *core.GameState) (int, bool) {
-	enemy := core.BattleMemberAt(g, g.Battle.EnemyAttacker)
-	if enemy == nil || enemy.TauntTurns <= 0 {
-		return -1, false
-	}
-	t := enemy.TauntedBy
-	if !partyIndexValid(g, t) {
-		return -1, false
-	}
-	if g.Party[t].HP <= 0 || g.Party[t].Ingested {
-		return -1, false
-	}
-	return t, true
-}
-
 // --- Poison Cloud (Thief, sequence AoE toxin + per-target Poison) ---
 
 func applyPoisonCloud(g *core.GameState, quality int) bool {
@@ -2495,7 +2474,7 @@ func resolveEnemyMiss(g *core.GameState, slot int) {
 	if !ok {
 		return
 	}
-	target := pickEnemyAttackTarget(g, true) // basic attack = melee, front row only
+	target := pickEnemyAttackTarget(g)
 	if target < 0 {
 		return
 	}
@@ -2510,7 +2489,7 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	if !ok {
 		return false
 	}
-	target := pickEnemyAttackTarget(g, true) // basic attack = melee, front row only
+	target := pickEnemyAttackTarget(g)
 	if target < 0 {
 		return false
 	}
@@ -2578,18 +2557,10 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 
 // pickEnemyAttackTarget chooses (and commits the cursor to) the party member the
 // acting enemy hits, round-robin via EnemyAttackCursor (separate from PartyTarget).
-// melee=true restricts to the effective front row; a live Taunt overrides any row.
-func pickEnemyAttackTarget(g *core.GameState, melee bool) int {
-	if forced, ok := forcedTauntTarget(g); ok {
-		g.Battle.EnemyAttackCursor = forced
-		return forced
-	}
-	var target int
-	if melee {
-		target = core.PeekNextMeleeEnemyTarget(g)
-	} else {
-		target = core.PeekNextEnemyTarget(g)
-	}
+// The melee/front-row gate and Taunt override live in core.PeekEnemyAttackerTarget
+// so the render forecast picks the identical slot.
+func pickEnemyAttackTarget(g *core.GameState) int {
+	target := core.PeekEnemyAttackerTarget(g)
 	if target >= 0 {
 		g.Battle.EnemyAttackCursor = target
 	}

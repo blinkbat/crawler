@@ -278,8 +278,18 @@ func SetBattleStartFormation(party []PartyMember, side EngageSide) {
 	for i := range party {
 		party[i].Row = AmbushLiveRow(party[i].HomeRow, party[i].HomeCol, side)
 		party[i].Col = AmbushLiveCol(party[i].HomeRow, party[i].HomeCol, side)
+		party[i].SwapSlide = 0 // no carried-over slide into a fresh formation
 	}
 	ShuntPartyFormation(party)
+}
+
+// StampSwapSlide arms the formation-Swap glide on a member: it eases from (fromRow,
+// fromCol) — its pre-swap slot — to its current live slot over SwapSlideDuration.
+// Call AFTER the live slots are exchanged, with each member's OLD slot.
+func StampSwapSlide(m *PartyMember, fromRow Row, fromCol Col) {
+	m.SwapFromRow = fromRow
+	m.SwapFromCol = fromCol
+	m.SwapSlide = SwapSlideDuration
 }
 
 // ShuntPartyFormation pulls living members into the front row and sinks the downed

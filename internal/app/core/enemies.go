@@ -638,6 +638,38 @@ func NewEnemy(kind EnemyKind) Enemy {
 	}
 }
 
+// RestorePackFull resets every member of a pack to its spawn condition: full HP,
+// revived, steal loot + Armor restored from the definition, and all combat
+// statuses / hit-animations cleared. Re-shunts the formation so the revived ranks
+// pack front-first. Used on a successful Flee — abandoning a fight forfeits ALL
+// progress against the pack (fleeing is an escape from death, not attrition).
+func RestorePackFull(pack *Pack) {
+	if pack == nil {
+		return
+	}
+	for i := range pack.Members {
+		m := &pack.Members[i]
+		def := EnemyInfoFor(*m)
+		m.HP = m.MaxHP
+		m.Alive = true
+		m.Item = def.Item
+		m.Armor = def.Armor
+		m.BurnTurns = 0
+		m.SleepTurns = 0
+		m.StunTurns = 0
+		m.PoisonTurns = 0
+		m.BleedTurns = 0
+		m.TauntTurns = 0
+		m.TauntedBy = 0
+		m.Debuffs = nil
+		m.SkillCastCount = nil
+		m.DeathFade = 0
+		m.AttackBump = 0
+		m.HitAnim = HitAnim{}
+	}
+	ShuntEnemyFormation(pack.Members)
+}
+
 func EnemySingularNoun(enemy Enemy) string {
 	return enemyGoverningDef(&enemy).SingularNoun
 }

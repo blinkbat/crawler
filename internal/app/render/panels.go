@@ -36,9 +36,6 @@ func panelsMapFooterText(zoom int) string {
 	return panelsMapFooterCache.text
 }
 
-// panelsMapFooterMeasureCache memoizes the footer width so the hint bar's start X isn't re-shaped per frame.
-var panelsMapFooterMeasureCache measureCache
-
 // panelTabDrawers dispatches by tab index to the per-tab body drawer (init asserts none nil).
 var panelTabDrawers = [core.PanelTabCount]func(*core.GameState, Resources, rl.Rectangle){
 	core.PanelTabStats:     drawPanelsStats,
@@ -49,10 +46,12 @@ var panelTabDrawers = [core.PanelTabCount]func(*core.GameState, Resources, rl.Re
 	core.PanelTabMap:       drawPanelsMap,
 }
 
-// footerHintMemberTabs is the shared hint for member-cursor-only tabs (Stats/Quests/Map).
-var footerHintMemberTabs = []HintSeg{
+// footerHintMapTab is the Map tab's controls — shown ONLY in the bottom footer bar
+// (no duplicate hint inside the map body). Pan = left stick, zoom = right stick.
+var footerHintMapTab = []HintSeg{
 	Hint("Tabs", GlyphLB, GlyphRB),
-	Hint("Member", GlyphLeftRight),
+	Hint("Pan", GlyphLeftStick),
+	Hint("Zoom", GlyphRightStick),
 	Hint("Close", GlyphB),
 }
 
@@ -103,7 +102,7 @@ var panelTabFooterHints = [core.PanelTabCount][]HintSeg{
 		Hint("Scroll", GlyphUpDown),
 		Hint("Close", GlyphB),
 	},
-	core.PanelTabMap: footerHintMemberTabs,
+	core.PanelTabMap: footerHintMapTab,
 }
 
 func init() {
@@ -1378,12 +1377,10 @@ func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 	rl.DrawCircleV(rl.NewVector2(crX, crY), 31, fadeColor(shadowHeavy, 0.34))
 	drawCompassRose(crX, crY, 48, font)
 
-	// Map footer — zoom indicator (area name is already in the top info strip), then the control hint.
+	// Map footer — zoom indicator only (area name is in the top info strip; the pan/
+	// zoom CONTROLS live in the shared bottom footer bar, not duplicated here).
 	footerY := body.Y + body.Height - 20
-	footer := panelsMapFooterText(zoom)
-	drawTextWithShadow(font, footer, body.X, footerY, FontSmall, textDim)
-	footerW := panelsMapFooterMeasureCache.measure(font, footer, FontSmall, canonicalSpacing(FontSmall)).X
-	DrawHintBarLeft(font, []HintSeg{Hint("Pan", GlyphLeftRight), Hint("Zoom", GlyphUpDown)}, body.X+footerW+hintSegGap, footerY, FontSmall)
+	drawTextWithShadow(font, panelsMapFooterText(zoom), body.X, footerY, FontSmall, textDim)
 }
 
 // drawCompassRose paints an 8-point compass rose at (cx,cy) within diameter d: cardinal + diagonal points,
