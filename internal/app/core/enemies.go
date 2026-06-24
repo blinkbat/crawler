@@ -638,15 +638,24 @@ func NewEnemy(kind EnemyKind) Enemy {
 	}
 }
 
-// RestorePackFull resets every member of a pack to its spawn condition: full HP,
-// revived, steal loot + Armor restored from the definition, and all combat
-// statuses / hit-animations cleared. Re-shunts the formation so the revived ranks
-// pack front-first. Used on a successful Flee — abandoning a fight forfeits ALL
-// progress against the pack (fleeing is an escape from death, not attrition).
+// RestorePackFull resets a pack to its spawn condition: drops mid-fight summons
+// (Raise Bones) so the roster reverts to what was authored, then for the survivors
+// restores full HP, revives the downed, restores steal loot + Armor from the
+// definition, and clears all combat statuses / hit-animations. Re-shunts the
+// formation so the revived ranks pack front-first. Used on a successful Flee —
+// abandoning a fight forfeits ALL progress against the pack (escape, not attrition).
 func RestorePackFull(pack *Pack) {
 	if pack == nil {
 		return
 	}
+	// Drop summoned members in place (preserve authored order).
+	kept := pack.Members[:0]
+	for _, m := range pack.Members {
+		if !m.Summoned {
+			kept = append(kept, m)
+		}
+	}
+	pack.Members = kept
 	for i := range pack.Members {
 		m := &pack.Members[i]
 		def := EnemyInfoFor(*m)

@@ -422,6 +422,7 @@ func handleEnemyRaiseBones(ctx enemySpellCtx) bool {
 		return false
 	}
 	skeleton := core.NewEnemy(core.EnemySkeleton)
+	skeleton.Summoned = true // a Flee drops summons so the pack reverts to its authored roster
 	pack.Members = append(pack.Members, skeleton)
 	// The skeleton enters the queue automatically — beginNewRound rebuilds it from
 	// the expanded pack.Members, so it acts the round AFTER this cast. The append

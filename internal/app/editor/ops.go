@@ -1497,6 +1497,19 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 		}
 		chestBlock[c.TileZ*w+c.TileX] = true
 	}
+	// Pre-mark door tiles blocked too: stepping onto a door fires a transition, so
+	// the player can't walk THROUGH one to reach tiles beyond — matching runtime.
+	// Exempt the start tile (the player spawns there even if it's an entrance door).
+	doorBlock := make([]bool, w*h)
+	for _, d := range a.DoorSpawns {
+		if d.TileX < 0 || d.TileX >= w || d.TileZ < 0 || d.TileZ >= h {
+			continue
+		}
+		if d.TileX == a.StartTileX && d.TileZ == a.StartTileZ {
+			continue
+		}
+		doorBlock[d.TileZ*w+d.TileX] = true
+	}
 	visited := make([]bool, w*h)
 	stack := [][2]int{{a.StartTileX, a.StartTileZ}}
 	for len(stack) > 0 {
@@ -1510,7 +1523,7 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 		if visited[idx] {
 			continue
 		}
-		if a.BlockedAt(px, pz) || chestBlock[idx] {
+		if a.BlockedAt(px, pz) || chestBlock[idx] || doorBlock[idx] {
 			continue
 		}
 		visited[idx] = true
@@ -1596,7 +1609,23 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 			doorsUnreachable++
 			continue
 		}
-		if !visited[d.TileZ*w+d.TileX] {
+		// Door tiles are blocked in the BFS (you step onto one to transition, not
+		// through it), so reachable = the tile is the start (visited) OR a neighbour
+		// is visited (player can step onto it) — same rule as chests.
+		reachable := visited[d.TileZ*w+d.TileX]
+		if !reachable {
+			for _, nd := range [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
+				nx, nz := d.TileX+nd[0], d.TileZ+nd[1]
+				if nx < 0 || nx >= w || nz < 0 || nz >= h {
+					continue
+				}
+				if visited[nz*w+nx] {
+					reachable = true
+					break
+				}
+			}
+		}
+		if !reachable {
 			doorsUnreachable++
 		}
 	}

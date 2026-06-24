@@ -479,8 +479,10 @@ func updateSoundsModal(s *State) Action {
 	mousePressed := rl.IsMouseButtonPressed(rl.MouseLeftButton)
 	mouseReleased := rl.IsMouseButtonReleased(rl.MouseLeftButton)
 
-	// Wheel scrolls the params slider body when the pointer is over it.
-	if wheel := rl.GetMouseWheelMove(); wheel != 0 && pointIn(mp, layout.paramsViewport) {
+	// Wheel scrolls the params slider body when the pointer is over it. Suppressed
+	// mid-drag: scrolling would shift the dragged track under the cursor (its geometry
+	// is this frame's pre-scroll layout), snapping the value.
+	if wheel := rl.GetMouseWheelMove(); wheel != 0 && soundDrag.idx < 0 && pointIn(mp, layout.paramsViewport) {
 		s.soundParamScroll = core.Clamp(s.soundParamScroll-wheel*soundRowH, 0, layout.paramMaxScroll)
 	}
 

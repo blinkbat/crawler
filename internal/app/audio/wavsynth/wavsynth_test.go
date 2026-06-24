@@ -6,6 +6,22 @@ import (
 	"testing"
 )
 
+// TestSynthChord_DegenerateDuration: a non-positive duration must return no samples,
+// NOT fall through to SynthSweep (whose SynthShapeParams pins duration<=0 to a 30s
+// maxDuration). Bounds the degenerate fallback to silence.
+func TestSynthChord_DegenerateDuration(t *testing.T) {
+	if got := SynthChord(0, []float64{440}, 0.5); len(got) != 0 {
+		t.Fatalf("SynthChord(0,…) = %d samples, want 0 (no 30s fallback)", len(got))
+	}
+	if got := SynthChord(-1, []float64{440}, 0.5); len(got) != 0 {
+		t.Fatalf("SynthChord(-1,…) = %d samples, want 0", len(got))
+	}
+	// Positive duration with no tones still yields a default note (not empty).
+	if got := SynthChord(0.05, nil, 0.5); len(got) == 0 {
+		t.Fatal("SynthChord(0.05, nil) should yield a default sine, got empty")
+	}
+}
+
 // TestBuildWAV_HeaderLayout pins the WAV byte structure (RIFF/WAVE/fmt/data).
 // Field drift silently breaks raylib's LoadWaveFromMemory — Init and Play both
 // succeed even on a malformed wave.

@@ -935,6 +935,10 @@ type Enemy struct {
 	// PerBattleCastLimit; usableEnemySkills drops a capped skill once it hits the
 	// limit. Lazy-init on first cast (Necromancer's RaiseBones is the headline user).
 	SkillCastCount map[SkillID]int
+
+	// Summoned marks a mid-fight addition (Necromancer's Raise Bones) so a Flee can
+	// drop it — the abandoned pack reverts to its authored roster, not authored+summons.
+	Summoned bool
 }
 
 // ActorRef points at one turn-queue slot: IsParty=true → Index into Party, else

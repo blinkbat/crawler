@@ -332,7 +332,13 @@ func SynthSweep(duration, startHz, endHz, volume, attack, release float64) []int
 // envelope.
 func SynthChord(duration float64, freqs []float64, volume float64) []int16 {
 	samples := int(duration * SampleRate)
-	if samples <= 0 || len(freqs) == 0 {
+	if samples <= 0 {
+		// No time → no samples. (A non-positive duration must NOT fall through to
+		// SynthSweep, whose SynthShapeParams pins duration<=0 to a 30s maxDuration.)
+		return nil
+	}
+	if len(freqs) == 0 {
+		// Has time but no tones: a default sine so the cue isn't silent.
 		return SynthSweep(duration, 440, 440, volume, 0.005, 0.02)
 	}
 	pcm := make([]int16, samples)

@@ -2,6 +2,43 @@ package core
 
 import "testing"
 
+// TestRestorePackFull_DropsSummonsRevivesAuthored: a flee reset drops mid-fight
+// summons (so the pack reverts to its authored roster) and revives + full-heals the
+// rest with statuses cleared.
+func TestRestorePackFull_DropsSummonsRevivesAuthored(t *testing.T) {
+	pack := &Pack{Members: []Enemy{
+		{Kind: EnemyRat, HP: 1, MaxHP: 10, Alive: true, PoisonTurns: 2},
+		{Kind: EnemySkeleton, HP: 0, MaxHP: 8, Alive: false, Summoned: true}, // raised mid-fight
+		{Kind: EnemyRat, HP: 0, MaxHP: 10, Alive: false},                     // authored, downed
+	}}
+	RestorePackFull(pack)
+	if len(pack.Members) != 2 {
+		t.Fatalf("summoned member not dropped: %d members, want 2", len(pack.Members))
+	}
+	for i := range pack.Members {
+		m := pack.Members[i]
+		if m.Summoned {
+			t.Errorf("member %d still marked summoned", i)
+		}
+		if !m.Alive || m.HP != m.MaxHP || m.PoisonTurns != 0 {
+			t.Errorf("member %d not fully restored: alive=%v HP=%d/%d poison=%d", i, m.Alive, m.HP, m.MaxHP, m.PoisonTurns)
+		}
+	}
+}
+
+// TestDropCrystalsOnPacks: a crystal sharing a pack's tile is removed (both block).
+func TestDropCrystalsOnPacks(t *testing.T) {
+	packs := []Pack{{TileX: 3, TileZ: 4, Members: []Enemy{{Kind: EnemyRat, Alive: true}}}}
+	crystals := []Crystal{
+		{TileX: 1, TileZ: 1, Charged: true}, // clear
+		{TileX: 3, TileZ: 4, Charged: true}, // on the pack → dropped
+	}
+	got := dropCrystalsOnPacks(crystals, packs)
+	if len(got) != 1 || got[0].TileX != 1 || got[0].TileZ != 1 {
+		t.Fatalf("expected only the (1,1) crystal to survive, got %+v", got)
+	}
+}
+
 // TestTickCrystalRecharge_ReArmsAtCeiling: re-arms at CrystalRechargeSteps, never over-charges.
 func TestTickCrystalRecharge_ReArmsAtCeiling(t *testing.T) {
 	g := &GameState{Crystals: []Crystal{

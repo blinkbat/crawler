@@ -97,14 +97,20 @@ func NewGameState(area AreaDefinition) GameState {
 	if area.InBounds(startX, startZ) {
 		visited[startZ][startX] = true
 	}
+	packs := placePacks(&area)
+	// Crystals block their tile, so drop any that coincide with a pack's (possibly
+	// runtime-snapped) tile — two blockers on one cell would trap the pack and render
+	// it embedded in the crystal.
+	crystals := placeCrystals(area)
+	crystals = dropCrystalsOnPacks(crystals, packs)
 	g := GameState{
 		Area:       area,
 		Player:     NewPlayer(startX, startZ, area.StartFacing),
 		Party:      NewParty(),
-		Packs:      placePacks(&area),
+		Packs:      packs,
 		Chests:     placeChests(area),
 		Doors:      placeDoors(area),
-		Crystals:   placeCrystals(area),
+		Crystals:   crystals,
 		Visited:    visited,
 		ChestOpen:  -1,
 		DoorPrompt: -1,
@@ -273,6 +279,18 @@ func placeCrystals(a AreaDefinition) []Crystal {
 		out = append(out, Crystal{TileX: c.TileX, TileZ: c.TileZ, Charge: CrystalRechargeSteps, Charged: true})
 	}
 	return out
+}
+
+// dropCrystalsOnPacks removes crystals sharing a tile with a pack (crystals block,
+// so an overlap is two blockers on one cell). Filters in place; order preserved.
+func dropCrystalsOnPacks(crystals []Crystal, packs []Pack) []Crystal {
+	kept := crystals[:0]
+	for _, c := range crystals {
+		if PackIndexAtTile(packs, c.TileX, c.TileZ) < 0 {
+			kept = append(kept, c)
+		}
+	}
+	return kept
 }
 
 // DefaultEntranceCrystalSpawns returns the auto-placed entrance crystal position

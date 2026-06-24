@@ -18,10 +18,15 @@ func TestWrapAngle(t *testing.T) {
 		{-1.5 * math.Pi, 0.5 * math.Pi}, // -270° → +90°
 		{3 * math.Pi, math.Pi},          // multiple wraps
 		{0.5 * math.Pi, 0.5 * math.Pi},  // already short
+		{float32(math.Inf(1)), 0},       // non-finite folds to 0 (would loop forever)
+		{float32(math.Inf(-1)), 0},
 	}
 	for _, c := range cases {
 		if got := WrapAngle(c.in); math.Abs(float64(got-c.want)) > eps {
 			t.Errorf("WrapAngle(%v) = %v, want %v", c.in, got, c.want)
 		}
+	}
+	if got := WrapAngle(float32(math.NaN())); got != 0 {
+		t.Errorf("WrapAngle(NaN) = %v, want 0", got)
 	}
 }

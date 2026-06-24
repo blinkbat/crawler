@@ -44,8 +44,15 @@ func toggleIsoView(s *State) {
 	s.flash("Top-down view")
 }
 
-// Close releases the editor's GPU resources (the 3D-view render target). Idempotent.
-func (s *State) Close() { s.freeIsoRT() }
+// Close releases the editor's GPU resources: the 3D-view render target plus the
+// visualizer/object-browser preview textures (their close is otherwise reached only
+// via closeModal, so exiting to title with one open would leak it). Idempotent.
+func (s *State) Close() {
+	s.freeIsoRT()
+	render.CloseFoePreview()
+	render.ClosePartyPreview()
+	render.CloseObjectPreview()
+}
 
 // freeIsoRT releases the off-screen iso target if allocated (idempotent).
 func (s *State) freeIsoRT() {

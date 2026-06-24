@@ -328,6 +328,10 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	// Sprite exemption ("Filter Sprites"): when exempt, billboards draw crisp on
 	// top (DrawCrispSpritePass) so their baked FX shows through; else inline.
 	exemptSprites := filtered && !game.RetroFilterSprites
+	// In battle with a filter active, the FX layer (particles + hit-glyphs) routes
+	// through the retro shader (DrawFilteredCombatFX) so the combat juice crunches
+	// with the world instead of popping crisp — independent of the sprite exemption.
+	battleFiltered := filtered && game.Battle.Active()
 	// 3D SCENE pass — sky, geometry, chests, doors, and (unless exempt) sprites.
 	rl.BeginMode3D(camera)
 	render.DrawWorld(camera, game, assets)
@@ -347,7 +351,10 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 		render.DrawPartySprites(camera, game, assets)
 		// VFX in the 3D pass so particles depth-sort; after the party draw so
 		// sparks paint over the sprite. TickAndDrawVFX drains VFXQueue (mutates g).
-		render.TickAndDrawVFX(camera, game, assets)
+		// In battle+filtered the FX layer is deferred to DrawFilteredCombatFX below.
+		if !battleFiltered {
+			render.TickAndDrawVFX(camera, game, assets)
+		}
 		if inBattle {
 			rl.EnableDepthTest()
 		}
@@ -358,9 +365,14 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	if filtered {
 		render.EndRetroCapture(game, skyCrisp)
 		// Crisp sprites over it, reusing the capture's depth so they still occlude.
-		// The state-mutating VFX tick runs once/frame: here when exempt, inline above otherwise.
+		// The state-mutating VFX tick runs once/frame: here when exempt (and NOT
+		// battle-filtered, where the FX pass owns it), inline above otherwise.
 		if exemptSprites {
-			render.DrawCrispSpritePass(camera, game, assets)
+			render.DrawCrispSpritePass(camera, game, assets, !battleFiltered)
+		}
+		// Filtered combat FX (particles + hit-glyphs) over the sprites.
+		if battleFiltered {
+			render.DrawFilteredCombatFX(camera, game, assets)
 		}
 	}
 	// Ambient rain — above the world, below popups/HUD. No-op when clear.
@@ -371,8 +383,11 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	render.DrawChestPrompt(camera, game, assets)
 	render.DrawCrystalPrompt(camera, game, assets)
 	// Hit-glyph shapes over struck targets — before the damage popups so the
-	// number floats on top of the glyph.
-	render.DrawHitGlyphs(camera, game, assets)
+	// number floats on top of the glyph. In battle+filtered they're drawn (filtered)
+	// inside DrawFilteredCombatFX above, so skip the crisp draw here.
+	if !battleFiltered {
+		render.DrawHitGlyphs(camera, game, assets)
+	}
 	render.DrawDamagePopups(camera, game, assets)
 	render.DrawQualityPopup(camera, game, assets)
 	render.DrawDebugOverlay(camera, game, assets)

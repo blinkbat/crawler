@@ -10,21 +10,30 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// timingHeadingStyle pairs a bar heading's text with its base-fill tint so a dispatch
-// site can't mismatch the two. The tints live in theme.go's palette block.
+// noPromptGlyph marks a timing heading whose minigame shows directional arrows in
+// the bar itself (the button is self-evident) — so no single-button glyph is
+// appended. Distinct from hitglyph.go's glyphNone (a different type).
+const noPromptGlyph = InputGlyph(-1)
+
+// timingHeadingStyle pairs a bar heading's text with its base-fill tint and the
+// button glyph the minigame wants, so a dispatch site can't mismatch them. The
+// tints live in theme.go's palette block.
 type timingHeadingStyle struct {
 	text  string
 	color rl.Color
+	glyph InputGlyph // button to press; noPromptGlyph when the bar shows arrows
 }
 
-// Per-bar headings (the press bar flips Strike/Defend by phase; recall flips Memo/Recall).
+// Per-bar headings (the press bar flips Strike/Defend by phase; recall flips Memo/
+// Recall). glyph: Strike/Charge/Reels = Confirm (A), Defend = Back (B); the arrow
+// minigames (Memorize/Recall, and the Combo sequence below) carry no button glyph.
 var (
-	headStrike       = timingHeadingStyle{"STRIKE!", timingHeadingStrikeColor}
-	headDefend       = timingHeadingStyle{"DEFEND!", timingHeadingDefendColor}
-	headCharge       = timingHeadingStyle{"CHARGE!", timingHeadingChargeColor}
-	headReels        = timingHeadingStyle{"STOP THE REELS!", timingHeadingReelsColor}
-	headRecallMemo   = timingHeadingStyle{"MEMORIZE!", timingHeadingRecallMemoColor}
-	headRecallRecall = timingHeadingStyle{"RECALL!", timingHeadingRecallRecallColor}
+	headStrike       = timingHeadingStyle{"STRIKE!", timingHeadingStrikeColor, GlyphA}
+	headDefend       = timingHeadingStyle{"DEFEND!", timingHeadingDefendColor, GlyphB}
+	headCharge       = timingHeadingStyle{"CHARGE!", timingHeadingChargeColor, GlyphA}
+	headReels        = timingHeadingStyle{"STOP THE REELS!", timingHeadingReelsColor, GlyphA}
+	headRecallMemo   = timingHeadingStyle{"MEMORIZE!", timingHeadingRecallMemoColor, noPromptGlyph}
+	headRecallRecall = timingHeadingStyle{"RECALL!", timingHeadingRecallRecallColor, noPromptGlyph}
 )
 
 // timingHeadingCombo's tint is the thief-green sequence color (seqOkColor), not a
@@ -301,9 +310,13 @@ func timingBarLayout() (x, y, barW, barH float32) {
 	return
 }
 
+// timingHeadingGlyphGap separates the heading word from its button glyph ("DEFEND! [B]").
+const timingHeadingGlyphGap = float32(10)
+
 // drawTimingHeading paints the centered prompt above the bar, shifting to the quality tint
-// during the flash hold.
-func drawTimingHeading(font rl.Font, text string, x, barW, y float32, baseCol rl.Color, flashing bool, flashCol rl.Color) {
+// during the flash hold. When glyph != noPromptGlyph it appends the button to press
+// (e.g. "STRIKE! [A]") so a non-obvious minigame's input reads at a glance.
+func drawTimingHeading(font rl.Font, text string, glyph InputGlyph, x, barW, y float32, baseCol rl.Color, flashing bool, flashCol rl.Color) {
 	size := FontHeading
 	col := baseCol
 	if flashing {
@@ -311,9 +324,17 @@ func drawTimingHeading(font rl.Font, text string, x, barW, y float32, baseCol rl
 		size = FontTitle // flash punch, next size up on the locked scale
 	}
 	measure := measureTimingHeading(font, text, size)
-	hx := x + (barW-measure.X)/2
+	gap, glyphW := float32(0), float32(0)
+	if glyph != noPromptGlyph {
+		glyphW = glyphWidth(glyph, size)
+		gap = timingHeadingGlyphGap
+	}
+	hx := x + (barW-measure.X-gap-glyphW)/2
 	hy := y - measure.Y - 6
 	drawEngravedTextSpaced(font, text, hx, hy, size, 1.5, col)
+	if glyph != noPromptGlyph {
+		drawInputGlyph(font, glyph, hx+measure.X+gap, hy, size, 1)
+	}
 }
 
 // timingHeadingMeasureCache memoizes drawTimingHeading's measure (keyed on the size flip).
@@ -430,7 +451,7 @@ func drawPressBar(timing core.TimingState, g *core.GameState, assets Resources, 
 	drawX := x + xOff
 	drawY := y + yOff
 
-	drawTimingHeading(assets.hudFont, heading, drawX, barW, drawY, baseCol, flashing, qualityColor(timing.Quality, isDefend))
+	drawTimingHeading(assets.hudFont, heading, hs.glyph, drawX, barW, drawY, baseCol, flashing, qualityColor(timing.Quality, isDefend))
 
 	// Track (flash hold fades it to the quality color).
 	drawTimingTrack(drawX, drawY, barW, drawnH, timing.Quality, isDefend, flashing, g.Battle.TimingFlash)
@@ -491,7 +512,7 @@ func drawChargeBar(timing core.TimingState, g *core.GameState, assets Resources,
 	drawX := x + xOff
 	drawY := y + yOff
 
-	drawTimingHeading(assets.hudFont, heading, drawX, barW, drawY, baseCol, flashing, qualityColor(timing.Quality, false))
+	drawTimingHeading(assets.hudFont, heading, headCharge.glyph, drawX, barW, drawY, baseCol, flashing, qualityColor(timing.Quality, false))
 
 	// Track.
 	drawTimingTrack(drawX, drawY, barW, drawnH, timing.Quality, false, flashing, g.Battle.TimingFlash)
@@ -570,7 +591,8 @@ func drawSequenceBar(timing core.TimingState, g *core.GameState, assets Resource
 	xOff, _, _ := applyBarMotion(timing, g.Battle.TimingFlash, barH)
 	drawX := x + xOff
 
-	drawTimingHeading(assets.hudFont, heading, drawX, barW, y, baseCol, flashing, qualityColor(timing.Quality, false))
+	// noPromptGlyph: the arrow slots below already show which directions to press.
+	drawTimingHeading(assets.hudFont, heading, noPromptGlyph, drawX, barW, y, baseCol, flashing, qualityColor(timing.Quality, false))
 
 	count := len(timing.SequenceTargets)
 	pad, slotWidth, arrowSize, ok := arrowRowLayout(barW, barH, count)
@@ -604,7 +626,7 @@ func drawReelBar(timing core.TimingState, g *core.GameState, assets Resources, x
 	barH *= reelBarHeightScale
 	xOff, _, _ := applyBarMotion(timing, g.Battle.TimingFlash, barH)
 	drawX := x + xOff
-	drawTimingHeading(assets.hudFont, headReels.text, drawX, barW, y, headReels.color, flashing, qualityColor(timing.Quality, false))
+	drawTimingHeading(assets.hudFont, headReels.text, headReels.glyph, drawX, barW, y, headReels.color, flashing, qualityColor(timing.Quality, false))
 
 	n := len(timing.Reels)
 	if n == 0 {
@@ -695,7 +717,7 @@ func drawRecallBar(timing core.TimingState, g *core.GameState, assets Resources,
 	heading, baseCol := hs.text, hs.color
 	xOff, _, _ := applyBarMotion(timing, g.Battle.TimingFlash, barH)
 	drawX := x + xOff
-	drawTimingHeading(assets.hudFont, heading, drawX, barW, y, baseCol, flashing, qualityColor(timing.Quality, false))
+	drawTimingHeading(assets.hudFont, heading, hs.glyph, drawX, barW, y, baseCol, flashing, qualityColor(timing.Quality, false))
 
 	count := len(timing.SequenceTargets)
 	pad, slotWidth, arrowSize, ok := arrowRowLayout(barW, barH, count)

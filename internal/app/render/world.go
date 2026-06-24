@@ -274,9 +274,9 @@ var battleTune = core.DefaultBattleTuning()
 // bearing so the ease-OUT (after ChestOpen clears) keeps aiming the right way.
 const (
 	chestPeekRate  = float32(1.0 / 0.22) // ease in/out over ~0.22s
-	chestPeekPitch = float32(-0.62)      // downward tilt to look into the box
-	chestPeekLean  = float32(0.28)       // forward dolly toward the chest
-	chestPeekDrop  = float32(-0.12)      // small eye drop (lean over the rim)
+	chestPeekPitch = float32(-0.95)      // steep downward tilt to look into the box
+	chestPeekLean  = float32(0.85)       // forward dolly well into the chest tile
+	chestPeekDrop  = float32(-0.22)      // eye drop so it leans over the rim
 )
 
 var (

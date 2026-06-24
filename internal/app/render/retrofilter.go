@@ -236,6 +236,17 @@ func EndRetroCapture(g *core.GameState, skyOnBackbuffer bool) {
 	if !skyOnBackbuffer {
 		rl.ClearBackground(rl.Black)
 	}
+	uploadRetroUniforms(g)
+	rl.BeginShaderMode(retroShader)
+	// blit flips upright; the shader filters as it composites.
+	retroRT.blit(rl.NewRectangle(0, 0, 0, 0))
+	rl.EndShaderMode()
+}
+
+// uploadRetroUniforms pushes the resolution / time / per-filter intensities to the
+// shader. Shared by EndRetroCapture and DrawFilteredCombatFX so the second blit uses
+// the identical filter settings.
+func uploadRetroUniforms(g *core.GameState) {
 	retroResBuf[0], retroResBuf[1] = float32(retroRT.w), float32(retroRT.h)
 	rl.SetShaderValue(retroShader, retroLocRes, retroResBuf[:], rl.ShaderUniformVec2)
 	retroTimeBuf[0] = float32(rl.GetTime())
@@ -244,18 +255,50 @@ func EndRetroCapture(g *core.GameState, skyOnBackbuffer bool) {
 		retroValBuf[0] = float32(g.RetroFilters[k])
 		rl.SetShaderValue(retroShader, retroLocs[k], retroValBuf[:], rl.ShaderUniformFloat)
 	}
+}
+
+// DrawFilteredCombatFX renders the combat "juice" — VFX particles + hit-glyphs —
+// into the retro RT and blits it through the retro shader, so the action glyphs and
+// sparks crunch with the rest of the scene instead of popping crisp on top. Owns the
+// once-per-frame VFX tick for this path; the caller must skip the inline/crisp VFX
+// draw AND the unfiltered hit-glyph draw. Call only in battle when a filter is active
+// (RT + shader are live from EndRetroCapture this frame); falls back to a crisp draw
+// if the RT/shader somehow aren't ready, so the FX never silently vanishes.
+func DrawFilteredCombatFX(camera rl.Camera3D, g *core.GameState, assets Resources) {
+	if !retroRT.init || !retroLoaded {
+		rl.BeginMode3D(camera)
+		rl.DisableDepthTest()
+		TickAndDrawVFX(camera, g, assets)
+		rl.EnableDepthTest()
+		rl.EndMode3D()
+		DrawHitGlyphs(camera, g, assets)
+		return
+	}
+	rl.BeginTextureMode(retroRT.rt)
+	rl.ClearBackground(rl.Blank) // transparent FX layer (alpha-composites on blit)
+	// Particles (3D, depth off so battle FX paint over) then hit-glyphs (2D screen
+	// space) — both land in the RT and the one -height blit flips them upright.
+	rl.BeginMode3D(camera)
+	rl.DisableDepthTest()
+	TickAndDrawVFX(camera, g, assets)
+	rl.EnableDepthTest()
+	rl.EndMode3D()
+	DrawHitGlyphs(camera, g, assets)
+	rl.EndTextureMode()
+	uploadRetroUniforms(g)
 	rl.BeginShaderMode(retroShader)
-	// blit flips upright; the shader filters as it composites.
 	retroRT.blit(rl.NewRectangle(0, 0, 0, 0))
 	rl.EndShaderMode()
 }
 
-// DrawCrispSpritePass draws billboards+VFX UNFILTERED over the already-filtered
-// environment ("Filter Sprites: Off"): re-opens the capture RT (depth still holds
-// the environment), wipes COLOR but keeps depth, draws sprites (depth-tested for
-// wall occlusion), blits the sprite layer crisp on top.
+// DrawCrispSpritePass draws billboards (+VFX, unless withVFX is false) UNFILTERED
+// over the already-filtered environment ("Filter Sprites: Off"): re-opens the
+// capture RT (depth still holds the environment), wipes COLOR but keeps depth, draws
+// sprites (depth-tested for wall occlusion), blits the sprite layer crisp on top.
+// withVFX=false leaves the once-per-frame VFX tick to a later filtered FX pass
+// (battle + filter active — see DrawFilteredCombatFX).
 // Contract: call ONLY right after a true EndRetroCapture, SAME camera. No-op if no RT.
-func DrawCrispSpritePass(camera rl.Camera3D, g *core.GameState, assets Resources) {
+func DrawCrispSpritePass(camera rl.Camera3D, g *core.GameState, assets Resources, withVFX bool) {
 	if !retroRT.init {
 		return
 	}
@@ -280,7 +323,9 @@ func DrawCrispSpritePass(camera rl.Camera3D, g *core.GameState, assets Resources
 	}
 	DrawEnemies(camera, g, assets)
 	DrawPartySprites(camera, g, assets)
-	TickAndDrawVFX(camera, g, assets)
+	if withVFX {
+		TickAndDrawVFX(camera, g, assets)
+	}
 	if inBattle {
 		rl.EnableDepthTest()
 	}

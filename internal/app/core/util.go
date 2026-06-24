@@ -81,8 +81,12 @@ func TileCenter(tile int) float32 {
 }
 
 // WrapAngle folds a radian angle into [-π, π] — the shortest signed form, so a
-// difference of two yaws eases the short way around (no 350° spins).
+// difference of two yaws eases the short way around (no 350° spins). A non-finite
+// input folds to 0 (±Inf would otherwise loop forever).
 func WrapAngle(a float32) float32 {
+	if a != a || math.IsInf(float64(a), 0) {
+		return 0
+	}
 	const twoPi = 2 * math.Pi
 	for a > math.Pi {
 		a -= twoPi

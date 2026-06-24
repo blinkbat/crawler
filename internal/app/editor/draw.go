@@ -1555,26 +1555,14 @@ func isSentinelBrush(layer Layer, char byte) bool {
 // "semantic" rather than a literal color.
 func drawSentinelHatch(r rl.Rectangle) {
 	stripe := rl.NewColor(0, 0, 0, 110)
+	// Scissor to the swatch so the diagonal strokes can't bleed past its edges
+	// (DrawLineEx doesn't clip; the per-endpoint clamp left a ~1px corner overflow).
+	rl.BeginScissorMode(int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height))
 	steps := int(r.Width + r.Height)
 	for i := 0; i < steps; i += 4 {
-		x1 := r.X + float32(i)
-		y1 := r.Y
-		x2 := r.X
-		y2 := r.Y + float32(i)
-		// Clip to swatch bounds (DrawLineEx doesn't clip).
-		if x1 > r.X+r.Width {
-			y1 += x1 - (r.X + r.Width)
-			x1 = r.X + r.Width
-		}
-		if y2 > r.Y+r.Height {
-			x2 += y2 - (r.Y + r.Height)
-			y2 = r.Y + r.Height
-		}
-		if x2 > r.X+r.Width || y1 > r.Y+r.Height {
-			continue
-		}
-		rl.DrawLineEx(rl.NewVector2(x1, y1), rl.NewVector2(x2, y2), 1, stripe)
+		rl.DrawLineEx(rl.NewVector2(r.X+float32(i), r.Y), rl.NewVector2(r.X, r.Y+float32(i)), 1, stripe)
 	}
+	rl.EndScissorMode()
 }
 
 // --- Metadata panel --------------------------------------------------------
