@@ -36,14 +36,13 @@ func panelsMapFooterText(zoom int) string {
 	return panelsMapFooterCache.text
 }
 
-// panelTabDrawers dispatches by tab index to the per-tab body drawer (init asserts none nil).
-var panelTabDrawers = [core.PanelTabCount]func(*core.GameState, Resources, rl.Rectangle){
-	core.PanelTabStats:     drawPanelsStats,
-	core.PanelTabEquipment: drawPanelsEquipment,
-	core.PanelTabItems:     drawPanelsItems,
-	core.PanelTabSkills:    drawPanelsSkills,
-	core.PanelTabQuests:    drawPanelsQuests,
-	core.PanelTabMap:       drawPanelsMap,
+// panelTabInfo is one tab's contract: body drawer + footer hint bar. Single
+// per-tab row (was two parallel [PanelTabCount] arrays) so a new tab is one edit.
+// footer values are static, built once at init (the segs never change), so the
+// per-frame panels draw doesn't reallocate a hint bar + glyph slices each frame.
+type panelTabInfo struct {
+	draw   func(*core.GameState, Resources, rl.Rectangle)
+	footer []HintSeg
 }
 
 // footerHintMapTab is the Map tab's controls — shown ONLY in the bottom footer bar
@@ -71,47 +70,46 @@ var (
 	healPickerHints      = []HintSeg{Hint("Cast", GlyphA), Hint("Cancel", GlyphB)}
 )
 
-// panelTabFooterHints is the per-tab footer hint, parallel to panelTabDrawers.
-// Static values built once at init (the segs never change), so the per-frame
-// panels draw doesn't reallocate a hint bar + glyph slices each frame.
-var panelTabFooterHints = [core.PanelTabCount][]HintSeg{
-	core.PanelTabStats: footerHintCharacterTab,
-	core.PanelTabEquipment: {
+// panelTabs is the per-tab drawer + footer registry, indexed by tab (init asserts
+// every row has both). Adding a tab = one row here, not two coordinated arrays.
+var panelTabs = [core.PanelTabCount]panelTabInfo{
+	core.PanelTabStats: {draw: drawPanelsStats, footer: footerHintCharacterTab},
+	core.PanelTabEquipment: {draw: drawPanelsEquipment, footer: []HintSeg{
 		Hint("Tabs", GlyphLB, GlyphRB),
 		Hint("Member", GlyphLeftRight),
 		Hint("Slot", GlyphUpDown),
 		Hint("Change gear", GlyphA),
 		Hint("Close", GlyphB),
-	},
-	core.PanelTabItems: {
+	}},
+	core.PanelTabItems: {draw: drawPanelsItems, footer: []HintSeg{
 		Hint("Tabs", GlyphLB, GlyphRB),
 		Hint("Item", GlyphUpDown),
 		Hint("Use", GlyphX),
 		Hint("Close", GlyphB),
-	},
-	core.PanelTabSkills: {
+	}},
+	core.PanelTabSkills: {draw: drawPanelsSkills, footer: []HintSeg{
 		Hint("Tabs", GlyphLB, GlyphRB),
 		Hint("Member", GlyphLeftRight),
 		Hint("Open trees", GlyphA),
 		Hint("Use skill", GlyphX),
 		Hint("Close", GlyphB),
-	},
-	core.PanelTabQuests: {
+	}},
+	core.PanelTabQuests: {draw: drawPanelsQuests, footer: []HintSeg{
 		Hint("Tabs", GlyphLB, GlyphRB),
 		Hint("Quests / Bestiary", GlyphLeftRight),
 		Hint("Scroll", GlyphUpDown),
 		Hint("Close", GlyphB),
-	},
-	core.PanelTabMap: footerHintMapTab,
+	}},
+	core.PanelTabMap: {draw: drawPanelsMap, footer: footerHintMapTab},
 }
 
 func init() {
 	for t := core.PanelTab(0); t < core.PanelTabCount; t++ {
-		if panelTabDrawers[t] == nil {
-			panic(fmt.Sprintf("render/panels: panelTabDrawers missing a drawer for tab %d", int(t)))
+		if panelTabs[t].draw == nil {
+			panic(fmt.Sprintf("render/panels: panelTabs missing a drawer for tab %d", int(t)))
 		}
-		if panelTabFooterHints[t] == nil {
-			panic(fmt.Sprintf("render/panels: panelTabFooterHints missing a hint for tab %d", int(t)))
+		if panelTabs[t].footer == nil {
+			panic(fmt.Sprintf("render/panels: panelTabs missing a footer hint for tab %d", int(t)))
 		}
 	}
 }
@@ -173,15 +171,12 @@ func drawPanelsBody(g *core.GameState, assets Resources) {
 	bodyRect := rl.NewRectangle(float32(cardX+hudContentInsetX), float32(bodyY),
 		float32(cardW-2*hudContentInsetX), float32(cardY+cardH-26-bodyY-overlayFooterReserve))
 
-	if int(g.PanelsTab) >= 0 && int(g.PanelsTab) < len(panelTabDrawers) {
-		panelTabDrawers[g.PanelsTab](g, assets, bodyRect)
+	tab := panelTabs[core.PanelTabStats]
+	if int(g.PanelsTab) >= 0 && int(g.PanelsTab) < len(panelTabs) {
+		tab = panelTabs[g.PanelsTab]
 	}
-
-	footerHint := panelTabFooterHints[core.PanelTabStats]
-	if int(g.PanelsTab) >= 0 && int(g.PanelsTab) < len(panelTabFooterHints) {
-		footerHint = panelTabFooterHints[g.PanelsTab]
-	}
-	drawModalFooterGlyphs(font, card, footerHint)
+	tab.draw(g, assets, bodyRect)
+	drawModalFooterGlyphs(font, card, tab.footer)
 
 	// Sub-modals painted on top of the whole overlay.
 	if g.PanelsTab == core.PanelTabEquipment && g.EquipPickerOpen {
@@ -469,9 +464,9 @@ func drawFormationCard(font rl.Font, g *core.GameState, i int, quad rl.Rectangle
 
 	// Allocate CTA — cursored member with something to spend.
 	if highlight && (m.PendingLevelUps > 0 || m.SkillPoints > 0) {
-		// -28, not footerBaselineY (which yields -35 at FontSmall): this CTA sits inside a
-		// dense formation quadrant and rides tighter to the bottom than a modal footer hint.
-		hintY := quad.Y + quad.Height - 28
+		// formationCTAInset, not footerBaselineY: this CTA sits inside a dense
+		// formation quadrant and rides tighter to the bottom than a modal footer hint.
+		hintY := quad.Y + quad.Height - formationCTAInset
 		if m.PendingLevelUps > 0 {
 			drawHintSegs(font, []HintSeg{Hint("allocate "+strconv.Itoa(m.PendingLevelUps)+" stat pt"+plural(m.PendingLevelUps), GlyphA)}, rightX, hintY, FontSmall, inkAccent, 1)
 		} else if m.SkillPoints > 0 {
@@ -630,7 +625,7 @@ func drawPanelsEquipment(g *core.GameState, assets Resources, body rl.Rectangle)
 			}
 		}
 	}
-	// Footer is painted once by DrawPanelsOverlay from panelTabFooterHints — no per-tab inline footer here.
+	// Footer is painted once by DrawPanelsOverlay from panelTabs[tab].footer — no per-tab inline footer here.
 }
 
 // Shared picker sub-modal geometry. use-target + heal pickers are visually identical and share these;
@@ -1028,9 +1023,11 @@ func drawPanelsItems(g *core.GameState, assets Resources, body rl.Rectangle) {
 		owned := "Owned: " + strconv.Itoa(stack.Count)
 		drawTextWithShadow(font, owned, dx, dy, FontBody, textMuted)
 		dy += 36
-		// Description placeholder — the item registry carries none today.
-		hint := "Consumable. Press Use to apply it to an ally — here or in battle."
-		drawTextWithShadow(font, hint, dx, dy, FontSmall, textDim)
+		// Description placeholder — the item registry carries none today. Lead with
+		// the Use glyph so the affordance reads controller-first (gamepad contract),
+		// never a bare "Press Use".
+		gx := dx + drawInputGlyph(font, GlyphX, dx, dy, FontSmall, 1) + glyphLabelGap
+		drawTextWithShadow(font, "applies this consumable to an ally — here or in battle.", gx, dy, FontSmall, textDim)
 	}
 }
 
@@ -1201,18 +1198,24 @@ func drawPanelsSkills(g *core.GameState, assets Resources, body rl.Rectangle) {
 
 		// Cursored member: Confirm opens the trees.
 		if highlight {
-			// -46, not footerBaselineY (-35 at FontSmall): this hint clears the tree-ratio rows
-			// stacked above it in the Skills-tab card, so it rides higher than a modal footer.
-			hintY := cols[i].Y + cols[i].Height - 46
+			// skillTreeCTAInset, not footerBaselineY: this hint clears the tree-ratio
+			// rows stacked above it in the Skills-tab card, so it rides higher.
+			hintY := cols[i].Y + cols[i].Height - skillTreeCTAInset
 			DrawHintBar(font, []HintSeg{Hint("Open skill trees", GlyphA)}, cols[i].X+cols[i].Width/2, hintY, FontSmall)
 		}
 	}
 }
 
-// mapFooterBottomInset sits the zoom readout this many px up from the body bottom.
-// NOTE: intentionally tighter than footerBaselineY(…, FontSmall) (which would be
-// uiFooterMargin+FontSmall = 35px) — the readout tucks lower against the map edge.
-const mapFooterBottomInset = float32(20)
+// In-card footer insets: a hint/readout that rides INSIDE a dense panel sits this
+// many px up from the card bottom — intentionally tighter than
+// footerBaselineY(…, FontSmall) (= uiFooterMargin+FontSmall = 35px), which is for
+// modal footers. Each tracks a different content density, so they're distinct
+// named values rather than one shared token.
+const (
+	mapFooterBottomInset = float32(20) // zoom readout, tucked low against the map edge
+	formationCTAInset    = float32(28) // allocate CTA inside a dense formation quadrant
+	skillTreeCTAInset    = float32(46) // skills hint clearing the tree-ratio rows
+)
 
 // drawPanelsMap renders the zoomable Map tab. Cells-on-screen comes from g.PanelsMapZoom; explored tiles
 // paint full-color, unexplored at a heavy fade (silhouette without spoiling discovery).

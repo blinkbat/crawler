@@ -8,15 +8,22 @@ import (
 )
 
 // chestGeometry — world-unit dims for anchoring the floating prompt; must match the meshes in loadChestBodyProp/loadChestLidProp.
+// PromptHeadroom: extra lift from the lid top to the "Open" cue (mirrors crystalGeometry).
 type chestGeometry struct {
-	BodyHeight float32
-	LidHeight  float32
+	BodyHeight     float32
+	LidHeight      float32
+	PromptHeadroom float32
 }
 
 var chestGeo = chestGeometry{
-	BodyHeight: 0.46,
-	LidHeight:  0.18,
+	BodyHeight:     0.46,
+	LidHeight:      0.18,
+	PromptHeadroom: 0.4,
 }
+
+// chestShadowRadius is the chest's ground-shadow half-extent (world units); kept
+// beside chestGeo rather than in propShadowRadius since a chest isn't a prop tile.
+const chestShadowRadius = float32(0.40)
 
 // Open-box "mouth": a dark recessed slab flush with the body top so an opened or
 // looted chest reads as a hole inside (no lid for now). Inset within the body
@@ -55,7 +62,7 @@ func DrawChests(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		if vc.cull(base) {
 			continue
 		}
-		drawGroundShadowAt(base.X, base.Y+groundShadowFloorClearance, base.Z, 0.40)
+		drawGroundShadowAt(base.X, base.Y+groundShadowFloorClearance, base.Z, chestShadowRadius)
 
 		assets.chestBody.draw(base, 1.0, 0)
 
@@ -87,7 +94,7 @@ func DrawChestPrompt(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	}
 	ch := g.Chests[idx]
 	// Anchor above the lid; must add StandGroundY (body draws there) or it detaches on raised tiles.
-	world := tileWorldPos(ch.TileX, ch.TileZ, g.Area.StandGroundY(ch.TileX, ch.TileZ)+chestGeo.BodyHeight+chestGeo.LidHeight+0.4)
+	world := tileWorldPos(ch.TileX, ch.TileZ, g.Area.StandGroundY(ch.TileX, ch.TileZ)+chestGeo.BodyHeight+chestGeo.LidHeight+chestGeo.PromptHeadroom)
 	drawFloatingInteractPrompt(camera, world, "Open", assets)
 }
 

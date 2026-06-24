@@ -172,6 +172,14 @@ type SkillEffect struct {
 	IceArmorTurns int
 }
 
+// NegStatDebuff builds a no-stack enemy stat debuff from a positive buff delta:
+// the stats are sign-flipped and bundled with the duration. Single home for the
+// "negate a stat into an enemy debuff" shape (Smoke Bomb's DEX sap, Ice Armor's
+// SPD chill), so the two can't drift on bundle shape.
+func NegStatDebuff(buff Stats, turns int) SkillEffect {
+	return SkillEffect{BuffStats: buff.Negated(), BuffTurns: turns}
+}
+
 // SEAT ORDER CONTRACT: the slice order is the in-battle seating order and the
 // SPD-tie-breaker order in buildTurnQueue; save format and render formation
 // index by class slot. Reordering reshuffles formation + tie-broken initiative

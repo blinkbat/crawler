@@ -13,33 +13,30 @@ const (
 	SpeakerWizard   DialogSpeakerID = "wizard"
 )
 
-// dialogSpeakerOrder is the display order; dialogSpeakers is the lookup (init guard keeps them in lockstep).
-var dialogSpeakerOrder = []DialogSpeakerID{
-	SpeakerNarrator,
-	SpeakerStranger,
-	SpeakerWarrior,
-	SpeakerCleric,
-	SpeakerThief,
-	SpeakerWizard,
+// dialogSpeakerList is the single source of truth, in display order. The lookup
+// map and id-order slice are derived from it in init, so adding a voice is one
+// edit here and the two views can't drift.
+var dialogSpeakerList = []DialogSpeaker{
+	{ID: SpeakerNarrator, Name: "Narrator", TintR: 198, TintG: 190, TintB: 170, TintA: 255},
+	{ID: SpeakerStranger, Name: "Stranger", TintR: 150, TintG: 120, TintB: 90, TintA: 255},
+	{ID: SpeakerWarrior, Name: "Warrior", TintR: 196, TintG: 80, TintB: 72, TintA: 255},
+	{ID: SpeakerCleric, Name: "Cleric", TintR: 220, TintG: 200, TintB: 120, TintA: 255},
+	{ID: SpeakerThief, Name: "Thief", TintR: 110, TintG: 170, TintB: 110, TintA: 255},
+	{ID: SpeakerWizard, Name: "Wizard", TintR: 110, TintG: 130, TintB: 210, TintA: 255},
 }
 
-var dialogSpeakers = map[DialogSpeakerID]DialogSpeaker{
-	SpeakerNarrator: {ID: SpeakerNarrator, Name: "Narrator", TintR: 198, TintG: 190, TintB: 170, TintA: 255},
-	SpeakerStranger: {ID: SpeakerStranger, Name: "Stranger", TintR: 150, TintG: 120, TintB: 90, TintA: 255},
-	SpeakerWarrior:  {ID: SpeakerWarrior, Name: "Warrior", TintR: 196, TintG: 80, TintB: 72, TintA: 255},
-	SpeakerCleric:   {ID: SpeakerCleric, Name: "Cleric", TintR: 220, TintG: 200, TintB: 120, TintA: 255},
-	SpeakerThief:    {ID: SpeakerThief, Name: "Thief", TintR: 110, TintG: 170, TintB: 110, TintA: 255},
-	SpeakerWizard:   {ID: SpeakerWizard, Name: "Wizard", TintR: 110, TintG: 130, TintB: 210, TintA: 255},
-}
+var (
+	dialogSpeakers     = make(map[DialogSpeakerID]DialogSpeaker, len(dialogSpeakerList))
+	dialogSpeakerOrder = make([]DialogSpeakerID, 0, len(dialogSpeakerList))
+)
 
 func init() {
-	if len(dialogSpeakerOrder) != len(dialogSpeakers) {
-		panic("core: dialogSpeakerOrder and dialogSpeakers must list the same speakers")
-	}
-	for _, id := range dialogSpeakerOrder {
-		if _, ok := dialogSpeakers[id]; !ok {
-			panic("core: dialogSpeakerOrder lists " + string(id) + " but dialogSpeakers has no entry")
+	for _, sp := range dialogSpeakerList {
+		if _, dup := dialogSpeakers[sp.ID]; dup {
+			panic("core: duplicate dialog speaker id " + string(sp.ID))
 		}
+		dialogSpeakers[sp.ID] = sp
+		dialogSpeakerOrder = append(dialogSpeakerOrder, sp.ID)
 	}
 }
 

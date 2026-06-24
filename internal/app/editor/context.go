@@ -8,38 +8,14 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// ctxItemKind enumerates the right-click menu's actions, dispatched by
-// runContextItem against (tileX, tileZ). A new kind needs a runContextItem case.
-type ctxItemKind int
-
-const (
-	ctxItemNone ctxItemKind = iota
-	ctxItemEditPack
-	ctxItemDeletePack
-	ctxItemEditChest
-	ctxItemDeleteChest
-	ctxItemEditDoor
-	ctxItemDeleteDoor
-	ctxItemDeleteCrystal // no edit counterpart — crystals carry no per-instance data
-	ctxItemMoveStartHere
-	// ctxItemStartFacing sets StartFacing (the spawn fallback; per-door Facing
-	// overrides it). The direction rides in ctxItem.facing — one kind, four rows.
-	ctxItemStartFacing
-	ctxItemSetWallFaces // opens the per-tile wall-faces modal (base + N/E/S/W)
-	ctxItemEraseTile    // resets the ACTIVE layer's cell here
-	// Location (region) actions — New always offered; Edit/Delete when a region on
-	// the active level sits under the cursor.
-	ctxItemNewLocation
-	ctxItemEditLocation
-	ctxItemDeleteLocation
-)
-
 // ctxItem is one right-click menu row, built fresh by contextItemsAt per tile.
+// apply carries the row's action (run against the menu's tile via fireContextItem),
+// so adding a row is one entry here — no parallel enum + dispatch switch to keep
+// in lockstep. isDelete draws the row red.
 type ctxItem struct {
-	label string
-	kind  ctxItemKind
-	// facing is the payload for ctxItemStartFacing; ignored by other kinds.
-	facing int
+	label    string
+	isDelete bool
+	apply    func(s *State)
 }
 
 // contextMenuState is the in-State data for an open right-click menu (open=false
@@ -51,12 +27,6 @@ type contextMenuState struct {
 	items        []ctxItem
 }
 
-// isDelete reports whether a row is a destructive delete (drawn red).
-func (k ctxItemKind) isDelete() bool {
-	return k == ctxItemDeletePack || k == ctxItemDeleteChest || k == ctxItemDeleteDoor ||
-		k == ctxItemDeleteCrystal || k == ctxItemDeleteLocation
-}
-
 // contextItemsAt builds the menu rows from what occupies (x,z) (pack/chest/door
 // are mutually exclusive in practice).
 func contextItemsAt(s *State, x, z int) []ctxItem {
@@ -66,30 +36,50 @@ func contextItemsAt(s *State, x, z int) []ctxItem {
 	items := []ctxItem{}
 	if core.PackSpawnIndexAt(s.area.PackSpawns, x, z) >= 0 {
 		items = append(items,
-			ctxItem{label: "Edit pack", kind: ctxItemEditPack},
-			ctxItem{label: "Delete pack", kind: ctxItemDeletePack},
+			ctxItem{label: "Edit pack", apply: func(s *State) {
+				if idx := core.PackSpawnIndexAt(s.area.PackSpawns, x, z); idx >= 0 {
+					openPackEditModal(s, idx)
+				}
+			}},
+			ctxItem{label: "Delete pack", isDelete: true, apply: func(s *State) {
+				deleteSpawnAt(s, x, z, "pack", func() bool { return deleteSpawnSlice(&s.area.PackSpawns, x, z) })
+			}},
 		)
 	}
 	if core.ChestSpawnIndexAt(s.area.ChestSpawns, x, z) >= 0 {
 		items = append(items,
-			ctxItem{label: "Edit chest", kind: ctxItemEditChest},
-			ctxItem{label: "Delete chest", kind: ctxItemDeleteChest},
+			ctxItem{label: "Edit chest", apply: func(s *State) {
+				if idx := core.ChestSpawnIndexAt(s.area.ChestSpawns, x, z); idx >= 0 {
+					openChestEditModal(s, idx)
+				}
+			}},
+			ctxItem{label: "Delete chest", isDelete: true, apply: func(s *State) {
+				deleteSpawnAt(s, x, z, "chest", func() bool { return deleteSpawnSlice(&s.area.ChestSpawns, x, z) })
+			}},
 		)
 	}
 	if core.DoorSpawnIndexAt(s.area.DoorSpawns, x, z) >= 0 {
 		items = append(items,
-			ctxItem{label: "Edit door", kind: ctxItemEditDoor},
-			ctxItem{label: "Delete door", kind: ctxItemDeleteDoor},
+			ctxItem{label: "Edit door", apply: func(s *State) {
+				if idx := core.DoorSpawnIndexAt(s.area.DoorSpawns, x, z); idx >= 0 {
+					openDoorEditModal(s, idx)
+				}
+			}},
+			ctxItem{label: "Delete door", isDelete: true, apply: func(s *State) {
+				deleteSpawnAt(s, x, z, "door", func() bool { return deleteSpawnSlice(&s.area.DoorSpawns, x, z) })
+			}},
 		)
 	}
 	if core.CrystalSpawnIndexAt(s.area.CrystalSpawns, x, z) >= 0 {
 		// No per-instance data, so Delete only.
 		items = append(items,
-			ctxItem{label: "Delete crystal", kind: ctxItemDeleteCrystal},
+			ctxItem{label: "Delete crystal", isDelete: true, apply: func(s *State) {
+				deleteSpawnAt(s, x, z, "crystal", func() bool { return deleteSpawnSlice(&s.area.CrystalSpawns, x, z) })
+			}},
 		)
 	}
 	// Player-start tile: facing controls; else "Move start here" (move legality
-	// enforced by runContextItem, which flashes why a blocked move was refused).
+	// enforced at apply time, which flashes why a blocked move was refused).
 	if s.area.StartTileX == x && s.area.StartTileZ == z {
 		// One row per facing, driven by core.FacingCount.
 		for dir := 0; dir < int(core.FacingCount); dir++ {
@@ -98,31 +88,65 @@ func contextItemsAt(s *State, x, z int) []ctxItem {
 				marker = "* "
 			}
 			items = append(items, ctxItem{
-				label:  marker + "Face " + core.FacingShortLabels[dir],
-				kind:   ctxItemStartFacing,
-				facing: dir,
+				label: marker + "Face " + core.FacingShortLabels[dir],
+				apply: func(s *State) { setStartFacing(s, dir) },
 			})
 		}
 	} else {
-		items = append(items,
-			ctxItem{label: "Move start here", kind: ctxItemMoveStartHere},
-		)
+		items = append(items, ctxItem{label: "Move start here", apply: func(s *State) {
+			// Shared startBlockers so this and the entity-brush start tool can't drift.
+			if msg := firstBlocker(startBlockers(&s.area, x, z)...); msg != "" {
+				s.flash(msg)
+				return
+			}
+			pushUndo(s)
+			s.area.StartTileX = x
+			s.area.StartTileZ = z
+			s.dirty = true
+		}})
 	}
 	// Regions: edit/delete the one under the cursor (on the active level), and
 	// always offer to create a new region anchored here.
 	if idx := core.LocationIndexAt(s.area.Locations, x, z, s.editLevel); idx >= 0 {
 		items = append(items,
-			ctxItem{label: "Edit location: " + locationLabel(s.area.Locations[idx]), kind: ctxItemEditLocation},
-			ctxItem{label: "Delete location", kind: ctxItemDeleteLocation},
+			ctxItem{label: "Edit location: " + locationLabel(s.area.Locations[idx]), apply: func(s *State) {
+				if idx := core.LocationIndexAt(s.area.Locations, x, z, s.editLevel); idx >= 0 {
+					openLocationEditModal(s, idx)
+				}
+			}},
+			ctxItem{label: "Delete location", isDelete: true, apply: func(s *State) {
+				deleteSpawnAt(s, x, z, "location", func() bool {
+					idx := core.LocationIndexAt(s.area.Locations, x, z, s.editLevel)
+					if idx < 0 {
+						return false
+					}
+					// Fresh-slice removal, not in-place append-shift, to avoid mutating a
+					// backing array an undo snapshot could alias (see removeModalListItem).
+					s.area.Locations = removeModalListItem(s.area.Locations, idx)
+					return true
+				})
+			}},
 		)
 	}
-	items = append(items, ctxItem{label: "New location here", kind: ctxItemNewLocation})
+	items = append(items, ctxItem{label: "New location here", apply: func(s *State) { createLocationAt(s, x, z) }})
 	// Wall-faces modal, only when the tile exposes a vertical face (same core
 	// rule the renderer uses), so a flat tile doesn't offer a no-op row.
 	if core.TileExposesFace(&s.area, x, z) {
-		items = append(items, ctxItem{label: "Set wall faces…", kind: ctxItemSetWallFaces})
+		items = append(items, ctxItem{label: "Set wall faces…", apply: func(s *State) { openWallFacesModal(s, x, z) }})
 	}
-	items = append(items, ctxItem{label: "Erase " + layerName(s.layer) + " here", kind: ctxItemEraseTile})
+	items = append(items, ctxItem{label: "Erase " + layerName(s.layer) + " here", apply: func(s *State) {
+		// Snapshot, commit only if changed — a no-op erase banks no undo.
+		before := core.CloneArea(s.area)
+		wasDirty := s.dirty
+		wasHidden := s.layerHidden[s.layer]
+		eraseAt(s, x, z)
+		if core.AreaContentEqual(s.area, before) {
+			s.dirty = wasDirty                 // eraseAt flips dirty unconditionally — undo a no-op
+			s.layerHidden[s.layer] = wasHidden // eraseAt also reveals unconditionally — undo that too
+		} else {
+			commitUndoSnapshot(s, before)
+		}
+	}})
 	return items
 }
 
@@ -238,7 +262,7 @@ func drawContextMenu(s *State, font rl.Font, theme render.Theme) {
 			col = theme.TextMuted
 		}
 		// Destructive rows read red.
-		if s.contextMenu.items[i].kind.isDelete() {
+		if s.contextMenu.items[i].isDelete {
 			col = theme.BorderDanger
 		}
 		render.DrawRichText(font, label,
@@ -262,7 +286,7 @@ func updateContextMenu(s *State) bool {
 		_, rows := contextMenuLayout(s)
 		for i, r := range rows {
 			if pointIn(mp, r) {
-				runContextItem(s, s.contextMenu.items[i])
+				fireContextItem(s, s.contextMenu.items[i])
 				closeContextMenu(s)
 				return true
 			}
@@ -274,92 +298,13 @@ func updateContextMenu(s *State) bool {
 	return true
 }
 
-func runContextItem(s *State, item ctxItem) {
-	kind := item.kind
-	x, z := s.contextMenu.tileX, s.contextMenu.tileZ
-	// Map may have shrunk since the menu was built — reject stale coords.
-	if !s.area.InBounds(x, z) {
+// fireContextItem runs a picked row's action, guarding against a tile that went
+// out of bounds since the menu opened (the map may have shrunk).
+func fireContextItem(s *State, item ctxItem) {
+	if !s.area.InBounds(s.contextMenu.tileX, s.contextMenu.tileZ) {
 		return
 	}
-	switch kind {
-	case ctxItemEditPack:
-		if idx := core.PackSpawnIndexAt(s.area.PackSpawns, x, z); idx >= 0 {
-			openPackEditModal(s, idx)
-		}
-	case ctxItemDeletePack:
-		deleteSpawnAt(s, x, z, "pack", func() bool {
-			return deleteSpawnSlice(&s.area.PackSpawns, x, z)
-		})
-	case ctxItemEditChest:
-		if idx := core.ChestSpawnIndexAt(s.area.ChestSpawns, x, z); idx >= 0 {
-			openChestEditModal(s, idx)
-		}
-	case ctxItemDeleteChest:
-		deleteSpawnAt(s, x, z, "chest", func() bool {
-			return deleteSpawnSlice(&s.area.ChestSpawns, x, z)
-		})
-	case ctxItemEditDoor:
-		if idx := core.DoorSpawnIndexAt(s.area.DoorSpawns, x, z); idx >= 0 {
-			openDoorEditModal(s, idx)
-		}
-	case ctxItemDeleteDoor:
-		deleteSpawnAt(s, x, z, "door", func() bool {
-			return deleteSpawnSlice(&s.area.DoorSpawns, x, z)
-		})
-	case ctxItemDeleteCrystal:
-		deleteSpawnAt(s, x, z, "crystal", func() bool {
-			return deleteSpawnSlice(&s.area.CrystalSpawns, x, z)
-		})
-	case ctxItemMoveStartHere:
-		// Shared startBlockers so this and the entity-brush start tool can't drift.
-		if msg := firstBlocker(startBlockers(&s.area, x, z)...); msg != "" {
-			s.flash(msg)
-			return
-		}
-		pushUndo(s)
-		s.area.StartTileX = x
-		s.area.StartTileZ = z
-		s.dirty = true
-	case ctxItemStartFacing:
-		setStartFacing(s, item.facing)
-	case ctxItemNewLocation:
-		createLocationAt(s, x, z)
-		return
-	case ctxItemEditLocation:
-		if idx := core.LocationIndexAt(s.area.Locations, x, z, s.editLevel); idx >= 0 {
-			openLocationEditModal(s, idx)
-		}
-		return
-	case ctxItemDeleteLocation:
-		deleteSpawnAt(s, x, z, "location", func() bool {
-			idx := core.LocationIndexAt(s.area.Locations, x, z, s.editLevel)
-			if idx < 0 {
-				return false
-			}
-			// Fresh-slice removal, not in-place append-shift, to avoid mutating a
-			// backing array an undo snapshot could alias (see removeModalListItem).
-			s.area.Locations = removeModalListItem(s.area.Locations, idx)
-			return true
-		})
-	case ctxItemSetWallFaces:
-		openWallFacesModal(s, x, z)
-		return
-	case ctxItemEraseTile:
-		// Snapshot, commit only if changed — a no-op erase banks no undo.
-		before := core.CloneArea(s.area)
-		wasDirty := s.dirty
-		wasHidden := s.layerHidden[s.layer]
-		eraseAt(s, x, z)
-		if core.AreaContentEqual(s.area, before) {
-			s.dirty = wasDirty                 // eraseAt flips dirty unconditionally — undo a no-op
-			s.layerHidden[s.layer] = wasHidden // eraseAt also reveals unconditionally — undo that too
-		} else {
-			commitUndoSnapshot(s, before)
-		}
-	default:
-		// Fail closed so a new kind's menu row can't silently no-op.
-		panic(fmt.Sprintf("editor: runContextItem has no case for ctxItemKind %d", int(kind)))
-	}
+	item.apply(s)
 }
 
 // deleteSpawnAt is the shared delete protocol for every context-menu spawn kind:

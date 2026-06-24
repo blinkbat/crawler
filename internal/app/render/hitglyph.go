@@ -217,14 +217,23 @@ func drawGlyphSlash(cx, cy, t, baseR float32) {
 	rl.DrawLineEx(rl.NewVector2(x1-off, y1-off*0.25), rl.NewVector2(x2-off, y2-off*0.25), 2, fadeColor(col, 0.6))
 }
 
-// spokeBurst draws n evenly-spaced radial spokes from inner to outer, thick px
-// wide. Shared by impact + holy (frost/fire keep their own loops).
-func spokeBurst(cx, cy float32, n int, inner, outer, thick float32, col rl.Color) {
+// radialSpokes invokes fn for n evenly-spaced directions around a circle, with an
+// optional starting-angle offset, passing each spoke's unit (dx,dy). Centralizes
+// the `ang := i·τ/n; cos/sin` boilerplate shared by the burst/snowflake/flame
+// glyphs and the ice-armor status mark.
+func radialSpokes(n int, offset float64, fn func(i int, dx, dy float32)) {
 	for i := 0; i < n; i++ {
-		ang := float64(i) * tau / float64(n)
-		dx, dy := float32(math.Cos(ang)), float32(math.Sin(ang))
-		rl.DrawLineEx(rl.NewVector2(cx+dx*inner, cy+dy*inner), rl.NewVector2(cx+dx*outer, cy+dy*outer), thick, col)
+		ang := float64(i)*tau/float64(n) + offset
+		fn(i, float32(math.Cos(ang)), float32(math.Sin(ang)))
 	}
+}
+
+// spokeBurst draws n evenly-spaced radial spokes from inner to outer, thick px
+// wide. Shared by impact + holy.
+func spokeBurst(cx, cy float32, n int, inner, outer, thick float32, col rl.Color) {
+	radialSpokes(n, 0, func(_ int, dx, dy float32) {
+		rl.DrawLineEx(rl.NewVector2(cx+dx*inner, cy+dy*inner), rl.NewVector2(cx+dx*outer, cy+dy*outer), thick, col)
+	})
 }
 
 // drawGlyphImpact — a blunt "POW": 8 radial spikes punching outward.
@@ -240,9 +249,7 @@ func drawGlyphImpact(cx, cy, t, baseR float32) {
 func drawGlyphFrost(cx, cy, t, baseR float32) {
 	col := colorWithAlpha(glyphFrostColor, glyphFade(t))
 	r := glyphPopR(t, baseR)
-	for i := 0; i < 6; i++ {
-		ang := float64(i) * tau / 6
-		dx, dy := float32(math.Cos(ang)), float32(math.Sin(ang))
+	radialSpokes(6, 0, func(_ int, dx, dy float32) {
 		tipX, tipY := cx+dx*r, cy+dy*r
 		rl.DrawLineEx(rl.NewVector2(cx, cy), rl.NewVector2(tipX, tipY), 2, col)
 		// two branches angled back from a point partway out the arm
@@ -251,7 +258,7 @@ func drawGlyphFrost(cx, cy, t, baseR float32) {
 		bl := r * 0.26
 		rl.DrawLineEx(rl.NewVector2(bx, by), rl.NewVector2(bx+(dx*0.5+px*0.7)*bl, by+(dy*0.5+py*0.7)*bl), 2, col)
 		rl.DrawLineEx(rl.NewVector2(bx, by), rl.NewVector2(bx+(dx*0.5-px*0.7)*bl, by+(dy*0.5-py*0.7)*bl), 2, col)
-	}
+	})
 	// Center hub scaled to baseR so it tracks the glyph's size.
 	rl.DrawCircleV(rl.NewVector2(cx, cy), baseR*0.096, col)
 }
@@ -305,11 +312,9 @@ func drawGlyphFire(cx, cy, t, baseR float32) {
 	inner := colorWithAlpha(glyphFireInner, a)
 	r := baseR * (0.7 + 0.5*glyphGrow(t))
 	rl.DrawPoly(rl.NewVector2(cx, cy), 6, r*0.7, t*90, fadeColor(outer, 0.4))
-	for i := 0; i < 6; i++ {
-		ang := float64(i)*tau/6 + float64(t)*1.4
-		dx, dy := float32(math.Cos(ang)), float32(math.Sin(ang))
+	radialSpokes(6, float64(t)*1.4, func(_ int, dx, dy float32) {
 		rl.DrawLineEx(rl.NewVector2(cx, cy), rl.NewVector2(cx+dx*r, cy+dy*r), 3, outer)
-	}
+	})
 	rl.DrawCircleV(rl.NewVector2(cx, cy), r*0.34, inner)
 }
 

@@ -3,7 +3,6 @@ package render
 import (
 	"fmt"
 	"image/color"
-	"math"
 
 	"crawler/internal/app/core"
 
@@ -392,12 +391,9 @@ func drawStatusGlyphShielded(cx, cy, r float32, col rl.Color) {
 
 func drawStatusGlyphIceArmor(cx, cy, r float32, col rl.Color) {
 	// Frost ward: a six-spoke snowflake/crystal — the universal ice mark.
-	for i := 0; i < 6; i++ {
-		ang := float64(i) * (math.Pi / 3)
-		dx := float32(math.Cos(ang)) * r * 0.68
-		dy := float32(math.Sin(ang)) * r * 0.68
-		rl.DrawLineEx(rl.NewVector2(cx, cy), rl.NewVector2(cx+dx, cy+dy), 1.5, col)
-	}
+	radialSpokes(6, 0, func(_ int, dx, dy float32) {
+		rl.DrawLineEx(rl.NewVector2(cx, cy), rl.NewVector2(cx+dx*r*0.68, cy+dy*r*0.68), 1.5, col)
+	})
 }
 
 func drawStatusGlyphDown(cx, cy, r float32, col rl.Color) {

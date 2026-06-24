@@ -85,6 +85,14 @@ const (
 	foeSliderRowH = float32(30)
 	foeColGap     = float32(26) // gutter between the two slider columns
 	foePickBtnH   = float32(28) // prev/next picker arrow height (< Name >)
+	foePickBtnW   = float32(32) // prev/next picker arrow width
+
+	// computeFoeViewLayout vertical/gutter steps.
+	foePreviewGap           = float32(18) // gutter between the preview and the right column
+	foePreviewBottomReserve = float32(50) // space below the preview for the footer row
+	foeTabRowGap            = float32(10) // gap from the name row down to the tab row
+	foeContentGap           = float32(14) // gap from the tab row down to the content
+	foeAssetBtnGap          = float32(16) // gap below the asset column before its action buttons
 	// foePreviewZoomStep is the per-wheel-notch zoom dolly (clamped render-side).
 	foePreviewZoomStep = float32(0.2)
 	// sliderHitPadY fattens a thin track's click band vertically (draw unchanged).
@@ -228,21 +236,20 @@ func computeFoeViewLayout() foeViewLayout {
 		card.X+foePad,
 		card.Y+foeHeaderH+foePad,
 		foePreviewW,
-		card.Height-foeHeaderH-foePad-50,
+		card.Height-foeHeaderH-foePad-foePreviewBottomReserve,
 	)
-	rightX := preview.X + preview.Width + 18
+	rightX := preview.X + preview.Width + foePreviewGap
 	rightW := card.X + card.Width - foePad - rightX
 
 	nameY := card.Y + foeHeaderH + foePad
-	pickBtnW := float32(32)
-	prevBtn := rl.NewRectangle(rightX, nameY, pickBtnW, foePickBtnH)
-	nextBtn := rl.NewRectangle(rightX+rightW-pickBtnW, nameY, pickBtnW, foePickBtnH)
+	prevBtn := rl.NewRectangle(rightX, nameY, foePickBtnW, foePickBtnH)
+	nextBtn := rl.NewRectangle(rightX+rightW-foePickBtnW, nameY, foePickBtnW, foePickBtnH)
 
 	// Tab row (Layout / Asset). Both tabs lay out at the same contentTop; only the
 	// active one is drawn/hit-tested (gated on State.foeViewTab).
-	tabY := nameY + foePickBtnH + 10
+	tabY := nameY + foePickBtnH + foeTabRowGap
 	tabBtns := buttonRowAt(rightX, tabY, foeViewTabLabels)
-	contentTop := tabY + float32(modalBtnH) + 14
+	contentTop := tabY + float32(modalBtnH) + foeContentGap
 
 	// Two-column slider stack (Layout tab): rightW split into two equal columns.
 	// Left column gets the ceil half (odd count → extra row left).
@@ -274,7 +281,7 @@ func computeFoeViewLayout() foeViewLayout {
 		y := contentTop + float32(row)*foeSliderRowH + (foeSliderRowH-foeSliderMetrics.trackH)/2
 		assetTracks[i] = rl.NewRectangle(colX+foeSliderMetrics.labelW, y, colTrackW, foeSliderMetrics.trackH)
 	}
-	assetBtnY := contentTop + float32(assetFirstColRows)*foeSliderRowH + 16
+	assetBtnY := contentTop + float32(assetFirstColRows)*foeSliderRowH + foeAssetBtnGap
 	assetBtns := buttonRowAt(rightX, assetBtnY, assetActionLabels)
 
 	btns := buttonRowAt(rightX, card.Y+card.Height-modalBtnH-modalBottomInset, foeViewBtnLabels)

@@ -458,7 +458,17 @@ func init() {
 	}
 	for _, def := range enemyDefinitions {
 		// Shared with the custom-enemy loader (customenemy.go).
-		if err := validateEnemyStatBounds(def.Name, def.SkillCastChance, def.PoisonChance, def.Armor, def.MDef, def.AttackDamage, def.XPValue, def.SpellPower, def.Tier); err != nil {
+		if err := validateEnemyStatBounds(enemyStatBounds{
+			Name:            def.Name,
+			SkillCastChance: def.SkillCastChance,
+			PoisonChance:    def.PoisonChance,
+			Armor:           def.Armor,
+			MDef:            def.MDef,
+			AttackDamage:    def.AttackDamage,
+			XPValue:         def.XPValue,
+			SpellPower:      def.SpellPower,
+			Tier:            def.Tier,
+		}); err != nil {
 			panic("core/enemies: " + err.Error())
 		}
 		if def.GoldMin < 0 || def.GoldMax < 0 {

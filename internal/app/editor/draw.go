@@ -611,20 +611,27 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 	render.DrawTextWithShadow(font, topbarInfoLabel, infoX, (topbarH-topbarInfoMeasure.Y)/2, editorFontLabel, theme.TextHint)
 }
 
+// layerMenuBtn* geometry for the active-layer dropdown button right of the menu
+// strip. Deliberately ~1-2px off the strip's shared tokens (buttonStripStartX=8,
+// menuBarBtnY=6, menuBarBtnH=topbarH-12) — kept as distinct NAMED values to
+// preserve the current pixels rather than nudge this button to match neighbors.
+const (
+	layerMenuBtnStartX = float32(6)
+	layerMenuBtnY      = float32(5)
+	layerMenuBtnW      = float32(172)
+	layerMenuBtnGap    = float32(16) // gap from the menu groups
+	layerMenuBtnH      = topbarH - 10
+)
+
 // layerMenuBtnRect is the active-layer dropdown button, right of the menu strip.
 // Single source for draw + hit-test + dropdown anchor.
-// NOTE: the start x (6) and y/height (5 / topbarH-10) deliberately kept as the
-// current literals; they differ ~1-2px from the menu strip's shared tokens
-// (buttonStripStartX=8, menuBarBtnY=6 / menuBarBtnH=topbarH-12). Aligning to
-// those tokens would nudge this button to match its neighbors — left as-is to
-// preserve the current pixels.
 func layerMenuBtnRect(s *State) rl.Rectangle {
-	x := float32(6)
+	x := layerMenuBtnStartX
 	for i := range menuBarBtns {
 		x += buttonWidth(menuBarBtns[i].label) + tightBtnGap
 	}
-	x += 16 // gap from the menu groups
-	return rl.NewRectangle(x, 5, 172, topbarH-10)
+	x += layerMenuBtnGap
+	return rl.NewRectangle(x, layerMenuBtnY, layerMenuBtnW, layerMenuBtnH)
 }
 
 // drawLayerMenuButton paints the active-layer dropdown trigger (accent-bordered).
@@ -952,12 +959,21 @@ func drawStepperButtons(font rl.Font, minus, plus rl.Rectangle) {
 	drawButton(font, plus, "+", false)
 }
 
+// stepperButtonPair lays out the "−"/"+" square button pair (each btnW×btnH,
+// gap apart) starting at (x,y). Shared by every numeric stepper so the −/+ sizing
+// can't drift between callers (stepperRow's value-left form + stepperFor's
+// right-anchored form).
+func stepperButtonPair(x, y, btnW, btnH, gap float32) (minus, plus rl.Rectangle) {
+	minus = rl.NewRectangle(x, y, btnW, btnH)
+	plus = rl.NewRectangle(minus.X+minus.Width+gap, y, btnW, btnH)
+	return minus, plus
+}
+
 // stepperRow lays out a numeric stepper at (x,y): a value cell of width valueW,
 // then two square "−"/"+" buttons each preceded by gap.
 func stepperRow(x, y, valueW, gap float32) (value, minus, plus rl.Rectangle) {
 	value = rl.NewRectangle(x, y, valueW, modalBtnH)
-	minus = rl.NewRectangle(value.X+value.Width+gap, y, modalBtnH, modalBtnH)
-	plus = rl.NewRectangle(minus.X+minus.Width+gap, y, modalBtnH, modalBtnH)
+	minus, plus = stepperButtonPair(value.X+value.Width+gap, y, modalBtnH, modalBtnH, gap)
 	return value, minus, plus
 }
 
@@ -1491,6 +1507,14 @@ func drawPalette(s *State, font rl.Font, theme render.Theme) {
 	}
 }
 
+// Brush-swatch row geometry: the color box is inset brushSwatchInset on all
+// sides, brushSwatchW wide; the label starts brushLabelInsetX from the row left.
+const (
+	brushSwatchInset = float32(6)
+	brushSwatchW     = float32(20)
+	brushLabelInsetX = float32(34)
+)
+
 // drawBrushSwatchRow renders one selectable brush entry: row bg (active/hover),
 // the colored swatch box (sentinel hatch when applicable), and a label.
 func drawBrushSwatchRow(font rl.Font, r rl.Rectangle, label string, layer Layer, brush Brush, active, hovered bool, labelSize float32) {
@@ -1507,7 +1531,7 @@ func drawBrushSwatchRow(font rl.Font, r rl.Rectangle, label string, layer Layer,
 	}
 	rl.DrawRectangleLinesEx(r, 1, border)
 
-	swatch := rl.NewRectangle(r.X+6, r.Y+6, 20, r.Height-12)
+	swatch := rl.NewRectangle(r.X+brushSwatchInset, r.Y+brushSwatchInset, brushSwatchW, r.Height-2*brushSwatchInset)
 	rl.DrawRectangleRec(swatch, brush.Color)
 	sentinel := isSentinelBrush(layer, brush.Char)
 	if sentinel {
@@ -1517,10 +1541,10 @@ func drawBrushSwatchRow(font rl.Font, r rl.Rectangle, label string, layer Layer,
 
 	nameCol := textEntry
 	if sentinel {
-		nameCol = rl.NewColor(190, 200, 220, 255)
+		nameCol = sentinelLabelColor
 	}
 	render.DrawRichText(font, label,
-		rl.NewVector2(r.X+34, r.Y+(r.Height-labelSize)/2),
+		rl.NewVector2(r.X+brushLabelInsetX, r.Y+(r.Height-labelSize)/2),
 		labelSize, 1, nameCol)
 }
 

@@ -33,6 +33,20 @@ func CanEquipInSlot(kind ItemKind, slot EquipSlotIndex) bool {
 	return def.Slot == SlotIndexType(slot)
 }
 
+// NormalizeTwoHandedHands enforces the two-hander-occupies-both-hands rule on an
+// equipped array: a two-hander in either hand empties the other (right wins when
+// both qualify). Canonical home for the rule, so the live equip path and the
+// load-time sanitizer can't drift. Pure — no inventory side effect (callers that
+// need the freed item routed back handle that themselves).
+func NormalizeTwoHandedHands(equipped *[EquipSlotCount]ItemKind) {
+	switch {
+	case ItemIsTwoHanded(equipped[EquipRightHand]):
+		equipped[EquipLeftHand] = ItemNone
+	case ItemIsTwoHanded(equipped[EquipLeftHand]):
+		equipped[EquipRightHand] = ItemNone
+	}
+}
+
 // ItemIsTwoHanded reports whether `kind` is a two-handed weapon (occupies both
 // hand slots). ItemNone/unregistered are false. Single home for the off-hand exclusion.
 func ItemIsTwoHanded(kind ItemKind) bool {

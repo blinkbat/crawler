@@ -64,11 +64,15 @@ func drawShopOverlay(g *core.GameState, assets Resources) {
 		rowY += stride
 	}
 
-	DrawHintBar(font, []HintSeg{
-		Hint("Buy / Sell", GlyphLB, GlyphRB),
-		Hint("Confirm", GlyphA),
-		Hint("Back", GlyphB),
-	}, float32(panelX)+float32(shopPanelW)/2, float32(panelY+panelH-shopFootH+shopHintDrop), FontSmall)
+	DrawHintBar(font, shopHints, float32(panelX)+float32(shopPanelW)/2, float32(panelY+panelH-shopFootH+shopHintDrop), FontSmall)
+}
+
+// shopHints is the shop's "Buy/Sell · Confirm · Back" footer, built once (like
+// confirmBackHints) so the panel doesn't reallocate a hint bar every frame.
+var shopHints = []HintSeg{
+	Hint("Buy / Sell", GlyphLB, GlyphRB),
+	Hint("Confirm", GlyphA),
+	Hint("Back", GlyphB),
 }
 
 // shopRowsCache memoizes the active tab's rows to avoid a slice alloc + per-row

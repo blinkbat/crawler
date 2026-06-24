@@ -153,10 +153,18 @@ func checkEnemyWipeout(g *core.GameState) bool {
 // roster (so Update's hoisted slice is reused). A nil pack never wins — empty
 // members must NOT look like a wipe and re-award spoils against a gone pack.
 func checkEnemyWipeoutFor(g *core.GameState, pack *core.Pack, members []core.Enemy) bool {
+	return winIfEnemiesWiped(g, pack, members, core.LastBattleEnemyFallsMessage())
+}
+
+// winIfEnemiesWiped wins the battle with `message` iff a real pack has no living
+// member left. Shared by the standard last-enemy-down path and flavor kills (e.g.
+// burn) that supply their own message. A nil pack never wins — empty members must
+// NOT look like a wipe and re-award spoils against a gone pack.
+func winIfEnemiesWiped(g *core.GameState, pack *core.Pack, members []core.Enemy, message string) bool {
 	if pack == nil || core.CountLivingEnemies(members) != 0 {
 		return false
 	}
-	winBattle(g, core.LastBattleEnemyFallsMessage())
+	winBattle(g, message)
 	return true
 }
 
@@ -440,11 +448,7 @@ func startActorTurn(g *core.GameState) {
 		// Burn ticks at the burning actor's turn start; a burn-kill skips their
 		// action and checks win in case it took the last enemy.
 		if killed := tickBurnAtTurnStart(g, actor); killed {
-			// Win only against a REAL pack: LivingBattleCount reads a nil/stale
-			// ActivePack as 0, which must not look like a wipe and re-award spoils
-			// against a gone pack (same guard checkEnemyWipeoutFor carries).
-			if core.ActivePack(g) != nil && core.LivingBattleCount(g) == 0 {
-				winBattle(g, "The fire finishes them.")
+			if winIfEnemiesWiped(g, core.ActivePack(g), core.BattleMembers(g), "The fire finishes them.") {
 				return
 			}
 			g.Battle.QueueCursor++

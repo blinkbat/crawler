@@ -18,6 +18,18 @@ type TileRegion struct {
 // Empty reports whether the region has nothing to paste.
 func (r TileRegion) Empty() bool { return r.W <= 0 || r.H <= 0 || len(r.Layers) == 0 }
 
+// clampSubstr returns s[lo:hi] with both bounds clamped to len(s) (lo<=hi
+// assumed), tolerating ragged source rows shorter than the copied rectangle.
+func clampSubstr(s string, lo, hi int) string {
+	if lo > len(s) {
+		lo = len(s)
+	}
+	if hi > len(s) {
+		hi = len(s)
+	}
+	return s[lo:hi]
+}
+
 // CopyRegion snapshots the inclusive rectangle (x0,z0)-(x1,z1) (any corner
 // order) across all grid layers; coords clamped to the area, degenerate yields
 // empty. Returned strings are immutable, so the snapshot survives later source edits.
@@ -46,15 +58,7 @@ func CopyRegion(a *AreaDefinition, x0, z0, x1, z1 int) TileRegion {
 			if z >= len(*lp) {
 				continue // ragged: leave row ""
 			}
-			src := (*lp)[z]
-			lo, hi := x0, x1+1
-			if lo > len(src) {
-				lo = len(src)
-			}
-			if hi > len(src) {
-				hi = len(src)
-			}
-			rows[i] = src[lo:hi]
+			rows[i] = clampSubstr((*lp)[z], x0, x1+1)
 		}
 		out.Layers[li] = rows
 	}
@@ -69,15 +73,7 @@ func CopyRegion(a *AreaDefinition, x0, z0, x1, z1 int) TileRegion {
 				if z >= len(a.Solids[L]) {
 					continue
 				}
-				src := a.Solids[L][z]
-				lo, hi := x0, x1+1
-				if lo > len(src) {
-					lo = len(src)
-				}
-				if hi > len(src) {
-					hi = len(src)
-				}
-				rows[i] = src[lo:hi]
+				rows[i] = clampSubstr(a.Solids[L][z], x0, x1+1)
 			}
 			planes[L] = rows
 		}

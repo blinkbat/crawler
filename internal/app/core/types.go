@@ -663,6 +663,12 @@ type Stats struct {
 	SPD int
 }
 
+// Negated returns the stat block with every field sign-flipped — turns a buff
+// delta into the matching debuff (see NegStatDebuff).
+func (s Stats) Negated() Stats {
+	return Stats{STR: -s.STR, DEX: -s.DEX, INT: -s.INT, WIS: -s.WIS, VIT: -s.VIT, SPD: -s.SPD}
+}
+
 // StatusMod is one active timed stat/defense modifier — the unit of the
 // STACKABLE buff/debuff system. Mods coexist and SUM; keyed by Source, so
 // re-casting the SAME skill REFRESHES (no double-stack), different skills add
@@ -817,6 +823,22 @@ func MaxHPFor(s Stats) int {
 // single home for the formula so preview + god-mode boost can't drift.
 func MPForINTDelta(delta int) int {
 	return delta * MPPerINT
+}
+
+// MaxMPFor returns a class's derived MaxMP for the given stats: the class base
+// plus MPForINTDelta for INT gained since creation. Mirrors MaxHPFor so the load
+// path can re-derive instead of trusting a persisted value. Floors at 0. Returns
+// ok=false for an unknown class (no proto to anchor the base).
+func MaxMPFor(class PartyClass, stats Stats) (int, bool) {
+	proto, ok := partyClassByID[class]
+	if !ok {
+		return 0, false
+	}
+	mp := proto.MaxMP + MPForINTDelta(stats.INT-proto.Stats.INT)
+	if mp < 0 {
+		mp = 0
+	}
+	return mp, true
 }
 
 // MeleeDamage = STR + skill base. Used for Attack, Swipe, etc.

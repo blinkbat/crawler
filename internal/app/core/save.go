@@ -234,31 +234,24 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	// Overlay saved crystal charge by TILE, not index: an edited map can yield
 	// the same crystal COUNT at a different tile, and an index overlay would
 	// re-arm a spent charge onto a relocated crystal.
-	usedSave := make([]bool, len(data.Crystals))
-	for i := range g.Crystals {
-		for j := range data.Crystals {
-			// One save record arms at most one live crystal; without this, two
-			// crystals sharing a tile would both read the same saved charge.
-			if usedSave[j] {
-				continue
-			}
+	matchUniqueOnce(len(g.Crystals), len(data.Crystals),
+		func(i, j int) bool {
 			cs := data.Crystals[j]
 			// Skip legacy phantoms (old format, no TileX/TileZ, decode as (0,0));
 			// the Saved flag distinguishes a real (0,0) crystal from a phantom.
 			if !cs.Saved && cs.TileX == 0 && cs.TileZ == 0 {
-				continue
+				return false
 			}
-			if cs.TileX == g.Crystals[i].TileX && cs.TileZ == g.Crystals[i].TileZ {
-				// Clamp the saved charge to [0, ceiling] (trust boundary). Honor
-				// the saved Charged flag — it's the authoritative armed state;
-				// re-deriving from Charge would discard it.
-				g.Crystals[i].Charge = Clamp(cs.Charge, 0, CrystalRechargeSteps)
-				g.Crystals[i].Charged = cs.Charged
-				usedSave[j] = true
-				break
-			}
-		}
-	}
+			return cs.TileX == g.Crystals[i].TileX && cs.TileZ == g.Crystals[i].TileZ
+		},
+		func(i, j int) {
+			// Clamp the saved charge to [0, ceiling] (trust boundary). Honor the
+			// saved Charged flag — it's the authoritative armed state; re-deriving
+			// from Charge would discard it.
+			cs := data.Crystals[j]
+			g.Crystals[i].Charge = Clamp(cs.Charge, 0, CrystalRechargeSteps)
+			g.Crystals[i].Charged = cs.Charged
+		})
 	// Place at the saved tile, falling back to the authored start if it's
 	// out-of-bounds or now blocked (map may have shrunk). Check the RAW coords:
 	// clamping to an edge first could silently drop the party at a walkable corner.
@@ -287,13 +280,24 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 // unknown-class members are dropped, unmatched slots keep their fresh default.
 // `saved` must already be sanitized by sanitizeLoadedParty.
 func overlaySavedParty(base, saved []PartyMember) {
-	used := make([]bool, len(saved))
-	for i := range base {
-		for j := range saved {
-			if used[j] || saved[j].Class != base[i].Class {
+	matchUniqueOnce(len(base), len(saved),
+		func(i, j int) bool { return saved[j].Class == base[i].Class },
+		func(i, j int) { base[i] = saved[j] })
+}
+
+// matchUniqueOnce pairs each dst index with the first eligible, not-yet-consumed
+// src index, consuming each src at most once: eligible(i,j) gates the pairing and
+// apply(i,j) performs it. Shared by the load-time overlays (crystal charge by
+// tile, party run-state by class) so the "one source claims one target" rule
+// lives in one place.
+func matchUniqueOnce(dstLen, srcLen int, eligible func(i, j int) bool, apply func(i, j int)) {
+	used := make([]bool, srcLen)
+	for i := 0; i < dstLen; i++ {
+		for j := 0; j < srcLen; j++ {
+			if used[j] || !eligible(i, j) {
 				continue
 			}
-			base[i] = saved[j]
+			apply(i, j)
 			used[j] = true
 			break
 		}
@@ -312,11 +316,10 @@ func sanitizeLoadedParty(party []PartyMember) {
 		if m.MaxHP < 1 {
 			m.MaxHP = 1
 		}
-		// MaxMP = class base + MPPerINT per INT gained since creation; re-derive
-		// from the class proto (the only stateful input is current INT) so a
-		// drifted/hand-edited value can't stand. Unknown class → just floor.
-		if proto, ok := partyClassByID[m.Class]; ok {
-			m.MaxMP = proto.MaxMP + MPForINTDelta(m.Stats.INT-proto.Stats.INT)
+		// MaxMP is class+INT-derived (MaxMPFor); re-derive rather than trust the
+		// persisted number. Unknown class has no proto to anchor it → just floor.
+		if mp, ok := MaxMPFor(m.Class, m.Stats); ok {
+			m.MaxMP = mp
 		}
 		if m.MaxMP < 0 {
 			m.MaxMP = 0
@@ -347,14 +350,8 @@ func sanitizeLoadedParty(party []PartyMember) {
 		}
 		// Two-handers occupy BOTH hands. A hand-edited save can carry one beside
 		// an off-hand item (or duplicated), and foldEquipment sums all slots, so
-		// bonuses would double-count. Mirror the equip rule: a two-hander in
-		// either hand empties the other (right wins when both qualify).
-		switch {
-		case ItemIsTwoHanded(m.Equipped[EquipRightHand]):
-			m.Equipped[EquipLeftHand] = ItemNone
-		case ItemIsTwoHanded(m.Equipped[EquipLeftHand]):
-			m.Equipped[EquipRightHand] = ItemNone
-		}
+		// bonuses would double-count. Re-apply the canonical equip rule.
+		NormalizeTwoHandedHands(&m.Equipped)
 		// Clone the decoded progression maps so the live party doesn't alias
 		// `data.Party`'s (overlaySavedParty shallow-copies; maps.Clone keeps nil).
 		m.SkillTiers = maps.Clone(m.SkillTiers)

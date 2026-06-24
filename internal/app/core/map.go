@@ -897,6 +897,19 @@ func CrystalSpawnIndexAt(spawns []CrystalSpawn, x, z int) int {
 	return SpawnIndexAt(spawns, x, z)
 }
 
+// spawnSummaryProbes lists every spawn-entity type AreaTileSummary surfaces, one
+// row per AreaDefinition spawn list. Add a spawn list → add a row here; missing
+// rows are caught by TestSpawnSummaryProbesCoverAllSpawns.
+var spawnSummaryProbes = []struct {
+	label   string
+	present func(a *AreaDefinition, x, z int) bool
+}{
+	{"Pack", func(a *AreaDefinition, x, z int) bool { return PackSpawnIndexAt(a.PackSpawns, x, z) >= 0 }},
+	{"Chest", func(a *AreaDefinition, x, z int) bool { return ChestSpawnIndexAt(a.ChestSpawns, x, z) >= 0 }},
+	{"Door", func(a *AreaDefinition, x, z int) bool { return DoorSpawnIndexAt(a.DoorSpawns, x, z) >= 0 }},
+	{"Crystal", func(a *AreaDefinition, x, z int) bool { return CrystalSpawnIndexAt(a.CrystalSpawns, x, z) >= 0 }},
+}
+
 // AreaTileSummary describes what's painted on (x,z) across every layer + entity
 // list, omitting empty layers. "(empty)" when nothing, "" when OOB.
 func AreaTileSummary(a *AreaDefinition, x, z int) string {
@@ -927,19 +940,10 @@ func AreaTileSummary(a *AreaDefinition, x, z int) string {
 	if a.StartTileX == x && a.StartTileZ == z {
 		parts = append(parts, "Start")
 	}
-	// Hand-maintained per spawn-entity type (no coverage assert) — add a new
-	// spawn list to AreaDefinition and it won't show here until you add a branch.
-	if PackSpawnIndexAt(a.PackSpawns, x, z) >= 0 {
-		parts = append(parts, "Pack")
-	}
-	if ChestSpawnIndexAt(a.ChestSpawns, x, z) >= 0 {
-		parts = append(parts, "Chest")
-	}
-	if DoorSpawnIndexAt(a.DoorSpawns, x, z) >= 0 {
-		parts = append(parts, "Door")
-	}
-	if CrystalSpawnIndexAt(a.CrystalSpawns, x, z) >= 0 {
-		parts = append(parts, "Crystal")
+	for _, probe := range spawnSummaryProbes {
+		if probe.present(a, x, z) {
+			parts = append(parts, probe.label)
+		}
 	}
 	if len(parts) == 0 {
 		return "(empty)"
@@ -1141,19 +1145,51 @@ func IsPropChar(c byte) bool {
 	return ok
 }
 
-// decorTileCharList is the canonical list of every explicit decor char with a
-// renderable model. '.' (auto) and '_' (force-empty) are excluded sentinels.
+// decorDef is one explicit decor-layer entry: char + TileLabel. decorDefs is the
+// SINGLE source for the decor char list and the decor row of tileLabelTable
+// (populated in init) — mirrors propDefs. '.' (auto) and '_' (force-empty) are
+// sentinels, kept out of the list and labelled "" directly in tileLabelTable.
 // The renderer asserts each entry has a model.
-var decorTileCharList = []byte{
-	DecorBush, DecorMushroom, DecorPebble,
-	DecorTallGrass, DecorFlowers, DecorClover, DecorReeds,
-	DecorBones, DecorScorch, DecorBlood, DecorCobweb,
-	DecorStump, DecorLog, DecorLeafPile,
-	DecorArchway, DecorArchwayTail,
-	DecorLilypad,
-	DecorRug, DecorCandle, DecorBootprints,
-	DecorAshHeap, DecorPuddle, DecorRootCluster,
+type decorDef struct {
+	Char  byte
+	Label string
 }
+
+var decorDefs = []decorDef{
+	{DecorBush, "Bush"},
+	{DecorMushroom, "Mushroom"},
+	{DecorPebble, "Pebble"},
+	{DecorTallGrass, "Tall Grass"},
+	{DecorFlowers, "Flowers"},
+	{DecorClover, "Clover"},
+	{DecorReeds, "Reeds"},
+	{DecorBones, "Bones"},
+	{DecorScorch, "Scorch"},
+	{DecorBlood, "Blood"},
+	{DecorCobweb, "Cobweb"},
+	{DecorStump, "Stump"},
+	{DecorLog, "Log"},
+	{DecorLeafPile, "Leaf Pile"},
+	{DecorArchway, "Arch (left)"},
+	{DecorArchwayTail, "Arch (right)"},
+	{DecorLilypad, "Lilypad"},
+	{DecorRug, "Rug"},
+	{DecorCandle, "Candle"},
+	{DecorBootprints, "Boot Prints"},
+	{DecorAshHeap, "Ash Heap"},
+	{DecorPuddle, "Puddle"},
+	{DecorRootCluster, "Roots"},
+}
+
+// decorTileCharList is the canonical list of every explicit decor char, derived
+// from decorDefs.
+var decorTileCharList = func() []byte {
+	out := make([]byte, len(decorDefs))
+	for i, d := range decorDefs {
+		out[i] = d.Char
+	}
+	return out
+}()
 
 // DecorTileChars returns a defensive copy of every renderable decor char.
 func DecorTileChars() []byte {
@@ -1233,32 +1269,11 @@ var tileLabelTable = map[TileLayer]map[byte]string{
 		FloorRampSouth: "Ramp ↓S",
 		FloorRampWest:  "Ramp ←W",
 	},
+	// Decor labels are populated from decorDefs in init (single source); only the
+	// sentinels live here.
 	TileLayerDecor: {
-		DecorAuto:        "",
-		DecorEmpty:       "",
-		DecorBush:        "Bush",
-		DecorMushroom:    "Mushroom",
-		DecorPebble:      "Pebble",
-		DecorTallGrass:   "Tall Grass",
-		DecorFlowers:     "Flowers",
-		DecorClover:      "Clover",
-		DecorReeds:       "Reeds",
-		DecorBones:       "Bones",
-		DecorScorch:      "Scorch",
-		DecorBlood:       "Blood",
-		DecorCobweb:      "Cobweb",
-		DecorStump:       "Stump",
-		DecorLog:         "Log",
-		DecorLeafPile:    "Leaf Pile",
-		DecorArchway:     "Arch (left)",
-		DecorArchwayTail: "Arch (right)",
-		DecorLilypad:     "Lilypad",
-		DecorRug:         "Rug",
-		DecorCandle:      "Candle",
-		DecorBootprints:  "Boot Prints",
-		DecorAshHeap:     "Ash Heap",
-		DecorPuddle:      "Puddle",
-		DecorRootCluster: "Roots",
+		DecorAuto:  "",
+		DecorEmpty: "",
 	},
 	// Props labels are populated from propDefs in init (single source); only the
 	// empty sentinel lives here.
@@ -1281,6 +1296,11 @@ func init() {
 	propLabelsInit := tileLabelTable[TileLayerProps]
 	for _, d := range propDefs {
 		propLabelsInit[d.Char] = d.Label
+	}
+	// Derive decor labels from decorDefs (the single decor registry).
+	decorLabelsInit := tileLabelTable[TileLayerDecor]
+	for _, d := range decorDefs {
+		decorLabelsInit[d.Char] = d.Label
 	}
 	floorLabels := tileLabelTable[TileLayerFloor]
 	for _, c := range floorTileCharList {
@@ -1308,12 +1328,11 @@ func init() {
 	assertLabelsSubsetOf(decorLabels, decorTileCharList, "decor")
 	assertLabelsSubsetOf(propLabels, propTileCharList, "prop")
 	assertNoUnregisteredCrossLayerOverlaps()
-	// core/mapfile's elevation parser hardcodes the top-level char 'K' for its
-	// validation range (it can't import core). Pin it here so bumping
-	// MaxElevationLevel can't silently desync the two — if this fires, update the
-	// 'A'..'K' bound in core/mapfile/mapfile.go to match.
-	if c := ElevationChar(MaxElevationLevel); c != 'K' {
-		panic(fmt.Sprintf("core: ElevationChar(MaxElevationLevel)=%q but core/mapfile hardcodes 'K' — update mapfile.go's elevation bound", c))
+	// core/mapfile's elevation parser bounds its level alphabet at mapfile.MaxLevelChar
+	// (it can't import core). Pin it here so bumping MaxElevationLevel can't silently
+	// desync the two — if this fires, update mapfile.MaxLevelChar to match.
+	if c := ElevationChar(MaxElevationLevel); c != mapfile.MaxLevelChar {
+		panic(fmt.Sprintf("core: ElevationChar(MaxElevationLevel)=%q but mapfile.MaxLevelChar=%q — bump them together", c, rune(mapfile.MaxLevelChar)))
 	}
 }
 

@@ -1520,7 +1520,7 @@ func applySmokeBomb(g *core.GameState, quality int) bool {
 	actor := beginPartyAction(g)
 	effect := core.EffectiveSkillEffect(actor, core.SkillSmokeBomb)
 	buffed := stampPartyWideBuff(g, effect, core.SkillSmokeBomb)
-	enemyDebuff := core.SkillEffect{BuffStats: core.Stats{DEX: -effect.BuffStats.DEX}, BuffTurns: effect.BuffTurns}
+	enemyDebuff := core.NegStatDebuff(core.Stats{DEX: effect.BuffStats.DEX}, effect.BuffTurns)
 	blinded := 0
 	if effect.BuffStats.DEX != 0 {
 		// Only stamp (and count) when the DEX delta is real — a zero-DEX effect
@@ -2408,6 +2408,30 @@ func applyBloodthirst(g *core.GameState, actor core.ActorRef) {
 	bloodthirstHeal(g, actor.Index, g.Battle.PhysDamageThisTurn)
 }
 
+// offTurnReflect applies an off-turn counter-strike at enemySlot for `raw` damage
+// with the given tag/VFX, prints the defeated/dealt messages, and returns the
+// damage dealt. The strike is kept OUT of the per-turn Bloodthirst tally
+// (snapshot/restore) since it lands outside the actor's own turn; callers that
+// should still lifesteal feed the returned amount to bloodthirstHeal explicitly.
+// Shared by tryRiposte (phys) and tryRetribution (magic).
+func offTurnReflect(g *core.GameState, enemySlot, raw int, tag core.SkillTag, vfx core.VFXKind, defeatedMsg, dealtMsg func(noun string, amount int) string) (dealt int, defeated bool) {
+	enemy, ok := livingEnemyAt(g, enemySlot)
+	if !ok {
+		return 0, false
+	}
+	noun := core.EnemySingularNoun(*enemy)
+	physTally := g.Battle.PhysDamageThisTurn
+	dealt, defeated = damageEnemy(g, enemySlot, raw, core.TimingQualityGood, tag)
+	g.Battle.PhysDamageThisTurn = physTally
+	core.EnqueueEnemyVFX(g, vfx, enemySlot)
+	if defeated {
+		setBattleMessageCat(g, defeatedMsg(noun, dealt), core.LogDeath)
+	} else if dealt > 0 {
+		setBattleMessageCat(g, dealtMsg(noun, dealt), core.LogDamageFoe)
+	}
+	return dealt, defeated
+}
+
 // tryRiposte fires the Warrior's Battle Sense counter on a DODGE: an immediate
 // phys strike at the attacker for RiposteDamageMult of the dodger's basic damage.
 // No-op without the node or on a dead attacker.
@@ -2419,26 +2443,14 @@ func tryRiposte(g *core.GameState, dodger, enemySlot int) {
 	if core.PassiveRank(member, core.PassiveRiposte) <= 0 {
 		return
 	}
-	enemy, ok := livingEnemyAt(g, enemySlot)
-	if !ok {
-		return
-	}
 	raw := int(float64(core.MemberAttackDamage(*member, 0)) * core.RiposteDamageMult)
 	if raw < 1 {
 		raw = 1
 	}
-	noun := core.EnemySingularNoun(*enemy)
-	// Keep this counter OUT of the per-turn Bloodthirst tally (it lands on the
-	// enemy's turn and lifesteals directly below): snapshot/restore around the strike.
-	physTally := g.Battle.PhysDamageThisTurn
-	dealt, defeated := damageEnemy(g, enemySlot, raw, core.TimingQualityGood, core.SkillTagPhys)
-	g.Battle.PhysDamageThisTurn = physTally
-	core.EnqueueEnemyVFX(g, core.WeaponHitVFX(core.EquippedWeapon(*member)), enemySlot)
-	if defeated {
-		setBattleMessageCat(g, fmt.Sprintf("%s ripostes — the %s drops!", member.Name, noun), core.LogDeath)
-	} else if dealt > 0 {
-		setBattleMessageCat(g, fmt.Sprintf("%s ripostes the %s for %d.", member.Name, noun, dealt), core.LogDamageFoe)
-	}
+	name := member.Name
+	dealt, _ := offTurnReflect(g, enemySlot, raw, core.SkillTagPhys, core.WeaponHitVFX(core.EquippedWeapon(*member)),
+		func(noun string, _ int) string { return fmt.Sprintf("%s ripostes — the %s drops!", name, noun) },
+		func(noun string, amount int) string { return fmt.Sprintf("%s ripostes the %s for %d.", name, noun, amount) })
 	// Feed Bloodthirst directly (the enemy-turn tally would otherwise drop it).
 	bloodthirstHeal(g, dodger, dealt)
 }
@@ -2458,22 +2470,14 @@ func tryRetribution(g *core.GameState, enemySlot, defender, dealt int) {
 	if rank <= 0 {
 		return
 	}
-	enemy, ok := livingEnemyAt(g, enemySlot)
-	if !ok {
-		return
-	}
 	reflect := int(float64(dealt) * float64(rank) * core.RetributionReflectPerRank)
 	if reflect < 1 {
 		return
 	}
-	noun := core.EnemySingularNoun(*enemy)
-	refl, defeated := damageEnemy(g, enemySlot, reflect, core.TimingQualityGood, core.SkillTagMagic)
-	core.EnqueueEnemyVFX(g, core.VFXSmite, enemySlot)
-	if defeated {
-		setBattleMessageCat(g, fmt.Sprintf("%s's retribution fells the %s for %d!", g.Party[defender].Name, noun, refl), core.LogDeath)
-	} else if refl > 0 {
-		setBattleMessageCat(g, fmt.Sprintf("The %s takes %d from %s's retribution.", noun, refl, g.Party[defender].Name), core.LogDamageFoe)
-	}
+	name := g.Party[defender].Name
+	offTurnReflect(g, enemySlot, reflect, core.SkillTagMagic, core.VFXSmite,
+		func(noun string, amount int) string { return fmt.Sprintf("%s's retribution fells the %s for %d!", name, noun, amount) },
+		func(noun string, amount int) string { return fmt.Sprintf("The %s takes %d from %s's retribution.", noun, amount, name) })
 }
 
 func resolveEnemyMiss(g *core.GameState, slot int) {
@@ -2553,7 +2557,7 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	// Ice Armor reprisal: a connecting attack on a frost-warded defender chills its
 	// attacker (SPD debuff). Lands on contact even if Defended to 0; overwrites (no-stack).
 	if g.Party[target].IceArmorTurns > 0 && enemy.HP > 0 {
-		if core.StampEnemyDebuff(enemy, core.SkillIceArmor, core.SkillEffect{BuffStats: core.Stats{SPD: -core.IceArmorChillSPD}, BuffTurns: core.IceArmorChillTurns}) {
+		if core.StampEnemyDebuff(enemy, core.SkillIceArmor, core.NegStatDebuff(core.Stats{SPD: core.IceArmorChillSPD}, core.IceArmorChillTurns)) {
 			setBattleMessage(g, fmt.Sprintf("%s's ice armor chills the %s.", g.Party[target].Name, core.EnemySingularNoun(*enemy)))
 		}
 	}

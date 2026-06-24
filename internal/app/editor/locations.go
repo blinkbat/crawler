@@ -86,11 +86,12 @@ type locEditLayout struct {
 	deleteBtn, backBtn rl.Rectangle
 }
 
-// stepperFor splits a full-width row into a label area (left) + −/+ buttons (right).
+// stepperFor splits a full-width row into a label area (left) + −/+ buttons
+// (right-anchored), sharing the stepperButtonPair sizing primitive.
 func stepperFor(row rl.Rectangle) locStepper {
 	const btn = float32(34)
-	plus := rl.NewRectangle(row.X+row.Width-btn, row.Y, btn, row.Height)
-	minus := rl.NewRectangle(plus.X-btn-6, row.Y, btn, row.Height)
+	const gap = float32(6)
+	minus, plus := stepperButtonPair(row.X+row.Width-2*btn-gap, row.Y, btn, row.Height, gap)
 	return locStepper{row: row, minus: minus, plus: plus}
 }
 

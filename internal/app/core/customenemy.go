@@ -93,20 +93,34 @@ func DefaultCustomEnemy(name string, base EnemyKind) CustomEnemyDef {
 	return def
 }
 
+// enemyStatBounds names the combat-stat fields validateEnemyStatBounds checks, so
+// callers can't transpose armor/mdef/attack/xp/spellpower/tier into the wrong slot
+// (they're all bare ints). PoisonChance is absent on custom enemies — leave it 0.
+type enemyStatBounds struct {
+	Name            string
+	SkillCastChance float64
+	PoisonChance    float64
+	Armor           int
+	MDef            int
+	AttackDamage    int
+	XPValue         int
+	SpellPower      int
+	Tier            int
+}
+
 // validateEnemyStatBounds checks combat-stat fields shared by the static registry and custom
 // enemies: proc chances (SkillCastChance, PoisonChance) must be in [0,1]; mitigation/reward/damage
 // must be non-negative. Shared so registry init (panic) and the map loader (author error) agree.
-// CustomEnemyDef has no PoisonChance, so the custom path passes 0.
-func validateEnemyStatBounds(name string, skillCastChance, poisonChance float64, armor, mdef, attackDamage, xpValue, spellPower, tier int) error {
-	if !ValidChance(skillCastChance) {
-		return fmt.Errorf("enemy %q has SkillCastChance %v outside [0, 1]", name, skillCastChance)
+func validateEnemyStatBounds(b enemyStatBounds) error {
+	if !ValidChance(b.SkillCastChance) {
+		return fmt.Errorf("enemy %q has SkillCastChance %v outside [0, 1]", b.Name, b.SkillCastChance)
 	}
-	if !ValidChance(poisonChance) {
-		return fmt.Errorf("enemy %q has PoisonChance %v outside [0, 1]", name, poisonChance)
+	if !ValidChance(b.PoisonChance) {
+		return fmt.Errorf("enemy %q has PoisonChance %v outside [0, 1]", b.Name, b.PoisonChance)
 	}
 	// Tier included so the save path agrees with the loader (parseCustomEnemyLine rejects negatives).
-	if armor < 0 || mdef < 0 || attackDamage < 0 || xpValue < 0 || spellPower < 0 || tier < 0 {
-		return fmt.Errorf("enemy %q has a negative stat field (armor/mdef/attack/xp/spellpower/tier)", name)
+	if b.Armor < 0 || b.MDef < 0 || b.AttackDamage < 0 || b.XPValue < 0 || b.SpellPower < 0 || b.Tier < 0 {
+		return fmt.Errorf("enemy %q has a negative stat field (armor/mdef/attack/xp/spellpower/tier)", b.Name)
 	}
 	return nil
 }
@@ -126,12 +140,26 @@ func validateCustomEnemyExtras(name string, hp, mp int) error {
 
 // validateCustomEnemy runs BOTH custom-enemy guards (HP/MP extras + shared stat
 // bounds) so the loader and writer can't drift on which checks they apply. The
-// custom path has no PoisonChance, so it passes 0.
-func validateCustomEnemy(name string, hp, mp int, skillCastChance float64, armor, mdef, attackDamage, xpValue, spellPower, tier int) error {
-	if err := validateCustomEnemyExtras(name, hp, mp); err != nil {
+// custom path has no PoisonChance, so bounds.PoisonChance stays 0.
+func validateCustomEnemy(hp, mp int, bounds enemyStatBounds) error {
+	if err := validateCustomEnemyExtras(bounds.Name, hp, mp); err != nil {
 		return err
 	}
-	return validateEnemyStatBounds(name, skillCastChance, 0, armor, mdef, attackDamage, xpValue, spellPower, tier)
+	return validateEnemyStatBounds(bounds)
+}
+
+// customEnemyBounds builds the shared stat-bounds payload from a core definition.
+func customEnemyBounds(ce CustomEnemyDef) enemyStatBounds {
+	return enemyStatBounds{
+		Name:            ce.Name,
+		SkillCastChance: ce.SkillCastChance,
+		Armor:           ce.Armor,
+		MDef:            ce.MDef,
+		AttackDamage:    ce.AttackDamage,
+		XPValue:         ce.XPValue,
+		SpellPower:      ce.SpellPower,
+		Tier:            ce.Tier,
+	}
 }
 
 // CustomEnemyDefFromMap converts one on-disk custom enemy row into the core definition.
@@ -141,7 +169,17 @@ func CustomEnemyDefFromMap(ce mapfile.MapCustomEnemy) (CustomEnemyDef, error) {
 		return CustomEnemyDef{}, fmt.Errorf("custom enemy %q references unknown base kind %q", ce.Name, ce.BaseKind)
 	}
 	// Refuse bad rows at load (shared with the writer so the two can't drift).
-	if err := validateCustomEnemy(ce.Name, ce.HP, ce.MP, ce.SkillCastChance, ce.Armor, ce.MDef, ce.AttackDamage, ce.XPValue, ce.SpellPower, ce.Tier); err != nil {
+	bounds := enemyStatBounds{
+		Name:            ce.Name,
+		SkillCastChance: ce.SkillCastChance,
+		Armor:           ce.Armor,
+		MDef:            ce.MDef,
+		AttackDamage:    ce.AttackDamage,
+		XPValue:         ce.XPValue,
+		SpellPower:      ce.SpellPower,
+		Tier:            ce.Tier,
+	}
+	if err := validateCustomEnemy(ce.HP, ce.MP, bounds); err != nil {
 		return CustomEnemyDef{}, err
 	}
 	skills := make([]SkillID, 0, len(ce.Skills))
@@ -177,7 +215,7 @@ func MapCustomEnemyFromDef(ce CustomEnemyDef) (mapfile.MapCustomEnemy, error) {
 	}
 	// Validate on the way OUT too: a non-editor writer (importer/script) could otherwise persist a
 	// field the loader would refuse, yielding an unloadable map.
-	if err := validateCustomEnemy(ce.Name, ce.HP, ce.MP, ce.SkillCastChance, ce.Armor, ce.MDef, ce.AttackDamage, ce.XPValue, ce.SpellPower, ce.Tier); err != nil {
+	if err := validateCustomEnemy(ce.HP, ce.MP, customEnemyBounds(ce)); err != nil {
 		return mapfile.MapCustomEnemy{}, err
 	}
 	skillNames := make([]string, 0, len(ce.Skills))

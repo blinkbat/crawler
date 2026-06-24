@@ -66,13 +66,15 @@ func LoadArea(path string) (AreaDefinition, error) {
 	return AreaFromMapFile(mf, path)
 }
 
-// inBoundsWH reports whether tile (x,z) lies inside a w×h grid (used before the
-// AreaDefinition — and its InBounds — exists). Delegates to the one definition.
-func inBoundsWH(x, z, w, h int) bool { return mapfile.InBoundsWH(x, z, w, h) }
-
 // oobErr is the shared "<what> is out of bounds" spawn-validation error.
 func oobErr(what string, x, z, w, h int) error {
 	return fmt.Errorf("%s at (%d,%d) is out of bounds for %dx%d", what, x, z, w, h)
+}
+
+// onStartErr rejects a tile-blocking spawn that sits on the player start (would
+// embed/soft-lock the spawn). Shared by every spawn type that blocks its tile.
+func onStartErr(what string, x, z int) error {
+	return fmt.Errorf("%s at (%d,%d) sits on the player start", what, x, z)
 }
 
 // validateLayerDims checks a layer's row count and per-row width against w×h,
@@ -140,7 +142,7 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 			return AreaDefinition{}, err
 		}
 	}
-	if !inBoundsWH(mf.StartX, mf.StartZ, mf.Width, mf.Height) {
+	if !mapfile.InBoundsWH(mf.StartX, mf.StartZ, mf.Width, mf.Height) {
 		return AreaDefinition{}, oobErr("start position", mf.StartX, mf.StartZ, mf.Width, mf.Height)
 	}
 	customs := make([]CustomEnemyDef, 0, len(mf.CustomEnemies))
@@ -153,7 +155,7 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	}
 	spawns := make([]PackSpawn, 0, len(mf.Packs))
 	for _, p := range mf.Packs {
-		if !inBoundsWH(p.X, p.Z, mf.Width, mf.Height) {
+		if !mapfile.InBoundsWH(p.X, p.Z, mf.Width, mf.Height) {
 			return AreaDefinition{}, oobErr("pack", p.X, p.Z, mf.Width, mf.Height)
 		}
 		if len(p.Members) == 0 {
@@ -179,13 +181,13 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	}
 	chests := make([]ChestSpawn, 0, len(mf.Chests))
 	for _, c := range mf.Chests {
-		if !inBoundsWH(c.X, c.Z, mf.Width, mf.Height) {
+		if !mapfile.InBoundsWH(c.X, c.Z, mf.Width, mf.Height) {
 			return AreaDefinition{}, oobErr("chest", c.X, c.Z, mf.Width, mf.Height)
 		}
 		// A chest on the player start would soft-lock the spawn (blocks the tile).
 		// Reject loudly here; placeChests silently drops it at runtime.
 		if c.X == mf.StartX && c.Z == mf.StartZ {
-			return AreaDefinition{}, fmt.Errorf("chest at (%d,%d) sits on the player start", c.X, c.Z)
+			return AreaDefinition{}, onStartErr("chest", c.X, c.Z)
 		}
 		kinds := make([]ItemKind, 0, len(c.Items))
 		for _, name := range c.Items {
@@ -202,7 +204,7 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	// now-wrong cross-map target. Display sites resolve "self" to the area name.
 	doors := make([]DoorSpawn, 0, len(mf.Doors))
 	for _, d := range mf.Doors {
-		if !inBoundsWH(d.X, d.Z, mf.Width, mf.Height) {
+		if !mapfile.InBoundsWH(d.X, d.Z, mf.Width, mf.Height) {
 			return AreaDefinition{}, oobErr(fmt.Sprintf("door %q", d.Name), d.X, d.Z, mf.Width, mf.Height)
 		}
 		facing, ok := facingFromName(d.Facing)
@@ -278,7 +280,7 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		// Crystals now block their tile, so one on the player start would embed the
 		// spawn — reject loudly (mirrors the chest-on-start rule).
 		if c.TileX == mf.StartX && c.TileZ == mf.StartZ {
-			return AreaDefinition{}, fmt.Errorf("crystal at (%d,%d) sits on the player start", c.TileX, c.TileZ)
+			return AreaDefinition{}, onStartErr("crystal", c.TileX, c.TileZ)
 		}
 		key := [2]int{c.TileX, c.TileZ}
 		if seenCrystal[key] {

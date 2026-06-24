@@ -90,6 +90,10 @@ var (
 	// editorLabelColor tints drawLabel field captions.
 	editorLabelColor = rl.NewColor(138, 160, 188, 220)
 
+	// sentinelLabelColor tints a sentinel brush's row label (e.g. erase/clear),
+	// cooler than textEntry so it reads as a non-paint action.
+	sentinelLabelColor = rl.NewColor(190, 200, 220, 255)
+
 	// hiddenTabTextColor dims a hidden layer/elevation tab's label.
 	hiddenTabTextColor = rl.NewColor(112, 116, 126, 255)
 

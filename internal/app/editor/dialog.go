@@ -761,7 +761,7 @@ func dialogNodeRowLabel(d core.DialogDefinition, i int) string {
 	if n.ID == d.StartNodeID {
 		mark = "★ "
 	}
-	return fmt.Sprintf("%s%s · %s: %s", mark, n.ID, core.DialogSpeakerName(n.SpeakerID), truncateDialog(n.Text, 24))
+	return fmt.Sprintf("%s%s · %s: %s", mark, n.ID, core.DialogSpeakerName(n.SpeakerID), truncateDialog(n.Text, dialogNodeSummaryTruncLen))
 }
 
 func updateDialogNodesModal(s *State) Action {
@@ -782,6 +782,7 @@ const (
 	dialogTrigRowGap   = float32(52)  // row pitch in the trigger editor
 	dialogActionRowGap = float32(56)  // row pitch in the action editor
 	dialogListRowH     = dropdownRowH // scrollable list rows share the dropdown's pitch
+	scrollMoreHintGap  = float32(16)  // gap above the first row for the ▲ "N more" hint
 )
 
 // stackRows lays out n equal-height rows from (x,y) at pitch rowGap (shared with
@@ -902,13 +903,9 @@ func drawDialogNodeEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawButton(font, l.actionBtn, "Action: "+dialogActionLabel(n.EndAction)+dropdownArrowSuffix, n.EndAction != nil)
 
 	drawLabel(font, fmt.Sprintf("Choices (%d) — Up/Down select, Enter edit", len(n.Choices)),
-		rl.NewRectangle(l.card.X+modalContentInset, l.actionBtn.Y+l.actionBtn.Height+10, l.card.Width, 14))
-	upHintY := float32(0)
-	if len(l.choiceRows) > 0 {
-		upHintY = l.choiceRows[0].Y - 16
-	}
-	drawScrollList(font, theme, l.choiceRows, l.choiceTop, len(n.Choices), s.modalCursor, 52,
-		l.card.X+entityListTextInset, upHintY, l.addChoiceBtn.Y-18,
+		rl.NewRectangle(l.card.X+modalContentInset, l.actionBtn.Y+l.actionBtn.Height+10, l.card.Width, labelCaptionH))
+	drawScrollList(font, theme, l.choiceRows, l.choiceTop, len(n.Choices), s.modalCursor, dialogChoiceRowTruncLen,
+		l.card.X+entityListTextInset, l.addChoiceBtn.Y-18,
 		func(idx int) string { return n.Choices[idx].Label })
 	drawButton(font, l.addChoiceBtn, "+ Choice", false)
 	drawButton(font, l.editChoiceBtn, "Edit Choice", false)
@@ -1116,14 +1113,10 @@ func drawDialogChoiceEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawLabel(font, "End action on pick (click to edit)", labelAbove(l.actionBtn))
 	drawButton(font, l.actionBtn, "Action: "+dialogActionLabel(c.EndAction)+dropdownArrowSuffix, c.EndAction != nil)
 
-	header := rl.NewRectangle(l.card.X+modalContentInset, l.actionBtn.Y+l.actionBtn.Height+8, l.card.Width, 14)
+	header := rl.NewRectangle(l.card.X+modalContentInset, l.actionBtn.Y+l.actionBtn.Height+8, l.card.Width, labelCaptionH)
 	drawLabel(font, fmt.Sprintf("Conditions (%d) — gate selectability; Up/Down select, Enter edit", len(c.Conditions)), header)
-	upHintY := float32(0)
-	if len(l.condRows) > 0 {
-		upHintY = l.condRows[0].Y - 14
-	}
-	drawScrollList(font, theme, l.condRows, l.condTop, len(c.Conditions), s.modalCursor, 56,
-		l.card.X+entityListTextInset, upHintY, l.addCondBtn.Y-16,
+	drawScrollList(font, theme, l.condRows, l.condTop, len(c.Conditions), s.modalCursor, dialogCondRowTruncLen,
+		l.card.X+entityListTextInset, l.addCondBtn.Y-16,
 		func(idx int) string { return condSummary(c.Conditions[idx]) })
 	drawButton(font, l.addCondBtn, "+ Cond", false)
 	drawButton(font, l.editCondBtn, "Edit Cond", false)
@@ -1864,9 +1857,21 @@ func toggleTriggerOnce(s *State) {
 
 // --- small shared helpers --------------------------------------------------
 
+// Editor dialog-list layout tokens.
+const (
+	labelCaptionH   = float32(14) // field caption height
+	labelCaptionGap = float32(16) // caption top above its field
+
+	// Per-list row text budgets (runes) — distinct values because the lists differ
+	// in width, but named so they can't drift unintentionally.
+	dialogNodeSummaryTruncLen = 24 // node summary line in the node list
+	dialogChoiceRowTruncLen   = 52 // choice rows in the node modal
+	dialogCondRowTruncLen     = 56 // condition rows in the condition modal
+)
+
 // labelAbove returns the label rect sitting just above a field rect.
 func labelAbove(field rl.Rectangle) rl.Rectangle {
-	return rl.NewRectangle(field.X, field.Y-16, field.Width, 14)
+	return rl.NewRectangle(field.X, field.Y-labelCaptionGap, field.Width, labelCaptionH)
 }
 
 // bottomRightBtn returns the bottom-right "Back (Esc)" button rect, shared by the
@@ -1897,9 +1902,9 @@ func drawScrollMoreHint(font rl.Font, theme render.Theme, x, y float32, hidden i
 // drawScrollList draws a scrolling list's body: the ▲/▼ "N more" hints + each
 // visible row (cursored row gets a "> " prefix). rowText trimmed to truncLen runes.
 func drawScrollList(font rl.Font, theme render.Theme, rows []rl.Rectangle, top, count, cursor, truncLen int,
-	hintX, upHintY, downHintY float32, rowText func(idx int) string) {
+	hintX, downHintY float32, rowText func(idx int) string) {
 	if len(rows) > 0 {
-		drawScrollMoreHint(font, theme, hintX, upHintY, top, true)
+		drawScrollMoreHint(font, theme, hintX, rows[0].Y-scrollMoreHintGap, top, true)
 	}
 	for i, row := range rows {
 		idx := top + i

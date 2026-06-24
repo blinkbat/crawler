@@ -335,6 +335,11 @@ const (
 // absent elevation seeds to it.
 const ElevationGroundChar = '0'
 
+// MaxLevelChar is the top of the elevation/level alphabet ('0'..'9' then 'A'..
+// MaxLevelChar = 0..20). Single source within this package; core/map.go init
+// pins ElevationChar(MaxElevationLevel) == MaxLevelChar so the two can't drift.
+const MaxLevelChar = 'K'
+
 // AssetDirMode / AssetFileMode are os mode bits for auto-created asset dirs/files.
 const (
 	AssetDirMode  = 0o755
@@ -879,7 +884,7 @@ func (mf *MapFile) validateOptionalGrid(name string, rows []string) error {
 		// downstream, silently flattening the prop/decor instead of failing here.
 		for c := 0; c < len(row); c++ {
 			if b := row[c]; b != '.' && !isLevelChar(b) {
-				return fmt.Errorf("%s row %d col %d has bad level char %q (expected '.', '0'..'9', or 'A'..'K')", name, i, c, string(row[c]))
+				return fmt.Errorf("%s row %d col %d has bad level char %q (expected '.', %s)", name, i, c, string(row[c]), levelCharRangeHint())
 			}
 		}
 	}
@@ -890,7 +895,13 @@ func (mf *MapFile) validateOptionalGrid(name string, rows []string) error {
 // The 'K' upper bound == core's MaxElevationLevel (core/map.go init pins this), so
 // the elevation and prop/decor-level grids share one alphabet definition.
 func isLevelChar(b byte) bool {
-	return (b >= '0' && b <= '9') || (b >= 'A' && b <= 'K')
+	return (b >= '0' && b <= '9') || (b >= 'A' && b <= MaxLevelChar)
+}
+
+// levelCharRangeHint describes the valid level alphabet for error messages,
+// derived from MaxLevelChar so the hint can't go stale if the alphabet grows.
+func levelCharRangeHint() string {
+	return fmt.Sprintf("'0'..'9' or 'A'..'%c'", MaxLevelChar)
 }
 
 func (mf *MapFile) validate() error {
@@ -936,7 +947,7 @@ func (mf *MapFile) validate() error {
 			// Anything else reads as ground 0, silently flattening the geometry.
 			for c := 0; c < len(row); c++ {
 				if b := row[c]; !isLevelChar(b) {
-					return fmt.Errorf("elevation layer row %d col %d has bad level char %q (expected '0'..'9' or 'A'..'K')", i, c, string(row[c]))
+					return fmt.Errorf("elevation layer row %d col %d has bad level char %q (expected %s)", i, c, string(row[c]), levelCharRangeHint())
 				}
 			}
 		}

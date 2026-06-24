@@ -414,6 +414,8 @@ const (
 
 	// Day/night cycle: TimeOfDayCount phases of StepsPerPhase steps per loop.
 	// Only landed exploration steps advance it (battles preserve the phase).
+	// TimeOfDayCount is defined in daycycle.go (derived from the TimeOfDay enum);
+	// adding a phase there grows the cycle here automatically.
 	StepsPerPhase = 25
 	StepsPerCycle = StepsPerPhase * TimeOfDayCount
 
