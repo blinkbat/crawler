@@ -91,6 +91,10 @@ func init() {
 		v := enemyStatusPillVisuals[i]
 		return v.turns == nil || v.glyph == nil
 	})
+	// A zero-alpha entry means a LogCategory was added without a tint (every real tint is opaque).
+	assertTableComplete("logCategoryColors", int(core.LogCategoryCount), func(i int) bool {
+		return logCategoryColors[i].A == 0
+	})
 }
 
 // rosterBackBuf / rosterFrontBuf split the visible slots into ranks (single-threaded draw).
@@ -150,8 +154,8 @@ func drawEnemyRoster(g *core.GameState, assets Resources) {
 	// targetable gates the per-cell yellow highlight (shares targetingEnemy with the in-world chevron).
 	targetable := targetingEnemy(g)
 	selectedSlot := core.SelectedEnemySlot(g)
-	// While picking a melee target, out-of-reach foes (back rank, front still up) grey out;
-	// the cursor can land on them but confirming buzzes. Ranged/magic reaches everyone.
+	// While picking a melee target, out-of-reach foes (back rank with front still up, or
+	// Flying) grey out; the cursor can land on them but confirming buzzes. Ranged/magic reaches everyone.
 	meleeTargeting := targetable && core.BattlePendingAttackIsMelee(g)
 
 	drawRank := func(rank []int, rankIdx int) {
@@ -163,7 +167,7 @@ func drawEnemyRoster(g *core.GameState, assets Resources) {
 			cx := startX + int32(j)*(cellW+gap)
 			// HP shows once the kind is identified (5 kills or a Scan) — a kind-level fact.
 			known := g.Bestiary.Knows(enemy.Kind)
-			reachable := !meleeTargeting || core.EnemyInEffectiveFront(members, slot)
+			reachable := !meleeTargeting || core.EnemyMeleeReachable(members, slot)
 			drawEnemyRosterCell(assets.hudFont, enemy, cx, rowY, cellW, cellH,
 				targetable && slot == selectedSlot, !enemy.Alive, known, reachable)
 		}
@@ -322,8 +326,26 @@ func drawActionLogSpine(panelX, panelY, panelH int32) {
 
 // actionLogVisualLine is one wrapped+styled source log line (package-scope for the cache).
 type actionLogVisualLine struct {
-	text  string
-	fresh bool
+	text string
+	cat  core.LogCategory
+}
+
+// logCategoryColors is the parallel tint table for core.LogCategory (see theme.go).
+// Fixed-size + init-asserted so a new category can't silently inherit the info tint.
+var logCategoryColors = [core.LogCategoryCount]rl.Color{
+	core.LogInfo:        logInfo,
+	core.LogDamageFoe:   logDamageFoe,
+	core.LogDamageParty: logDamageParty,
+	core.LogHeal:        logHeal,
+	core.LogDeath:       logDeath,
+}
+
+// logCategoryColor maps a log line's category to its tint (see theme.go).
+func logCategoryColor(cat core.LogCategory) rl.Color {
+	if int(cat) >= len(logCategoryColors) {
+		return logInfo
+	}
+	return logCategoryColors[cat]
 }
 
 // actionLogCache memoizes the wrapped log between frames. Invalidates on log length,
@@ -337,7 +359,7 @@ var actionLogCache struct {
 }
 
 // statusLineScratch is the reused 1-slot backing for the empty-log StatusMessage path.
-var statusLineScratch [1]string
+var statusLineScratch [1]core.LogLine
 
 // shrinkPinnedToBottom shrinks a bottom-pinned pane (floored at hudPanelMinH) to clear
 // topLimit while keeping its bottom edge at bottomY. Shared by the two bottom HUD panes.
@@ -387,8 +409,9 @@ func drawActionLogPanel(g *core.GameState, assets Resources) {
 
 	lines := g.ActionLog
 	if len(lines) == 0 && g.StatusMessage != "" {
-		// Reuse the package 1-slot buffer rather than allocating per frame.
-		statusLineScratch[0] = g.StatusMessage
+		// Reuse the package 1-slot buffer rather than allocating per frame. A bare
+		// status line (no logged action yet) reads as neutral info.
+		statusLineScratch[0] = core.LogLine{Text: g.StatusMessage, Cat: core.LogInfo}
 		lines = statusLineScratch[:]
 	}
 	if len(lines) == 0 {
@@ -410,21 +433,18 @@ func drawActionLogPanel(g *core.GameState, assets Resources) {
 			posT := float32(i) / float32(n-1) // 0 at top, 1 at bottom
 			alpha = 0.5 + 0.5*posT
 		}
-		base := textMuted
-		if vl.fresh {
-			base = textPrimary
-		}
-		col := fadeColor(base, alpha)
+		// Category drives the hue; the top-fade alpha still reads newest-brightest.
+		col := fadeColor(logCategoryColor(vl.cat), alpha)
 		drawTextWithShadow(assets.hudFont, vl.text, float32(innerX+actionLogTextPad), float32(startY+int32(i)*lineH), lineSize, col)
 	}
 }
 
 // wrappedActionLogLines returns the visible wrapped log lines, reusing the cache when
 // (length, last-line, innerW, maxLines) are unchanged.
-func wrappedActionLogLines(font rl.Font, lines []string, innerW int32, maxLines int, lineSize, wrapW float32) []actionLogVisualLine {
+func wrappedActionLogLines(font rl.Font, lines []core.LogLine, innerW int32, maxLines int, lineSize, wrapW float32) []actionLogVisualLine {
 	lastLine := ""
 	if len(lines) > 0 {
-		lastLine = lines[len(lines)-1]
+		lastLine = lines[len(lines)-1].Text
 	}
 	if actionLogCache.lastLogLen == len(lines) &&
 		actionLogCache.lastLastLine == lastLine &&
@@ -440,17 +460,16 @@ func wrappedActionLogLines(font rl.Font, lines []string, innerW int32, maxLines 
 		reversed = make([]actionLogVisualLine, 0, maxLines)
 	}
 	for i := len(lines) - 1; i >= 0 && len(reversed) < maxLines; i-- {
-		fresh := i == len(lines)-1
-		src := lines[i]
-		wraps := wrapTextLines(font, src, lineSize, wrapW)
+		cat := lines[i].Cat
+		wraps := wrapTextLines(font, lines[i].Text, lineSize, wrapW)
 		if len(wraps) == 0 {
 			// Empty source line preserved as a blank row.
-			reversed = append(reversed, actionLogVisualLine{text: "", fresh: fresh})
+			reversed = append(reversed, actionLogVisualLine{text: "", cat: cat})
 			continue
 		}
 		// Append in reverse (reversed[] stays newest-first); the pass below restores order.
 		for j := len(wraps) - 1; j >= 0; j-- {
-			reversed = append(reversed, actionLogVisualLine{text: wraps[j], fresh: fresh})
+			reversed = append(reversed, actionLogVisualLine{text: wraps[j], cat: cat})
 			if len(reversed) >= maxLines {
 				break
 			}
@@ -574,7 +593,7 @@ func transientStatus(g *core.GameState) string {
 	if msg == "" {
 		return ""
 	}
-	if n := len(g.ActionLog); n > 0 && g.ActionLog[n-1] == msg {
+	if n := len(g.ActionLog); n > 0 && g.ActionLog[n-1].Text == msg {
 		return ""
 	}
 	return msg
@@ -805,11 +824,15 @@ func drawItemMenuList(g *core.GameState, assets Resources, x, y, rightX int32) {
 	}
 }
 
+// actionRowPlateInsetX is how far the selection plate bleeds left past the text origin,
+// so the highlight reaches the content edge regardless of where the label starts.
+const actionRowPlateInsetX = int32(8)
+
 // drawActionRow paints one key-plate row (selected gets the gilt plate, else dark glass).
-// The plate spans x-8 to rightX so the highlight reaches the content edge regardless of text start.
+// The plate spans x-actionRowPlateInsetX to rightX so the highlight reaches the content edge.
 // A disabled row keeps the selection plate (cursor must stay visible) but greys its text.
 func drawActionRow(font rl.Font, x, y, rightX int32, label, suffix string, selected, disabled bool) {
-	plateX := x - 8
+	plateX := x - actionRowPlateInsetX
 	plateW := rightX - plateX
 	switch {
 	case selected:

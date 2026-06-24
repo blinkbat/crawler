@@ -2,29 +2,35 @@ package core
 
 import "testing"
 
-// TestFlyingMeleePenalty: melee vs a flyer loses accuracy, ranged shrugs it, ground is unaffected.
-func TestFlyingMeleePenalty(t *testing.T) {
-	m := NewParty()[0]
-	quality := int(TimingQualityGood)
-
-	// Melee: flyer accuracy is below ground; ground is unchanged from the bare curve.
-	m.Equipped[EquipRightHand] = ItemIronSword
-	base := memberAttackAccuracy(m, quality)
-	if vsGround := memberAttackAccuracyVs(m, false, quality); vsGround != base {
-		t.Errorf("ground accuracy changed by the flying path: base %.3f vs %.3f", base, vsGround)
-	}
-	vsFlyer := memberAttackAccuracyVs(m, true, quality)
-	if vsFlyer >= base {
-		t.Errorf("melee accuracy vs flyer (%.3f) should be below ground (%.3f)", vsFlyer, base)
-	}
-
-	// Ranged: flyer accuracy equals the bare curve (no penalty).
-	m.Equipped[EquipRightHand] = ItemShortBow
-	if got, want := memberAttackAccuracyVs(m, true, quality), memberAttackAccuracy(m, quality); got != want {
-		t.Errorf("ranged accuracy vs flyer (%.3f) should equal base (%.3f)", got, want)
-	}
-
+// TestFlyingMeleeImmunity: a flyer is hard-unreachable by melee (no damage), reachable
+// by a ranged weapon; ground foes are always melee-reachable.
+func TestFlyingMeleeImmunity(t *testing.T) {
 	if !CanReachFlying(WeaponBow) || CanReachFlying(WeaponSword) {
 		t.Error("CanReachFlying: bow should reach a flyer, sword should not")
+	}
+
+	m := NewParty()[0]
+	m.Equipped[EquipRightHand] = ItemIronSword
+	if MemberMeleeReachesFlyer(m) {
+		t.Error("a melee weapon must not reach a flyer")
+	}
+	m.Equipped[EquipRightHand] = ItemShortBow
+	if !MemberMeleeReachesFlyer(m) {
+		t.Error("a ranged weapon should reach a flyer")
+	}
+
+	// EnemyMeleeReachable: a front-row flyer is melee-immune; a front-row ground foe is reachable.
+	members := []Enemy{
+		{Alive: true, Row: RowFront, Kind: EnemyBat}, // Flying
+		{Alive: true, Row: RowFront, Kind: EnemyRat}, // grounded
+	}
+	if !EnemyInfo(EnemyBat).Flying {
+		t.Fatal("test assumes EnemyBat is Flying")
+	}
+	if EnemyMeleeReachable(members, 0) {
+		t.Error("a Flying foe must not be melee-reachable even in the front row")
+	}
+	if !EnemyMeleeReachable(members, 1) {
+		t.Error("a grounded front-row foe should be melee-reachable")
 	}
 }

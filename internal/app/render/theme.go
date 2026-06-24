@@ -166,6 +166,16 @@ var (
 	// textDim is the faded-calligraphy ink (disabled text, footer hints, blurbs).
 	textDim = inkDim
 
+	// ----- Action-log category tints (logCategoryColor, by core.LogCategory) -----
+	// Reuse existing semantic tones where the meaning lines up (heal = HP green,
+	// foe death = gilt gold, party damage = the floating-popup red); only white and
+	// the pale-blue info tone are log-specific.
+	logDamageFoe   = rl.NewColor(244, 244, 248, 255) // party→foe damage — white
+	logInfo        = rl.NewColor(150, 198, 238, 255) // neutral flavor / prompts — pale blue
+	logDamageParty = partyDamagePopupColor           // party takes damage — popup red
+	logHeal        = barHPHigh                        // party healed — HP green
+	logDeath       = giltBright                       // a foe falls — gilt gold
+
 	barHPHigh = mute(rl.NewColor(116, 200, 132, 255))
 	// xpGainColor fills the victory XP bars — coin-gold (reward, not HP green).
 	xpGainColor = coinFace
@@ -459,9 +469,8 @@ const (
 	barValuePadRight    = float32(10)
 	barLabelPadLeft     = float32(8)
 
-	// Canonical HP/MP gauge heights for the three drawBar contexts: full ribbon
-	// card, shorter Character tab, mini picker row.
-	barHeightFull    = float32(32)
+	// Canonical HP/MP gauge heights: Character tab (compact) and the use-item
+	// picker row (mini). The party ribbon cards size their own gauge (partyCardBarH).
 	barHeightCompact = float32(28)
 	barHeightMini    = float32(18)
 
@@ -1635,9 +1644,7 @@ func drawBarState(font rl.Font, x, y, width, height float32, label string, pct f
 	labelMeasure := measureBarLabel(font, label)
 	labelY := y + (float32(ih)-labelMeasure.Y)/2 - 1
 	labelX := x + barLabelPadLeft
-	rl.DrawTextEx(font, label, rl.NewVector2(labelX+2, labelY+2), labelSize, 1, shadowHeavy)
-	rl.DrawTextEx(font, label, rl.NewVector2(labelX+1, labelY+1), labelSize, 1, shadowHeavy)
-	rl.DrawTextEx(font, label, rl.NewVector2(labelX, labelY), labelSize, 1, labelColor)
+	drawBarText(font, label, labelX, labelY, labelSize, labelColor)
 
 	if valText != "" {
 		// Value text always FontSmall (UI_STANDARDS.md). Bright, faded when muted.
@@ -1653,10 +1660,17 @@ func drawBarState(font rl.Font, x, y, width, height float32, label string, pct f
 		valMeasure := measureBarValue(font, valText)
 		valY := y + (float32(ih)-valMeasure.Y)/2 - 1
 		valX := x + width - valMeasure.X - barValuePadRight
-		rl.DrawTextEx(font, valText, rl.NewVector2(valX+2, valY+2), valSize, 1, shadowHeavy)
-		rl.DrawTextEx(font, valText, rl.NewVector2(valX+1, valY+1), valSize, 1, shadowHeavy)
-		rl.DrawTextEx(font, valText, rl.NewVector2(valX, valY), valSize, 1, valColor)
+		drawBarText(font, valText, valX, valY, valSize, valColor)
 	}
+}
+
+// drawBarText paints a gauge label/value with a two-layer drop shadow (+2 then +1,
+// heavier than drawTextWithShadow's single drop) so it reads on any fill. Plain text
+// at spacing 1 — local to the gauge, no rich-glyph or canonical-spacing path.
+func drawBarText(font rl.Font, text string, x, y, size float32, col color.RGBA) {
+	rl.DrawTextEx(font, text, rl.NewVector2(x+2, y+2), size, 1, shadowHeavy)
+	rl.DrawTextEx(font, text, rl.NewVector2(x+1, y+1), size, 1, shadowHeavy)
+	rl.DrawTextEx(font, text, rl.NewVector2(x, y), size, 1, col)
 }
 
 func drawGaugeWell(x, y, w, h int32) {

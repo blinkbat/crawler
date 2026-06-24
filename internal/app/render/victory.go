@@ -162,7 +162,7 @@ func drawSpoilsLoot(b *core.Battle, font rl.Font, x, y, w, fill float32) float32
 
 	if b.Spoils.Gold > 0 {
 		shown := int(float32(b.Spoils.Gold) * fill)
-		drawTextWithShadow(font, "Gold  +"+strconv.Itoa(shown), x, y, FontBody, coinFace)
+		drawTextWithShadow(font, goldGainLabel(shown), x, y, FontBody, coinFace)
 		y += victoryLootRowH
 	}
 

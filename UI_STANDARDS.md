@@ -161,7 +161,7 @@ identical measure to plain text — so existing centering math holds;
 tracking (the timing prompt's 1.5).
 
 WHERE: panel/modal headings (`drawPanelHeading`), menu titles + rows
-(`drawCardTitle`, pause/debug rows, title-screen rows), combat verbs
+(`drawTitledMenuCard`/`drawMenuRow`, pause/debug rows, title-screen rows), combat verbs
 (action-menu header + Attack/Items/Skills), roster enemy names,
 level-up stat labels, the timing-bar prompt, Tome member names +
 picker titles + item detail names, the door prompt. NOT for FontBody

@@ -198,6 +198,7 @@ func tickLightning(g *GameState, dt float32) {
 		if w.NextFlash <= 0 {
 			w.Flash = 1
 			w.NextFlash = g.RandRangeF(LightningIntervalMin, LightningIntervalMax)
+			return // full brightness this frame; decay starts next tick
 		}
 	}
 	w.Flash = Approach(w.Flash, 0, LightningDecayPerSec*dt)

@@ -2,7 +2,6 @@ package render
 
 import (
 	"crawler/internal/app/core"
-	"strconv"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -254,7 +253,7 @@ func drawSkillTreeDetail(font rl.Font, g *core.GameState, m *core.PartyMember, t
 
 	drawTextWithShadow(font, node.Name, x+12, y+8, FontBody, textPrimary)
 	rank := core.TreeNodeRank(m, node.ID)
-	state := "Rank " + strconv.Itoa(rank) + " / " + strconv.Itoa(node.MaxRank)
+	state := "Rank " + formatRatioSpaced(rank, node.MaxRank)
 	drawTextRightAligned(font, state, x+w-12, y+10, FontSmall, inkAccent)
 
 	drawTextWithShadow(font, node.Desc, x+12, y+34, FontSmall, textDim)

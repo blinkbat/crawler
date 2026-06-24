@@ -775,6 +775,34 @@ func ApplyHitRecoil(knockback *float32, sleep *int, damage int) {
 	}
 }
 
+// HitTarget bundles the per-actor fields the post-damage tail writes, so the enemy
+// and party damage paths share one ordering instead of duplicating it. Both Enemy
+// and PartyMember expose these fields.
+type HitTarget struct {
+	HP           *int
+	Flash        *float32
+	Popup        *int
+	PopupQuality *int
+	PopupTimer   *float32
+	Knockback    *float32
+	Sleep        *int
+}
+
+// ApplyDamageWithPopup runs the shared post-mitigation tail: ApplyFlatDamage, then a
+// damage popup (only on positive amount, tagged with quality), then ApplyHitRecoil.
+// Returns true if the actor was dropped to 0. Death-side handling (statuses, VFX,
+// formation shunt, sounds) stays at the call site — only the common tail lives here.
+func ApplyDamageWithPopup(t HitTarget, amount, quality int) (died bool) {
+	died = ApplyFlatDamage(t.HP, t.Flash, amount)
+	if amount > 0 {
+		*t.Popup = amount
+		*t.PopupQuality = quality
+		*t.PopupTimer = QualityResultDuration
+	}
+	ApplyHitRecoil(t.Knockback, t.Sleep, amount)
+	return died
+}
+
 // DodgeChance is the [0,1] probability a defender sidesteps an incoming basic
 // attack (DodgePerDEX/DodgeCap). Skill damage isn't dodgeable.
 func DodgeChance(s Stats) float64 {

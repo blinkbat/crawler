@@ -333,15 +333,19 @@ func SwapLiveSlots(party []PartyMember, i, j int) {
 	party[i].Col, party[j].Col = party[j].Col, party[i].Col
 }
 
+// defaultPartyRows is each class's starting formation row. Init-asserted complete
+// (every PartyClass mapped) so a new class must declare its row, not inherit one.
+var defaultPartyRows = map[PartyClass]Row{
+	ClassWarrior: RowFront,
+	ClassThief:   RowFront,
+	ClassCleric:  RowBack,
+	ClassWizard:  RowBack,
+}
+
 // DefaultPartyRow is a class's starting formation row: Warrior/Thief front,
 // casters (Cleric, Wizard) back. Applies to a fresh party; the player can rearrange.
 func DefaultPartyRow(c PartyClass) Row {
-	switch c {
-	case ClassCleric, ClassWizard:
-		return RowBack
-	default: // Warrior, Thief, and any future front-line class
-		return RowFront
-	}
+	return defaultPartyRows[c] // RowFront zero-value is unreachable: init asserts full coverage
 }
 
 // AttackClass classifies attack reach: only Melee is front-gated; Ranged/Magic
@@ -366,16 +370,34 @@ func BasicAttackClass(wt WeaponType) AttackClass {
 	return AttackMelee
 }
 
+// skillKindCount bounds the skillAttackClasses coverage assert (SkillKind starts at 1).
+const skillKindCount = SkillKindUtility + 1
+
+// skillAttackClasses maps a SkillKind to its reach. Init-asserted complete so a new
+// kind must pick a reach instead of silently falling through to any-row Ranged.
+var skillAttackClasses = map[SkillKind]AttackClass{
+	SkillKindMelee:   AttackMelee,
+	SkillKindMagic:   AttackMagic,
+	SkillKindHeal:    AttackMagic,
+	SkillKindUtility: AttackRanged, // any-row — not a melee swing
+}
+
 // SkillAttackClass classifies a skill for reach from its SkillKind: melee
 // front-gated; magic/heal = magic; utility = ranged (any-row — not a melee swing).
 func SkillAttackClass(k SkillKind) AttackClass {
-	switch k {
-	case SkillKindMelee:
-		return AttackMelee
-	case SkillKindMagic, SkillKindHeal:
-		return AttackMagic
-	default: // SkillKindUtility (and future kinds) — any row
-		return AttackRanged
+	return skillAttackClasses[k] // AttackMelee zero-value unreachable: init asserts full coverage
+}
+
+func init() {
+	for c := PartyClass(0); c < PartyClassCount; c++ {
+		if _, ok := defaultPartyRows[c]; !ok {
+			panic("core: defaultPartyRows missing a row for a PartyClass — add it")
+		}
+	}
+	for k := SkillKindMelee; k < skillKindCount; k++ {
+		if _, ok := skillAttackClasses[k]; !ok {
+			panic("core: skillAttackClasses missing a reach for a SkillKind — add it")
+		}
 	}
 }
 
@@ -467,4 +489,13 @@ func EnemyInEffectiveFront(members []Enemy, i int) bool {
 		return false
 	}
 	return members[i].Row == RowFront || !EnemyColumnCovered(members, i)
+}
+
+// EnemyMeleeReachable reports whether a MELEE attack/skill can connect with enemy i:
+// in the effective front row AND not Flying. Flyers are immune to melee — only a
+// ranged weapon or magic touches them (a ranged attacker is Ranged-class, so it never
+// consults this). The party→enemy melee-reach predicate. EnemyInEffectiveFront stays
+// the pure row test, still used for the enemy→party gate — a flying foe can melee.
+func EnemyMeleeReachable(members []Enemy, i int) bool {
+	return EnemyInEffectiveFront(members, i) && !EnemyInfoFor(members[i]).Flying
 }

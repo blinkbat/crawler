@@ -57,6 +57,9 @@ const (
 	VFXAnchorParty
 	// VFXAnchorTile: TileX/TileZ identify a world tile.
 	VFXAnchorTile
+	// VFXAnchorCount bounds render's init-time anchor-coverage assert (a new anchor
+	// must be handled by resolveAnchor AND spawnFromRequest, not left to the log default).
+	VFXAnchorCount
 )
 
 // VFXRequest is one queued spawn intent appended to GameState.VFXQueue.

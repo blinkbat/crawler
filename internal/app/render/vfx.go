@@ -253,10 +253,24 @@ var vfxKindsSpawnlessOK = map[core.VFXKind]bool{
 // init asserts the merged vfxKinds table covers every VFXKind with a spawn pattern
 // (except the deliberately particle-less ones), mirroring the old switch + the
 // vfxGlyphs length-assert so a new kind forces both a spawn and a glyph choice.
+// vfxAnchorHandled lists the anchors resolveAnchor + spawnFromRequest explicitly switch
+// on. Both have a logged-once runtime default; this turns that into a startup panic so a
+// new anchor can't ship silently degraded.
+var vfxAnchorHandled = map[core.VFXAnchor]bool{
+	core.VFXAnchorEnemy: true,
+	core.VFXAnchorParty: true,
+	core.VFXAnchorTile:  true,
+}
+
 func init() {
 	for k := core.VFXKind(0); k < core.VFXKindCount; k++ {
 		if vfxKinds[k].spawn == nil && !vfxKindsSpawnlessOK[k] {
 			panic("render/vfx: vfxKinds missing a spawn pattern for a VFX kind — add its spawn func + clarity glyph (or mark it spawnless)")
+		}
+	}
+	for a := core.VFXAnchor(0); a < core.VFXAnchorCount; a++ {
+		if !vfxAnchorHandled[a] {
+			panic("render/vfx: VFXAnchor not handled — add it to resolveAnchor AND spawnFromRequest (and vfxAnchorHandled)")
 		}
 	}
 }

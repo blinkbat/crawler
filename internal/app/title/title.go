@@ -23,11 +23,17 @@ const (
 	ActionQuit
 )
 
+// mapChoice pairs a map's on-disk path with its display name, so the picker can't
+// desync a name from its path (they were two cursor-indexed slices).
+type mapChoice struct {
+	Path string
+	Name string
+}
+
 type State struct {
 	mode          titleMode
 	cursor        int
-	mapPaths      []string
-	mapNames      []string // display names, derived once when mapPaths is set
+	mapChoices    []mapChoice // path + display name, derived once when the picker opens
 	chosenMapPath string
 	loadError     string
 	// hasSave caches SaveExists() once (can't change while the title is up),
@@ -96,11 +102,10 @@ var mainMenuRows = []mainMenuRowDef{
 		Label: func() string { return "Adventure" },
 		Action: func(s *State) Action {
 			paths, _ := mapfile.List(core.MapsDir())
-			s.mapPaths = paths
-			// Derive display names once (the path list is fixed while open).
-			s.mapNames = make([]string, len(paths))
+			// Derive path + display name once (the list is fixed while the picker is open).
+			s.mapChoices = make([]mapChoice, len(paths))
 			for i, p := range paths {
-				s.mapNames[i] = core.MapIDFromPath(p)
+				s.mapChoices[i] = mapChoice{Path: p, Name: core.MapIDFromPath(p)}
 			}
 			s.cursor = 0
 			s.mode = modeMapPicker
@@ -164,12 +169,12 @@ func updateMapPicker(s *State) Action {
 		s.cursor = 0
 		return ActionNone
 	}
-	if len(s.mapPaths) == 0 {
+	if len(s.mapChoices) == 0 {
 		return ActionNone
 	}
-	s.cursor = input.CursorUpDown(s.cursor, len(s.mapPaths))
+	s.cursor = input.CursorUpDown(s.cursor, len(s.mapChoices))
 	if input.ConfirmPressed() {
-		s.chosenMapPath = s.mapPaths[s.cursor]
+		s.chosenMapPath = s.mapChoices[s.cursor].Path
 		return ActionStartAdventure
 	}
 	return ActionNone
@@ -238,13 +243,16 @@ func drawMainMenu(s State, font rl.Font, theme render.Theme, screenH int32) {
 
 func drawMapPicker(s State, font rl.Font, theme render.Theme, screenH int32) {
 	header := "Choose a map"
-	if len(s.mapPaths) == 0 {
-		items := []string{"(no maps in maps/ — open the Editor to make one)"}
-		drawList(items, 0, font, theme, screenH, header)
+	if len(s.mapChoices) == 0 {
+		drawList([]string{"(no maps in maps/ — open the Editor to make one)"}, 0, font, theme, screenH, header)
 		drawHint(font, []render.HintSeg{render.Hint("Back", render.GlyphB)}, screenH)
 		return
 	}
-	drawList(s.mapNames, s.cursor, font, theme, screenH, header)
+	names := make([]string, len(s.mapChoices))
+	for i, c := range s.mapChoices {
+		names[i] = c.Name
+	}
+	drawList(names, s.cursor, font, theme, screenH, header)
 	drawHint(font, []render.HintSeg{
 		render.Hint("Navigate", render.GlyphUpDown),
 		render.Hint("Start", render.GlyphA),

@@ -449,10 +449,10 @@ type GameState struct {
 	// step, fires heal+autosave on/beside a charged one. Charge persists via SaveData.
 	Crystals []Crystal
 	// ActionLog is the rolling log of notable actions in AND out of combat (one
-	// continuous buffer, capped at ActionLogMaxLines; written via LogMessage,
+	// continuous buffer, capped at ActionLogMaxLines; written via LogMessage[Cat],
 	// consecutive dupes coalesced). StatusMessage is the latest single line shown
 	// under the HUD, also the freshest ActionLog entry.
-	ActionLog     []string
+	ActionLog     []LogLine
 	StatusMessage string
 	// DoorPrompt is the Doors index of the door being confirmed, or -1. Stepping
 	// onto a door opens this modal; confirm sets PendingTransition, cancel clears it.
@@ -574,18 +574,45 @@ func (g *GameState) SetStatusMessage(msg string) {
 	g.StatusMessage = msg
 }
 
-// LogMessage sets the status line AND records msg in the ActionLog (consecutive
-// dupes coalesced, capped at ActionLogMaxLines). Empty msg clears the status
-// line without logging. For actions/results; UI prompts use SetStatusMessage.
+// LogCategory tags an action-log line for color-coding (render's logCategoryColor
+// maps each to a tint). LogInfo is the neutral default.
+type LogCategory uint8
+
+const (
+	LogInfo        LogCategory = iota // neutral flavor / prompts / spoils — pale blue
+	LogDamageFoe                      // damage the party deals to a foe — white
+	LogDamageParty                    // damage the party takes — pale red
+	LogHeal                           // HP restored to the party — pale green
+	LogDeath                          // a foe is felled — gold
+	// LogCategoryCount bounds the parallel tint table in render (logCategoryColors);
+	// a new category trips its init-time coverage assert until a tint is added.
+	LogCategoryCount
+)
+
+// LogLine is one action-log entry: its text plus the category that colors it.
+type LogLine struct {
+	Text string
+	Cat  LogCategory
+}
+
+// LogMessage records msg in the ActionLog (and status line) with the neutral
+// LogInfo category. Empty msg clears the status line without logging. For
+// actions/results; UI prompts use SetStatusMessage.
 func (g *GameState) LogMessage(msg string) {
+	g.LogMessageCat(msg, LogInfo)
+}
+
+// LogMessageCat is LogMessage with an explicit color category (consecutive dupes
+// coalesced by text, capped at ActionLogMaxLines).
+func (g *GameState) LogMessageCat(msg string, cat LogCategory) {
 	g.StatusMessage = msg
 	if msg == "" {
 		return
 	}
-	if n := len(g.ActionLog); n > 0 && g.ActionLog[n-1] == msg {
+	if n := len(g.ActionLog); n > 0 && g.ActionLog[n-1].Text == msg {
 		return
 	}
-	g.ActionLog = append(g.ActionLog, msg)
+	g.ActionLog = append(g.ActionLog, LogLine{Text: msg, Cat: cat})
 	if len(g.ActionLog) > ActionLogMaxLines {
 		g.ActionLog = g.ActionLog[len(g.ActionLog)-ActionLogMaxLines:]
 	}

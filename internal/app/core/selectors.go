@@ -398,12 +398,13 @@ func LivingBattleEnemyIndices(g *GameState) []int {
 }
 
 // MeleeReachableBattleEnemyIndices returns alive enemy slots a MELEE attack can hit
-// — the effective front row only (back row protected until the front falls).
+// — the effective front row only (back row protected until the front falls), Flying
+// foes excluded (immune to melee).
 func MeleeReachableBattleEnemyIndices(g *GameState) []int {
 	members := BattleMembers(g)
 	out := make([]int, 0, len(members))
 	for i := range members {
-		if members[i].Alive && EnemyInEffectiveFront(members, i) {
+		if members[i].Alive && EnemyMeleeReachable(members, i) {
 			out = append(out, i)
 		}
 	}
@@ -425,8 +426,9 @@ func BattlePendingAttackIsMelee(g *GameState) bool {
 }
 
 // BattleEnemyTargetReachable reports whether the slot can be hit by the targeted
-// action: always for ranged/magic, for melee only when in the effective front row.
-// Shared by the cycler's confirm gate and the roster gray-out.
+// action: always for ranged/magic, for melee only when in the effective front row
+// and not Flying (flyers are melee-immune). Shared by the cycler's confirm gate and
+// the roster gray-out.
 func BattleEnemyTargetReachable(g *GameState, slot int) bool {
 	members := BattleMembers(g)
 	if slot < 0 || slot >= len(members) {
@@ -435,7 +437,7 @@ func BattleEnemyTargetReachable(g *GameState, slot int) bool {
 	if !BattlePendingAttackIsMelee(g) {
 		return true
 	}
-	return members[slot].Alive && EnemyInEffectiveFront(members, slot)
+	return members[slot].Alive && EnemyMeleeReachable(members, slot)
 }
 
 // PeekNextMeleeEnemyTarget is PeekNextEnemyTarget for a MELEE enemy attack: the

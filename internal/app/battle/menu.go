@@ -347,7 +347,11 @@ func applyItem(g *core.GameState) {
 	}
 	actor := &g.Party[g.Battle.CurrentParty]
 	stampPartyBump(actor)
-	setBattleMessage(g, itemUseMessage(tgt.Name, def, healedHP > 0, healedHP, restoredMP))
+	itemCat := core.LogInfo
+	if healedHP > 0 || restoredMP > 0 {
+		itemCat = core.LogHeal // restorative use reads as healing; a no-op use stays neutral
+	}
+	setBattleMessageCat(g, itemUseMessage(tgt.Name, def, healedHP > 0, healedHP, restoredMP), itemCat)
 	g.Battle.PendingItem = core.ItemNone
 	finishActorTurn(g)
 }

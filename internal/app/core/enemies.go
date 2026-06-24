@@ -102,9 +102,9 @@ type EnemyDefinition struct {
 	// Drops is the per-defeat drop table (each Chance rolled independently into
 	// shared inventory). Separate from Item (the steal loot).
 	Drops []ItemDrop
-	// Flying: a melee basic against a flyer takes FlyingMeleeAccuracyPenalty
-	// unless the weapon is ranged (WeaponIsRanged). Skills/enemy attacks
-	// unaffected. See MemberAttackHitsTarget.
+	// Flying: immune to MELEE — a melee/unarmed basic or melee skill can't reach a
+	// flyer at all (hard gate, no damage); only a ranged weapon or magic touches it.
+	// Enemy attacks against the party are unaffected. See EnemyMeleeReachable.
 	Flying bool
 }
 

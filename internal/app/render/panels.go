@@ -460,7 +460,7 @@ func drawFormationCard(font rl.Font, g *core.GameState, i int, quad rl.Rectangle
 	drawTextWithShadow(font, "ARM", rightX, ay, FontSmall, textMuted)
 	drawTextRightAligned(font, smallIntLabel(m.Armor), rightX+statColW-statValueInsetX, ay, FontSmall, textPrimary)
 	drawTextWithShadow(font, "XP", rightX+statColW, ay, FontSmall, textMuted)
-	drawTextRightAligned(font, strconv.Itoa(m.XP)+" / "+strconv.Itoa(core.XPForLevel(m.Level)), rightX+rightW, ay, FontSmall, textPrimary)
+	drawTextRightAligned(font, formatRatioSpaced(m.XP, core.XPForLevel(m.Level)), rightX+rightW, ay, FontSmall, textPrimary)
 
 	// Allocate CTA — cursored member with something to spend.
 	if highlight && (m.PendingLevelUps > 0 || m.SkillPoints > 0) {
@@ -651,11 +651,16 @@ const (
 	equipPickerSubtitleDY = float32(52)
 )
 
+// uiCellInsetX is the standard body inset for a Stats/detail cell, so the two below
+// share one rhythm instead of two bare 14s that can silently drift apart. Give either
+// its own literal if it must diverge.
+const uiCellInsetX = float32(14)
+
 // statValueInsetX is the right-edge inset for a right-aligned value in a Stats-tab cell, so the number column shares one gutter.
-const statValueInsetX = float32(14)
+const statValueInsetX = uiCellInsetX
 
 // detailCardInsetX is the content inset (top-left) for a glass detail card's body text.
-const detailCardInsetX = float32(14)
+const detailCardInsetX = uiCellInsetX
 
 // pickerCardLeftInset is the shared left gutter for a picker's title + footer hint.
 // 26, not hudContentInsetX=22: the picker's engraved title sits a touch further off the
@@ -861,6 +866,16 @@ func drawHealPicker(g *core.GameState, assets Resources) {
 	})
 }
 
+// statBonusPart formats one signed stat-bonus chip ("STR +2", "Armor -1") with the
+// correct sign for negatives — one source so every arm (Armor/MDef/stat loop) agrees.
+func statBonusPart(label string, value int) string {
+	sign := "+"
+	if value < 0 {
+		sign = "" // strconv already prints the leading '-'
+	}
+	return label + " " + sign + strconv.Itoa(value)
+}
+
 // equipBonusSummary returns the single-line "STR +2" / "Armor +1" bonus copy under an item's tile.
 // equipBonusSummaryCache memoizes it by kind (built from the immutable ItemDefinition); "" is cached too.
 var equipBonusSummaryCache = map[core.ItemKind]string{}
@@ -879,21 +894,17 @@ func equipBonusSummary(def core.ItemDefinition) string {
 		parts = append(parts, tag)
 	}
 	if def.ArmorBonus != 0 {
-		parts = append(parts, "Armor +"+strconv.Itoa(def.ArmorBonus))
+		parts = append(parts, statBonusPart("Armor", def.ArmorBonus))
 	}
 	if def.MDefBonus != 0 {
-		parts = append(parts, "MDef +"+strconv.Itoa(def.MDefBonus))
+		parts = append(parts, statBonusPart("MDef", def.MDefBonus))
 	}
 	for s := core.Stat(0); s < core.StatCount; s++ {
 		v := def.StatBonus[s]
 		if v == 0 {
 			continue
 		}
-		sign := "+"
-		if v < 0 {
-			sign = ""
-		}
-		parts = append(parts, core.StatLabel(s)+" "+sign+strconv.Itoa(v))
+		parts = append(parts, statBonusPart(core.StatLabel(s), v))
 	}
 	out := ""
 	if len(parts) > 0 {
@@ -1039,6 +1050,9 @@ var skillCostMPLabelCache = func() [32]string {
 func goldLabelFull(n int) string  { return fmt.Sprintf("Gold: %d", n) }
 func goldLabelShort(n int) string { return fmt.Sprintf("%d G", n) }
 
+// goldGainLabel formats a reward gain ("Gold  +N") — the victory-spoils sibling of the two above.
+func goldGainLabel(n int) string { return fmt.Sprintf("Gold  +%d", n) }
+
 // skillPointsLabel returns "<n> SP" from a LUT — the SP sibling of skillCostMPLabel, shared across the Skills tab + tree modal.
 func skillPointsLabel(n int) string {
 	if n >= 0 && n < len(skillPointsLabelCache) {
@@ -1103,16 +1117,17 @@ func panelsItemCountLabel(n int) string {
 	return "x" + strconv.Itoa(n)
 }
 
-// treeRatioLabel memoizes the Skills-tab "invested / total" strings (bounded operands, so the memo can't grow unbounded).
-var treeRatioLabelCache = map[[2]int]string{}
+// formatRatioSpaced memoizes the canonical spaced "cur / total" readout shared by the
+// Skills tree, XP line, and rank state. (Narrow gauges use the space-free formatBarValue.)
+var ratioSpacedCache = map[[2]int]string{}
 
-func treeRatioLabel(invested, total int) string {
-	k := [2]int{invested, total}
-	if s, ok := treeRatioLabelCache[k]; ok {
+func formatRatioSpaced(cur, total int) string {
+	k := [2]int{cur, total}
+	if s, ok := ratioSpacedCache[k]; ok {
 		return s
 	}
-	s := strconv.Itoa(invested) + " / " + strconv.Itoa(total)
-	treeRatioLabelCache[k] = s
+	s := strconv.Itoa(cur) + " / " + strconv.Itoa(total)
+	ratioSpacedCache[k] = s
 	return s
 }
 
@@ -1170,7 +1185,7 @@ func drawPanelsSkills(g *core.GameState, assets Resources, body rl.Rectangle) {
 
 			drawTextWithShadow(font, tr.Name, rect.X+12, rect.Y+8, FontBody, textPrimary)
 			invested := core.TreeInvestedRanks(&m, tr)
-			ratio := treeRatioLabel(invested, core.TreeMaxRanks(tr))
+			ratio := formatRatioSpaced(invested, core.TreeMaxRanks(tr))
 			ratioCol := textMuted
 			if invested > 0 {
 				ratioCol = giltBright

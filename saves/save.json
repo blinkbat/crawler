@@ -5,8 +5,8 @@
   "playerTileZ": 24,
   "playerFacing": 0,
   "playerLevel": 10,
-  "stepCount": 116,
-  "gold": 0,
+  "stepCount": 114,
+  "gold": 16,
   "party": [
     {
       "Class": 0,
@@ -19,7 +19,7 @@
         "VIT": 5,
         "SPD": 3
       },
-      "HP": 10,
+      "HP": 0,
       "MaxHP": 10,
       "MP": 4,
       "MaxMP": 4,
@@ -38,7 +38,7 @@
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 0,
+      "DamagePopup": 1,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "Defending": false,
@@ -55,7 +55,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 1,
-      "XP": 0,
+      "XP": 55,
       "PendingLevelUps": 0,
       "SkillPoints": 1,
       "SkillTiers": null,
@@ -85,14 +85,14 @@
         0,
         0
       ],
-      "Row": 1,
-      "Col": 0,
+      "Row": 0,
+      "Col": 1,
       "HomeRow": 1,
       "HomeCol": 0,
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 0,
+      "DamagePopup": 1,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "Defending": false,
@@ -109,7 +109,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 1,
-      "XP": 0,
+      "XP": 55,
       "PendingLevelUps": 0,
       "SkillPoints": 1,
       "SkillTiers": null,
@@ -127,7 +127,7 @@
         "VIT": 4,
         "SPD": 6
       },
-      "HP": 8,
+      "HP": 0,
       "MaxHP": 8,
       "MP": 5,
       "MaxMP": 5,
@@ -139,18 +139,18 @@
         0,
         0
       ],
-      "Row": 0,
-      "Col": 0,
+      "Row": 1,
+      "Col": 1,
       "HomeRow": 0,
       "HomeCol": 1,
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 0,
+      "DamagePopup": 1,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "Defending": false,
-      "PoisonTurns": 0,
+      "PoisonTurns": 2,
       "SleepTurns": 0,
       "StunTurns": 0,
       "Ingested": false,
@@ -163,7 +163,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 1,
-      "XP": 0,
+      "XP": 15,
       "PendingLevelUps": 0,
       "SkillPoints": 1,
       "SkillTiers": null,
@@ -181,13 +181,13 @@
         "VIT": 4,
         "SPD": 4
       },
-      "HP": 8,
+      "HP": 0,
       "MaxHP": 8,
       "MP": 10,
       "MaxMP": 10,
       "Armor": 0,
       "Equipped": [
-        0,
+        11,
         0,
         0,
         0,
@@ -200,11 +200,11 @@
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 0,
+      "DamagePopup": 1,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "Defending": false,
-      "PoisonTurns": 0,
+      "PoisonTurns": 1,
       "SleepTurns": 0,
       "StunTurns": 0,
       "Ingested": false,
@@ -217,7 +217,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 1,
-      "XP": 0,
+      "XP": 55,
       "PendingLevelUps": 0,
       "SkillPoints": 1,
       "SkillTiers": null,
@@ -233,6 +233,10 @@
     {
       "Kind": 15,
       "Count": 2
+    },
+    {
+      "Kind": 2,
+      "Count": 1
     }
   ],
   "quests": [
@@ -243,6 +247,17 @@
       "Status": 0
     }
   ],
+  "bestiary": {
+    "0": {
+      "kills": 7
+    },
+    "1": {
+      "kills": 1
+    },
+    "2": {
+      "kills": 1
+    }
+  },
   "crystals": [
     {
       "tileX": 34,

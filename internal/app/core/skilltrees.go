@@ -169,12 +169,14 @@ var classSkillTrees = map[PartyClass][]SkillTreeDef{
 }
 
 func init() {
+	// Node IDs must be globally unique: findTreeNode/passives.go search per-class
+	// and take the first hit, so a cross-class duplicate would mis-resolve.
+	seen := map[string]bool{}
 	for _, c := range AllPartyClasses() {
 		trees, ok := classSkillTrees[c]
 		if !ok || len(trees) != skillTreesPerClass {
 			panic("core: classSkillTrees must define exactly skillTreesPerClass trees per class")
 		}
-		seen := map[string]bool{}
 		// granted: SkillIDs learned by a node in THIS class. At most one node per class may grant a
 		// skill — BuySkillNode writes SkillTiers[grant]=rank-1, so a second would desync the tier.
 		// Per-class, not global; a different class granting the same skill is fine.

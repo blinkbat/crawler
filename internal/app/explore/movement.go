@@ -452,11 +452,11 @@ func fireHealingCrystal(g *core.GameState, idx int) {
 	g.Crystals[idx].Charged = false
 	g.Crystals[idx].Charge = 0
 	if err := core.SaveGame(g); err != nil {
-		g.LogMessage("The crystal restores the party. (Autosave failed: " + err.Error() + ")")
+		g.LogMessageCat("The crystal restores the party. (Autosave failed: "+err.Error()+")", core.LogHeal)
 		audio.Play(audio.SoundInputGreat)
 		return
 	}
-	g.LogMessage("The crystal restores the party and saves your progress.")
+	g.LogMessageCat("The crystal restores the party and saves your progress.", core.LogHeal)
 	audio.Play(audio.SoundInputGreat)
 }
 

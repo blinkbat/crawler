@@ -147,27 +147,10 @@ func MemberAttackHits(rng *rand.Rand, m PartyMember, quality int) bool {
 	return RollChance(rng, memberAttackAccuracy(m, quality))
 }
 
-// memberAttackAccuracyVs folds the flying-target penalty in: a melee swing at a
-// Flying enemy loses FlyingMeleeAccuracyPenalty (ranged shrugs it). Applied
-// post-clamp, so it can pull even an Excellent press below a guaranteed hit.
-func memberAttackAccuracyVs(m PartyMember, flying bool, quality int) float64 {
-	acc := memberAttackAccuracy(m, quality)
-	if flying && !CanReachFlying(EquippedWeapon(m)) {
-		acc = Clamp(acc-FlyingMeleeAccuracyPenalty, 0, 1)
-	}
-	return acc
-}
-
-// MemberAttackHitsTarget rolls the basic-attack hit chance against a known
-// defender, applying the flying-target penalty. Prefer this when the target is
-// in hand; bare MemberAttackHits stays for attacker-only callers (previews/tests).
-func MemberAttackHitsTarget(rng *rand.Rand, m PartyMember, target Enemy, quality int) bool {
-	return RollChance(rng, memberAttackAccuracyVs(m, EnemyInfoFor(target).Flying, quality))
-}
-
-// MemberMeleeReachesFlyer reports whether the basic attack reaches a Flying
-// target without penalty (ranged weapon). The battle layer flavors a flyer
-// whiff as "out of reach".
+// MemberMeleeReachesFlyer reports whether the basic attack can reach a Flying
+// target at all — only a ranged weapon does. A melee/unarmed swing is hard-blocked
+// (no damage); the battle layer gates targeting on this and flavors the whiff as
+// "out of reach". See EnemyMeleeReachable for the target-set mirror.
 func MemberMeleeReachesFlyer(m PartyMember) bool {
 	return CanReachFlying(EquippedWeapon(m))
 }

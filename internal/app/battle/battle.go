@@ -1107,7 +1107,7 @@ func winBattle(g *core.GameState, message string) {
 	g.Battle.Timer = core.VictoryDanceDuration
 	g.Battle.ClearTiming()
 	resetBattleAction(g)
-	setBattleMessage(g, message)
+	setBattleMessageCat(g, message, core.LogDeath) // the felling/victory banner reads as a foe death
 	// Credit felled foes to the bestiary (kill counts drive the identify threshold).
 	core.RecordBattleKills(g)
 	// Snapshot pre-award level/XP for the spoils screen before AwardBattleXP mutates
@@ -1281,7 +1281,7 @@ func loseBattle(g *core.GameState, message string) {
 	g.Battle.Phase = core.BattleLost
 	g.Battle.ClearTiming()
 	resetBattleAction(g)
-	setBattleMessage(g, message)
+	setBattleMessageCat(g, message, core.LogDamageParty)
 }
 
 // fleeBattle is the debug "Easy Battle Quit" exit: drop the engaged pack and
@@ -1395,8 +1395,23 @@ func setBattleStatus(g *core.GameState, message string) {
 // non-immediate-repeat). Dedupe is one-step-behind only: drops "X then X" but NOT
 // "X then Y then X" so alternating-actor sequences read correctly.
 func setBattleMessage(g *core.GameState, message string) {
-	// LogMessage dedupes consecutive repeats + caps the buffer.
+	// LogMessage dedupes consecutive repeats + caps the buffer. Neutral (LogInfo) tint.
 	g.LogMessage(message)
+}
+
+// setBattleMessageCat is setBattleMessage with an explicit color category (see
+// core.LogCategory): damage/heal/death lines color-code; everything else stays LogInfo.
+func setBattleMessageCat(g *core.GameState, message string, cat core.LogCategory) {
+	g.LogMessageCat(message, cat)
+}
+
+// logFoeHit logs a party→foe damage line: gold when the blow felled the foe, white otherwise.
+func logFoeHit(g *core.GameState, message string, defeated bool) {
+	cat := core.LogDamageFoe
+	if defeated {
+		cat = core.LogDeath
+	}
+	setBattleMessageCat(g, message, cat)
 }
 
 // tickHitTimers decays the three per-actor hit-reaction timers (bump, flash,

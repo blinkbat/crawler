@@ -207,8 +207,13 @@ var enemySpellHandlers = map[core.SkillID]func(enemySpellCtx) bool{
 // enemySpellLog formats "<Enemy> casts <Skill> — <rest>" for handlers following
 // the casts-prefix convention. Handlers with bespoke phrasings call setBattleMessage directly.
 func enemySpellLog(ctx enemySpellCtx, rest string, args ...any) {
+	enemySpellLogCat(ctx, core.LogInfo, rest, args...)
+}
+
+// enemySpellLogCat is enemySpellLog with an explicit color category (damaging casts pass LogDamageParty).
+func enemySpellLogCat(ctx enemySpellCtx, cat core.LogCategory, rest string, args ...any) {
 	tail := fmt.Sprintf(rest, args...)
-	setBattleMessage(ctx.g, fmt.Sprintf("%s casts %s — %s", core.TheEnemy(ctx.def), ctx.skillName, tail))
+	setBattleMessageCat(ctx.g, fmt.Sprintf("%s casts %s — %s", core.TheEnemy(ctx.def), ctx.skillName, tail), cat)
 }
 
 // enemySpellDamage is the shared damaging-enemy-spell formula: SpellPower +
@@ -225,9 +230,9 @@ func handleEnemyFirebolt(ctx enemySpellCtx) bool {
 	dealt, killed := damagePartyMemberDefendable(g, ctx.target, enemySpellDamage(ctx.def, ctx.effect), core.SkillTagFor(core.SkillFirebolt))
 	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillFirebolt), ctx.target)
 	if killed {
-		setBattleMessage(g, fmt.Sprintf("%s incinerates %s.", core.TheEnemy(ctx.def), g.Party[ctx.target].Name))
+		setBattleMessageCat(g, fmt.Sprintf("%s incinerates %s.", core.TheEnemy(ctx.def), g.Party[ctx.target].Name), core.LogDamageParty)
 	} else {
-		enemySpellLog(ctx, "%s burns for %d.", g.Party[ctx.target].Name, dealt)
+		enemySpellLogCat(ctx, core.LogDamageParty, "%s burns for %d.", g.Party[ctx.target].Name, dealt)
 	}
 	audio.Play(audio.SoundEnemyHit)
 	tryRetribution(g, ctx.slot, ctx.target, dealt)
@@ -391,9 +396,9 @@ func handleEnemyStoneslam(ctx enemySpellCtx) bool {
 	case hits == 0:
 		setBattleMessage(g, fmt.Sprintf("%s raises stone fists, but finds no targets.", core.TheEnemy(ctx.def)))
 	case kills > 0:
-		setBattleMessage(g, fmt.Sprintf("%s slams the ground — %d crushed.", core.TheEnemy(ctx.def), kills))
+		setBattleMessageCat(g, fmt.Sprintf("%s slams the ground — %d crushed.", core.TheEnemy(ctx.def), kills), core.LogDamageParty)
 	default:
-		setBattleMessage(g, fmt.Sprintf("%s slams the ground — the whole party staggers.", core.TheEnemy(ctx.def)))
+		setBattleMessageCat(g, fmt.Sprintf("%s slams the ground — the whole party staggers.", core.TheEnemy(ctx.def)), core.LogDamageParty)
 	}
 	audio.Play(audio.SoundEnemyHit)
 	// No targets = connected with nothing; don't count it.
@@ -479,8 +484,9 @@ func forEachLivingEnemy(g *core.GameState, fn func(slot int, enemy *core.Enemy))
 
 // forEachTargetableEnemy walks the enemies a whole-pack skill can actually reach:
 // a MELEE AoE (Swipe / Whirlwind / Poison Cloud) is front-gated like a melee swing,
-// so it hits only the effective front row; ranged/magic AoE (Fireball / Arc Bolt /
-// Cone of Cold) sweeps the whole pack. One source so every sweep respects reach.
+// so it hits only the effective front row and skips Flying foes (melee-immune); ranged/
+// magic AoE (Fireball / Arc Bolt / Cone of Cold) sweeps the whole pack. One source so
+// every sweep respects reach.
 func forEachTargetableEnemy(g *core.GameState, skill core.SkillID, fn func(slot int, enemy *core.Enemy)) {
 	meleeOnly := core.SkillAttackClassFor(skill).IsMelee()
 	members := core.BattleMembers(g)
@@ -488,7 +494,7 @@ func forEachTargetableEnemy(g *core.GameState, skill core.SkillID, fn func(slot 
 		if !members[slot].Alive {
 			continue
 		}
-		if meleeOnly && !core.EnemyInEffectiveFront(members, slot) {
+		if meleeOnly && !core.EnemyMeleeReachable(members, slot) {
 			continue
 		}
 		fn(slot, core.BattleMemberAt(g, slot))
@@ -826,17 +832,19 @@ func applyAttack(g *core.GameState, quality int) bool {
 	// plays even on a whiff.
 	attacker := beginPartyAction(g)
 	target := *core.BattleMemberAt(g, g.Battle.EnemyIndex)
+	// Flying foes are immune to a melee swing — only a ranged weapon connects. Target
+	// selection already bars picking one in melee; this is the defense-in-depth hard
+	// gate (no damage, turn spent), and the swing still plays via AttackBump.
+	if core.EnemyInfoFor(target).Flying && !core.MemberMeleeReachesFlyer(*attacker) {
+		setBattleMessage(g, fmt.Sprintf("%s%s can't reach the airborne %s.", qualityTag(quality), attacker.Name, core.EnemySingularNoun(target)))
+		finishActorTurn(g)
+		return true
+	}
 	// Accuracy roll (basic attack only): DEX + timing drive hit chance, clamped past
 	// 1.0 so high-DEX/high-grade essentially never whiff. The swing + timing popup
 	// still play on a miss; only damage is withheld.
-	if !core.MemberAttackHitsTarget(g.Rand(), *attacker, target, quality) {
-		// Keep the quality prefix so the whiff reads consistently with hits. A melee
-		// swing at a flyer reads "can't reach" so the miss is legible as the flying penalty.
-		whiff := fmt.Sprintf("%s%s swings wide.", qualityTag(quality), attacker.Name)
-		if core.EnemyInfoFor(target).Flying && !core.MemberMeleeReachesFlyer(*attacker) {
-			whiff = fmt.Sprintf("%s%s can't reach the airborne %s.", qualityTag(quality), attacker.Name, core.EnemySingularNoun(target))
-		}
-		setBattleMessage(g, whiff)
+	if !core.MemberAttackHits(g.Rand(), *attacker, quality) {
+		setBattleMessage(g, fmt.Sprintf("%s%s swings wide.", qualityTag(quality), attacker.Name))
 		finishActorTurn(g)
 		return true
 	}
@@ -855,7 +863,7 @@ func applyAttack(g *core.GameState, quality int) bool {
 	// Glyph keyed to the weapon (blunt/ranged = impact, edged = slash). Basic
 	// attacks are the only weapon-driven swing; skills pick VFX via vfxKindFor.
 	core.EnqueueEnemyVFX(g, core.WeaponHitVFX(core.EquippedWeapon(*attacker)), g.Battle.EnemyIndex)
-	setBattleMessage(g, appendCrit(attackResultMessage(attacker.Name, target, dealt, quality, defeated), crit))
+	logFoeHit(g, appendCrit(attackResultMessage(attacker.Name, target, dealt, quality, defeated), crit), defeated)
 	finishActorTurn(g)
 	return true
 }
@@ -894,7 +902,7 @@ func applySwipe(g *core.GameState, quality int) bool {
 	if enemiesHit == 0 || passes == 0 {
 		setBattleMessage(g, aoeEmptyMessage(core.SkillName(core.SkillSwipe), "catches only air"))
 	} else {
-		setBattleMessage(g, appendCrit(swipeMessage(actor.Name, enemiesHit, quality), crit))
+		setBattleMessageCat(g, appendCrit(swipeMessage(actor.Name, enemiesHit, quality), crit), core.LogDamageFoe)
 	}
 	finishActorTurn(g)
 	// hits=0 still counts as landed (motion played, MP spent).
@@ -933,7 +941,7 @@ func applyPrayer(g *core.GameState, quality int) bool {
 	// The chosen ally can die (or its slot go out of range) between confirm and this
 	// apply; the shared head re-checks — refund + end the turn on a gone target — so we
 	// don't index a stale slot or log a heal that never landed.
-	return applyAllyTargetSkill(g, core.SkillPrayer, func(actor, target *core.PartyMember) string {
+	return applyAllyTargetSkill(g, core.SkillPrayer, core.LogHeal, func(actor, target *core.PartyMember) string {
 		// Prayer is Heal-kind (WIS + Effect.Heal).
 		heal := core.ScaleHeal(core.SkillHealFor(actor, core.SkillPrayer), quality)
 		healPartyMember(g, g.Battle.PartyTarget, heal)
@@ -978,13 +986,16 @@ func applySteal(g *core.GameState, quality int) bool {
 		}
 		core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillSteal), g.Battle.EnemyIndex)
 		msg := stealMessage(actor.Name, kind, quality)
+		cat := core.LogInfo // a plain lift is utility; the T3 cut tints it damage/death
 		switch {
 		case defeated:
 			msg = fmt.Sprintf("%s The cut fells the %s for %d.", msg, core.EnemySingularNoun(*enemy), bonus)
+			cat = core.LogDeath
 		case bonus > 0:
 			msg = fmt.Sprintf("%s The cut bleeds for %d.", msg, bonus)
+			cat = core.LogDamageFoe
 		}
-		setBattleMessage(g, appendCrit(msg, critBonus))
+		setBattleMessageCat(g, appendCrit(msg, critBonus), cat)
 	} else {
 		setBattleMessage(g, fmt.Sprintf("%s fails to steal.", actor.Name))
 	}
@@ -1045,7 +1056,7 @@ func simpleEnemyDebuff(g *core.GameState, skill core.SkillID, msgFmt string) boo
 // that target g.Battle.PartyTarget. Re-checks the chosen ally (refund + end turn on a
 // gone target), begins the turn, then hands off to resolve for the skill's unique
 // mutation + log line. VFX (vfxKindFor) at PartyTarget and finishActorTurn are shared.
-func applyAllyTargetSkill(g *core.GameState, skill core.SkillID, resolve func(actor, target *core.PartyMember) string) bool {
+func applyAllyTargetSkill(g *core.GameState, skill core.SkillID, cat core.LogCategory, resolve func(actor, target *core.PartyMember) string) bool {
 	if !ensureAlivePartyTargetOrCancel(g, skill) {
 		return false
 	}
@@ -1053,7 +1064,7 @@ func applyAllyTargetSkill(g *core.GameState, skill core.SkillID, resolve func(ac
 	target := &g.Party[g.Battle.PartyTarget]
 	msg := resolve(actor, target)
 	core.EnqueuePartyVFX(g, vfxKindFor(skill), g.Battle.PartyTarget)
-	setBattleMessage(g, msg)
+	setBattleMessageCat(g, msg, cat)
 	finishActorTurn(g)
 	return true
 }
@@ -1076,7 +1087,7 @@ func applyFrostbite(g *core.GameState, quality int) bool {
 	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillFrostbite), g.Battle.EnemyIndex)
 	// Chill only on a survivor (no debuffing a corpse); guaranteed when alive.
 	chilled := !defeated && core.StampEnemyDebuff(enemy, core.SkillFrostbite, effect)
-	setBattleMessage(g, appendCrit(frostbiteMessage(actor.Name, target, damage, quality, defeated, chilled), crit))
+	logFoeHit(g, appendCrit(frostbiteMessage(actor.Name, target, damage, quality, defeated, chilled), crit), defeated)
 	finishActorTurn(g)
 	return true
 }
@@ -1126,13 +1137,13 @@ func applyFirebolt(g *core.GameState, quality int) bool {
 	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillFirebolt, rawDamage, quality)
 	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillFirebolt), g.Battle.EnemyIndex)
 	burned := tryProcStatus(g.Rand(), &enemy.BurnTurns, defeated, effect.BurnChance, quality, 0, effect.BurnDuration, resistWIS)
-	setBattleMessage(g, appendCrit(fireboltMessage(actor.Name, target, damage, quality, defeated, burned, enemy.BurnTurns), crit))
+	logFoeHit(g, appendCrit(fireboltMessage(actor.Name, target, damage, quality, defeated, burned, enemy.BurnTurns), crit), defeated)
 	if overloaded {
 		// Overcharge recoils on the caster. SkillTagNone so the self-burn bypasses
 		// the caster's own armor/MDef.
 		recoil, _ := damagePartyMember(g, g.Battle.CurrentParty, core.OverchargeRecoil, core.SkillTagNone)
 		core.EnqueuePartyVFX(g, core.VFXEmber, g.Battle.CurrentParty)
-		setBattleMessage(g, fmt.Sprintf("%s overcharges the bolt — and is scorched for %d!", actor.Name, recoil))
+		setBattleMessageCat(g, fmt.Sprintf("%s overcharges the bolt — and is scorched for %d!", actor.Name, recoil), core.LogDamageParty)
 	}
 	finishActorTurn(g)
 	return true
@@ -1172,7 +1183,7 @@ func applyMassMend(g *core.GameState, quality int) bool {
 	if healed == 0 {
 		setBattleMessage(g, fmt.Sprintf("%s%s's Mass Mend finds no wounds.", qualityTag(quality), actor.Name))
 	} else {
-		setBattleMessage(g, fmt.Sprintf("%s%s mends %d allies for %d each.", qualityTag(quality), actor.Name, healed, heal))
+		setBattleMessageCat(g, fmt.Sprintf("%s%s mends %d allies for %d each.", qualityTag(quality), actor.Name, healed, heal), core.LogHeal)
 	}
 	finishActorTurn(g)
 	return true
@@ -1214,7 +1225,7 @@ func applyBackstab(g *core.GameState, quality int) bool {
 	rawDamage = applyCritMultiplier(rawDamage, crit, double)
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillBackstab))
 	core.EnqueueEnemyVFX(g, core.VFXSlash, g.Battle.EnemyIndex)
-	setBattleMessage(g, backstabMessage(actor.Name, target, damage, quality, defeated, crit))
+	logFoeHit(g, backstabMessage(actor.Name, target, damage, quality, defeated, crit), defeated)
 	finishActorTurn(g)
 	return true
 }
@@ -1303,7 +1314,7 @@ func applyProcStrike(g *core.GameState, skill core.SkillID, quality int, ps proc
 	damage, defeated, crit := strikeWithCrit(g, actor, skill, rawDamage, quality)
 	core.EnqueueEnemyVFX(g, vfxKindFor(skill), g.Battle.EnemyIndex)
 	procced := tryProcStatus(g.Rand(), ps.counter(enemy), defeated, ps.chance(effect), quality, ps.minGrade, ps.dur(effect), resistWIS)
-	setBattleMessage(g, appendCrit(procSkillMessage(ps.arms, actor.Name, target, damage, quality, defeated, procced), crit))
+	logFoeHit(g, appendCrit(procSkillMessage(ps.arms, actor.Name, target, damage, quality, defeated, procced), crit), defeated)
 	finishActorTurn(g)
 	return true
 }
@@ -1393,7 +1404,7 @@ func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, hitVerb, emptyVe
 	if afflicted > 0 {
 		msg = fmt.Sprintf("%s %d afflicted.", msg, afflicted)
 	}
-	setBattleMessage(g, msg)
+	setBattleMessageCat(g, msg, core.LogDamageFoe)
 	finishActorTurn(g)
 	return true
 }
@@ -1429,7 +1440,7 @@ func applySunder(g *core.GameState, quality int) bool {
 	case shoved:
 		msg = fmt.Sprintf("%s Its turn is shoved back.", msg)
 	}
-	setBattleMessage(g, appendCrit(msg, crit))
+	logFoeHit(g, appendCrit(msg, crit), defeated)
 	finishActorTurn(g)
 	return true
 }
@@ -1462,7 +1473,7 @@ func applyWarBanner(g *core.GameState, quality int) bool {
 // --- Stone Skin (Warrior, press single-ally Armor/MDef ward) ---
 
 func applyStoneSkin(g *core.GameState, quality int) bool {
-	return applyAllyTargetSkill(g, core.SkillStoneSkin, func(actor, target *core.PartyMember) string {
+	return applyAllyTargetSkill(g, core.SkillStoneSkin, core.LogInfo, func(actor, target *core.PartyMember) string {
 		eff := core.EffectiveSkillEffect(actor, core.SkillStoneSkin)
 		// Self-cast +1 correction (offsets finishActorTurn's immediate tick); see selfCastTurnBonus.
 		eff.BuffTurns += selfCastTurnBonus(g, g.Battle.PartyTarget)
@@ -1486,7 +1497,7 @@ func applyBlind(g *core.GameState, quality int) bool {
 // applyAegis grants the ally a ShieldHP pool the damage path spends before HP.
 // Not turn-counted; re-cast replaces the pool.
 func applyAegis(g *core.GameState, quality int) bool {
-	return applyAllyTargetSkill(g, core.SkillAegis, func(actor, target *core.PartyMember) string {
+	return applyAllyTargetSkill(g, core.SkillAegis, core.LogInfo, func(actor, target *core.PartyMember) string {
 		effect := core.EffectiveSkillEffect(actor, core.SkillAegis)
 		target.ShieldHP = effect.ShieldHP
 		return fmt.Sprintf("%s%s raises an aegis over %s — absorbs the next %d damage.",
@@ -1609,7 +1620,7 @@ func applyPoisonCloud(g *core.GameState, quality int) bool {
 // --- Cleanse (Cleric, press single-ally status cure) ---
 
 func applyCleanse(g *core.GameState, quality int) bool {
-	return applyAllyTargetSkill(g, core.SkillCleanse, func(actor, target *core.PartyMember) string {
+	return applyAllyTargetSkill(g, core.SkillCleanse, core.LogInfo, func(actor, target *core.PartyMember) string {
 		cured := core.CureDebuffs(target)
 		if cured == 0 {
 			return fmt.Sprintf("%s%s cleanses %s — nothing ailed them.", qualityTag(quality), actor.Name, target.Name)
@@ -1626,7 +1637,7 @@ func applySecondWind(g *core.GameState, quality int) bool {
 	heal := core.ScaleHeal(core.SkillHealFor(actor, core.SkillSecondWind), quality)
 	if healPartyMember(g, g.Battle.CurrentParty, heal) {
 		core.EnqueuePartyVFX(g, vfxKindFor(core.SkillSecondWind), g.Battle.CurrentParty)
-		setBattleMessage(g, fmt.Sprintf("%s%s catches a second wind — recovers %d HP.", qualityTag(quality), actor.Name, heal))
+		setBattleMessageCat(g, fmt.Sprintf("%s%s catches a second wind — recovers %d HP.", qualityTag(quality), actor.Name, heal), core.LogHeal)
 	} else {
 		setBattleMessage(g, fmt.Sprintf("%s%s is already at full health.", qualityTag(quality), actor.Name))
 	}
@@ -1640,7 +1651,7 @@ func applyRenewal(g *core.GameState, quality int) bool {
 	// Renewal arms on a charge bar (the ally can die mid-charge) and bypasses
 	// healPartyMember's guard by stamping the regen counter directly, so the shared
 	// head re-checks the target.
-	return applyAllyTargetSkill(g, core.SkillRenewal, func(actor, target *core.PartyMember) string {
+	return applyAllyTargetSkill(g, core.SkillRenewal, core.LogHeal, func(actor, target *core.PartyMember) string {
 		effect := core.EffectiveSkillEffect(actor, core.SkillRenewal)
 		// Snapshot the per-turn heal at cast (WIS + timing), floored at 1. Re-cast replaces.
 		perTurn := core.ScaleHeal(core.SkillHealFor(actor, core.SkillRenewal), quality)
@@ -1784,15 +1795,13 @@ func damageEnemy(g *core.GameState, slot, rawDamage, quality int, tag core.Skill
 	if tag == core.SkillTagPhys && damage > 0 {
 		g.Battle.PhysDamageThisTurn += damage
 	}
-	// Flash + HP-floor (shared with the party path + poison tick).
-	died := core.ApplyFlatDamage(&enemy.HP, &enemy.DamageFlash, damage)
-	if damage > 0 {
-		enemy.DamagePopup = damage
-		enemy.DamagePopupQuality = quality
-		enemy.DamagePopupTimer = core.QualityResultDuration
-	}
-	// Recoil + wake — only on real damage (zero-damage connections don't).
-	core.ApplyHitRecoil(&enemy.HitKnockback, &enemy.SleepTurns, damage)
+	// Flash + HP-floor + popup + recoil (shared tail with the party path; popup/recoil
+	// only fire on real damage). Death-side handling stays below.
+	died := core.ApplyDamageWithPopup(core.HitTarget{
+		HP: &enemy.HP, Flash: &enemy.DamageFlash,
+		Popup: &enemy.DamagePopup, PopupQuality: &enemy.DamagePopupQuality, PopupTimer: &enemy.DamagePopupTimer,
+		Knockback: &enemy.HitKnockback, Sleep: &enemy.SleepTurns,
+	}, damage, quality)
 	if !died {
 		// Audible thud only on scoring hits.
 		if damage > 0 {
@@ -1859,7 +1868,7 @@ func applyPartyPoisonTick(g *core.GameState, index int) bool {
 	// damagePartyMemberPoison is the authoritative kill signal; it bypasses the
 	// ingested lockout so poison keeps ticking on ingested prey (else a free escape).
 	dealt, killed := damagePartyMemberPoison(g, index)
-	setBattleMessage(g, poisonTickMessage(member.Name, dealt, killed))
+	setBattleMessageCat(g, poisonTickMessage(member.Name, dealt, killed), core.LogDamageParty)
 	return killed
 }
 
@@ -1959,9 +1968,9 @@ func tickRegenAfterPartyTurn(g *core.GameState, actor core.ActorRef) {
 	fades := m.RegenTurns == 0
 	switch {
 	case healed && fades:
-		setBattleMessage(g, fmt.Sprintf("%s renews %d HP — the renewal fades.", m.Name, m.RegenPerTurn))
+		setBattleMessageCat(g, fmt.Sprintf("%s renews %d HP — the renewal fades.", m.Name, m.RegenPerTurn), core.LogHeal)
 	case healed:
-		setBattleMessage(g, fmt.Sprintf("%s renews %d HP.", m.Name, m.RegenPerTurn))
+		setBattleMessageCat(g, fmt.Sprintf("%s renews %d HP.", m.Name, m.RegenPerTurn), core.LogHeal)
 	case fades:
 		setBattleMessage(g, fmt.Sprintf("%s's renewal fades.", m.Name))
 	}
@@ -2004,7 +2013,7 @@ func tickEnemyDoTAfterTurn(g *core.GameState, actor core.ActorRef, counterOf fun
 		return false
 	}
 	dealt, defeated := applyEnemyDoTTick(g, actor.Index, counter, tickDamage)
-	setBattleMessage(g, msg(core.EnemyDisplayName(enemy), dealt, defeated))
+	logFoeHit(g, msg(core.EnemyDisplayName(enemy), dealt, defeated), defeated)
 	return defeated
 }
 
@@ -2041,12 +2050,12 @@ func tickBurnAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
 	dealt, _ := applyEnemyDoTTick(g, actor.Index, &enemy.BurnTurns, core.BurnTickDamage)
 	def := core.EnemyInfoFor(*enemy)
 	if !enemy.Alive {
-		setBattleMessage(g, fmt.Sprintf("%s succumbs to the flames.", core.TheEnemy(def)))
+		setBattleMessageCat(g, fmt.Sprintf("%s succumbs to the flames.", core.TheEnemy(def)), core.LogDeath)
 		// Repoint the cursor if the burn killed the selected enemy.
 		repointEnemyCursorIfDead(g)
 		return true
 	}
-	setBattleMessage(g, fmt.Sprintf("%s burns for %d.", core.TheEnemy(def), dealt))
+	setBattleMessageCat(g, fmt.Sprintf("%s burns for %d.", core.TheEnemy(def), dealt), core.LogDamageFoe)
 	return false
 }
 
@@ -2102,17 +2111,13 @@ func applyPartyDamage(g *core.GameState, member *core.PartyMember, rawAmount int
 		member.ShieldHP -= absorbed
 		amount -= absorbed
 	}
-	// Flash + HP-floor (shared with the enemy path + poison tick).
-	died := core.ApplyFlatDamage(&member.HP, &member.DamageFlash, amount)
-	// Damage popup; incoming hits aren't player-timed so quality is Miss (the draw
-	// colors party popups with a fixed hurt tone).
-	if amount > 0 {
-		member.DamagePopup = amount
-		member.DamagePopupQuality = int(core.TimingQualityMiss)
-		member.DamagePopupTimer = core.QualityResultDuration
-	}
-	// Knockback + wake — only on real damage (a soaked 0 doesn't shove).
-	core.ApplyHitRecoil(&member.HitKnockback, &member.SleepTurns, amount)
+	// Flash + HP-floor + popup + recoil (shared tail with the enemy path). Incoming hits
+	// aren't player-timed, so quality is Miss (the draw colors party popups a fixed hurt tone).
+	died := core.ApplyDamageWithPopup(core.HitTarget{
+		HP: &member.HP, Flash: &member.DamageFlash,
+		Popup: &member.DamagePopup, PopupQuality: &member.DamagePopupQuality, PopupTimer: &member.DamagePopupTimer,
+		Knockback: &member.HitKnockback, Sleep: &member.SleepTurns,
+	}, amount, int(core.TimingQualityMiss))
 	// Haptic buzz on a landing hit. Taking a hit doesn't shake the camera, so this
 	// arms rumble directly (TriggerCombatShake is for offensive impacts).
 	if amount > 0 {
@@ -2394,7 +2399,7 @@ func bloodthirstHeal(g *core.GameState, partyIndex, physDamage int) {
 	if gained := member.HP - before; gained > 0 {
 		// VFXHeal cue — lifesteal is an HP gain, not a hit.
 		core.EnqueuePartyVFX(g, core.VFXHeal, partyIndex)
-		setBattleMessage(g, fmt.Sprintf("%s's bloodthirst restores %d HP.", member.Name, gained))
+		setBattleMessageCat(g, fmt.Sprintf("%s's bloodthirst restores %d HP.", member.Name, gained), core.LogHeal)
 	}
 }
 
@@ -2434,9 +2439,9 @@ func tryRiposte(g *core.GameState, dodger, enemySlot int) {
 	g.Battle.PhysDamageThisTurn = physTally
 	core.EnqueueEnemyVFX(g, core.WeaponHitVFX(core.EquippedWeapon(*member)), enemySlot)
 	if defeated {
-		setBattleMessage(g, fmt.Sprintf("%s ripostes — the %s drops!", member.Name, noun))
+		setBattleMessageCat(g, fmt.Sprintf("%s ripostes — the %s drops!", member.Name, noun), core.LogDeath)
 	} else if dealt > 0 {
-		setBattleMessage(g, fmt.Sprintf("%s ripostes the %s for %d.", member.Name, noun, dealt))
+		setBattleMessageCat(g, fmt.Sprintf("%s ripostes the %s for %d.", member.Name, noun, dealt), core.LogDamageFoe)
 	}
 	// Feed Bloodthirst directly (the enemy-turn tally would otherwise drop it).
 	bloodthirstHeal(g, dodger, dealt)
@@ -2469,9 +2474,9 @@ func tryRetribution(g *core.GameState, enemySlot, defender, dealt int) {
 	refl, defeated := damageEnemy(g, enemySlot, reflect, core.TimingQualityGood, core.SkillTagMagic)
 	core.EnqueueEnemyVFX(g, core.VFXSmite, enemySlot)
 	if defeated {
-		setBattleMessage(g, fmt.Sprintf("%s's retribution fells the %s for %d!", g.Party[defender].Name, noun, refl))
+		setBattleMessageCat(g, fmt.Sprintf("%s's retribution fells the %s for %d!", g.Party[defender].Name, noun, refl), core.LogDeath)
 	} else if refl > 0 {
-		setBattleMessage(g, fmt.Sprintf("The %s takes %d from %s's retribution.", noun, refl, g.Party[defender].Name))
+		setBattleMessageCat(g, fmt.Sprintf("The %s takes %d from %s's retribution.", noun, refl, g.Party[defender].Name), core.LogDamageFoe)
 	}
 }
 
@@ -2529,7 +2534,7 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	}
 	recordQuality(g, defendQuality, target, true)
 	def := core.EnemyInfoFor(*enemy)
-	setBattleMessage(g, appendCrit(enemyHitMessage(*enemy, g.Party[target].Name, dealt, defendQuality, g.Party[target].Defending), enemyCrit))
+	setBattleMessageCat(g, appendCrit(enemyHitMessage(*enemy, g.Party[target].Name, dealt, defendQuality, g.Party[target].Defending), enemyCrit), core.LogDamageParty)
 	// Poison inflict: only on a landed hit (gate on `dealt`, so an armor-soaked 0
 	// inflicts no DoT). No-stack like burn.
 	if dealt > 0 {

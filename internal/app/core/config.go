@@ -273,11 +273,6 @@ const (
 	AccuracyBaseline = 0.55
 	AccuracyPerStat  = 0.04
 
-	// FlyingMeleeAccuracyPenalty: subtracted from a basic MELEE attack's hit chance
-	// vs a Flying target (a ranged weapon shrugs it). Applied post-clamp, so it can
-	// pull even an Excellent press below a sure hit. 0 disables; skills aren't gated.
-	FlyingMeleeAccuracyPenalty = 0.30
-
 	// DodgeChance curve: DEX-driven, linear with a saturating cap (cap bites at DEX 15)
 	// so no one is ever untouchable. Dodge = no damage, no status proc.
 	DodgePerDEX = 0.02
