@@ -497,10 +497,16 @@ func forEachLivingEnemy(g *core.GameState, fn func(slot int, enemy *core.Enemy))
 // every sweep respects reach.
 func forEachTargetableEnemy(g *core.GameState, skill core.SkillID, fn func(slot int, enemy *core.Enemy)) {
 	members := core.BattleMembers(g)
+	// Snapshot reachable slots BEFORE any callback runs. A melee AoE that kills a
+	// front-row foe shunts a back-row foe up to RowFront mid-sweep; re-evaluating
+	// reachability per slot would then strike a foe that was covered at cast start.
+	var slots []int
 	for slot := range members {
-		if !core.AoEReachesEnemy(members, skill, slot) {
-			continue
+		if core.AoEReachesEnemy(members, skill, slot) {
+			slots = append(slots, slot)
 		}
+	}
+	for _, slot := range slots {
 		fn(slot, core.BattleMemberAt(g, slot))
 	}
 }

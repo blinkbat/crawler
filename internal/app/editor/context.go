@@ -288,9 +288,7 @@ func runContextItem(s *State, item ctxItem) {
 		}
 	case ctxItemDeletePack:
 		deleteSpawnAt(s, x, z, "pack", func() bool {
-			before := len(s.area.PackSpawns)
-			s.area.PackSpawns = removePackAt(s.area.PackSpawns, x, z)
-			return len(s.area.PackSpawns) != before
+			return deleteSpawnSlice(&s.area.PackSpawns, x, z)
 		})
 	case ctxItemEditChest:
 		if idx := core.ChestSpawnIndexAt(s.area.ChestSpawns, x, z); idx >= 0 {
@@ -298,9 +296,7 @@ func runContextItem(s *State, item ctxItem) {
 		}
 	case ctxItemDeleteChest:
 		deleteSpawnAt(s, x, z, "chest", func() bool {
-			before := len(s.area.ChestSpawns)
-			s.area.ChestSpawns = removeChestSpawnAt(s.area.ChestSpawns, x, z)
-			return len(s.area.ChestSpawns) != before
+			return deleteSpawnSlice(&s.area.ChestSpawns, x, z)
 		})
 	case ctxItemEditDoor:
 		if idx := core.DoorSpawnIndexAt(s.area.DoorSpawns, x, z); idx >= 0 {
@@ -308,15 +304,11 @@ func runContextItem(s *State, item ctxItem) {
 		}
 	case ctxItemDeleteDoor:
 		deleteSpawnAt(s, x, z, "door", func() bool {
-			before := len(s.area.DoorSpawns)
-			s.area.DoorSpawns = removeDoorAt(s.area.DoorSpawns, x, z)
-			return len(s.area.DoorSpawns) != before
+			return deleteSpawnSlice(&s.area.DoorSpawns, x, z)
 		})
 	case ctxItemDeleteCrystal:
 		deleteSpawnAt(s, x, z, "crystal", func() bool {
-			before := len(s.area.CrystalSpawns)
-			s.area.CrystalSpawns = removeCrystalSpawnAt(s.area.CrystalSpawns, x, z)
-			return len(s.area.CrystalSpawns) != before
+			return deleteSpawnSlice(&s.area.CrystalSpawns, x, z)
 		})
 	case ctxItemMoveStartHere:
 		// Shared startBlockers so this and the entity-brush start tool can't drift.
@@ -356,9 +348,11 @@ func runContextItem(s *State, item ctxItem) {
 		// Snapshot, commit only if changed — a no-op erase banks no undo.
 		before := core.CloneArea(s.area)
 		wasDirty := s.dirty
+		wasHidden := s.layerHidden[s.layer]
 		eraseAt(s, x, z)
 		if core.AreaContentEqual(s.area, before) {
-			s.dirty = wasDirty // eraseAt flips dirty unconditionally — undo a no-op
+			s.dirty = wasDirty                 // eraseAt flips dirty unconditionally — undo a no-op
+			s.layerHidden[s.layer] = wasHidden // eraseAt also reveals unconditionally — undo that too
 		} else {
 			commitUndoSnapshot(s, before)
 		}

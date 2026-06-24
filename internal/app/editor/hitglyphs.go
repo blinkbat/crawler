@@ -13,16 +13,17 @@ import (
 // file is just the modal frame + loop clock.
 
 const (
-	hitGlyphModalW   = float32(540)
-	hitGlyphCols     = 4
-	hitGlyphCellW    = float32(126)
-	hitGlyphCellH    = float32(118)
-	hitGlyphLabelH   = float32(22)
-	hitGlyphPreScale = float32(1.6)  // gallery glyphs draw larger than in-combat
-	hitGlyphLoopSecs = float64(1.4)  // pop → animate → fade → repeat, per cell
-	hitGlyphStagger  = float64(0.18) // per-cell phase offset
-	hitGlyphHeaderH  = float32(52)   // header band above the glyph grid
-	hitGlyphFooterH  = float32(34)   // footer band (hint row)
+	hitGlyphModalW     = float32(540)
+	hitGlyphCols       = 4
+	hitGlyphCellW      = float32(126)
+	hitGlyphCellH      = float32(118)
+	hitGlyphLabelH     = float32(22)
+	hitGlyphPreScale   = float32(1.6)  // gallery glyphs draw larger than in-combat
+	hitGlyphLoopSecs   = float64(1.4)  // pop → animate → fade → repeat, per cell
+	hitGlyphStagger    = float64(0.18) // per-cell phase offset
+	hitGlyphHeaderH    = float32(52)   // header band above the glyph grid
+	hitGlyphFooterH    = float32(34)   // footer band (hint row)
+	hitGlyphCellInsetX = float32(5)    // backdrop inset per side within a cell
 )
 
 func openHitGlyphsModal(s *State) { openModal(s, modalHitGlyphs) }
@@ -59,7 +60,7 @@ func drawHitGlyphsModal(s *State, font rl.Font, theme render.Theme) {
 		cy := cellY + hitGlyphCellH/2
 
 		// Inset backdrop so the glyph reads against the card.
-		cell := rl.NewRectangle(cellX+5, cellY, hitGlyphCellW-10, hitGlyphCellH)
+		cell := rl.NewRectangle(cellX+hitGlyphCellInsetX, cellY, hitGlyphCellW-2*hitGlyphCellInsetX, hitGlyphCellH)
 		rl.DrawRectangleRec(cell, bgFieldInset)
 		rl.DrawRectangleLinesEx(cell, 1, editorBorderDim)
 

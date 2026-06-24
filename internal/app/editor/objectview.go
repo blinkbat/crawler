@@ -64,14 +64,8 @@ func computeObjectViewLayout(s *State) objectViewLayout {
 	if pageCount < 1 {
 		pageCount = 1
 	}
+	setObjectViewPage(s, s.objectViewPage, pageCount) // single clamp+write site
 	page := s.objectViewPage
-	if page < 0 {
-		page = 0
-	}
-	if page >= pageCount {
-		page = pageCount - 1
-	}
-	s.objectViewPage = page
 
 	start := page * perPage
 	end := start + perPage

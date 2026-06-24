@@ -101,6 +101,11 @@ func updatePanels(g *core.GameState, dt float32) {
 		// 2-D cursor over the formation grid: a D-pad/arrow press moves to the
 		// orthogonal neighbour's member (by home slot), mirroring the on-screen 2×2.
 		// Confirm on a member with unspent stat points opens the level-up modal.
+		// Self-heal an out-of-range cursor so nav can't get stuck (all moves below
+		// are gated on the cursor being in range).
+		if len(g.Party) > 0 && !core.PartyIndexInRange(g.Party, g.PanelsRowCursor) {
+			g.PanelsRowCursor = 0
+		}
 		if core.PartyIndexInRange(g.Party, g.PanelsRowCursor) {
 			row, col := g.Party[g.PanelsRowCursor].HomeRow, g.Party[g.PanelsRowCursor].HomeCol
 			dx := input.CursorLeftRight()
@@ -196,20 +201,14 @@ func updatePanels(g *core.GameState, dt float32) {
 		panRate := float32(g.PanelsMapZoom) * core.PanelMapPanRateFrac
 		mapPanAccumX += px * panRate * dt
 		mapPanAccumZ += pz * panRate * dt
-		g.PanelsMapPanX += stepAccum(&mapPanAccumX)
-		g.PanelsMapPanZ += stepAccum(&mapPanAccumZ)
+		g.PanelsMapPanX += drainSteps(&mapPanAccumX)
+		g.PanelsMapPanZ += drainSteps(&mapPanAccumZ)
 
 		// Right stick up (negative) zooms in; wheel up (positive) zooms in. Both feed
-		// one accumulator; each whole unit steps the zoom by PanelMapZoomStep.
+		// one accumulator; each whole unit steps the zoom by PanelMapZoomStep (positive
+		// accum = zoom in = PanelsMapZoom decreases).
 		mapZoomAccum += -input.MapZoomAxis()*core.PanelMapZoomStickRate*dt + input.MapZoomWheel()
-		for mapZoomAccum >= 1 {
-			g.PanelsMapZoom -= core.PanelMapZoomStep
-			mapZoomAccum -= 1
-		}
-		for mapZoomAccum <= -1 {
-			g.PanelsMapZoom += core.PanelMapZoomStep
-			mapZoomAccum += 1
-		}
+		g.PanelsMapZoom -= drainSteps(&mapZoomAccum) * core.PanelMapZoomStep
 		g.PanelsMapZoom = core.Clamp(g.PanelsMapZoom, core.PanelMapZoomMin, core.PanelMapZoomMax)
 		// Clamp the pan to a map's span off the player — enough to inspect any
 		// corner, not into an endless void.
@@ -256,10 +255,11 @@ var (
 	mapZoomAccum float32
 )
 
-// stepAccum drains whole units from an analog accumulator, returning the integer
-// step and leaving the sub-unit remainder for the next frame (truncates toward 0,
-// so it handles both directions).
-func stepAccum(acc *float32) int {
+// drainSteps drains whole units from an analog accumulator, returning the signed
+// whole-unit count and leaving the sub-unit remainder for the next frame (truncates
+// toward 0, so it handles both directions). Used for the Map tab's 1:1 tile pan and
+// the stepped zoom alike.
+func drainSteps(acc *float32) int {
 	n := int(*acc)
 	*acc -= float32(n)
 	return n

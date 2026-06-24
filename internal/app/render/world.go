@@ -2014,6 +2014,15 @@ func drawEnemyAttackTargetMarker(camera rl.Camera3D, position rl.Vector3) {
 	drawMarkerOnTop(position, markerEnemyAttackTarget)
 }
 
+// formationSlotXZ projects a camera-relative formation slot to world X/Z:
+// camera.Position + forward*distance + right*lateral (horizontal plane only). Shared
+// base for the party trapezoid and the foe rank center; each caller layers its own
+// clamp/zigzag/depth on top. Term order is verbatim so output stays bit-identical.
+func formationSlotXZ(camera rl.Camera3D, forward, right rl.Vector3, distance, lateral float32) (x, z float32) {
+	return camera.Position.X + forward.X*distance + right.X*lateral,
+		camera.Position.Z + forward.Z*distance + right.Z*lateral
+}
+
 func partySpritePosition(camera rl.Camera3D, party []core.PartyMember, index int, bump, victoryDance float32, knockback float32) rl.Vector3 {
 	forward := horizontalForward(camera)
 	right := horizontalRight(forward)
@@ -2042,8 +2051,7 @@ func partySpritePosition(camera rl.Camera3D, party []core.PartyMember, index int
 			colSign = 0.5
 		}
 		offset := colSign * rowSpacing
-		return camera.Position.X + forward.X*rowForward + right.X*offset,
-			camera.Position.Z + forward.Z*rowForward + right.Z*offset
+		return formationSlotXZ(camera, forward, right, rowForward, offset)
 	}
 	slotX, slotZ := slotXZ(visRow, visCol)
 	// Formation-Swap glide: ease from the pre-swap slot to the live slot over the
@@ -2176,7 +2184,8 @@ func enemyRowPlacements(members []core.Enemy) []enemyPlacement {
 func enemyFormationPos(camera rl.Camera3D, g *core.GameState, row core.Row, slot, count int, enemy *core.Enemy) rl.Vector3 {
 	if count <= 0 {
 		// Defensive: re-check the ActivePack bound so a malformed state can't panic.
-		if g.Battle.ActivePack >= len(g.Packs) {
+		// ActivePack < 0 is the "no pack" sentinel — guard it too, else g.Packs[-1].
+		if g.Battle.ActivePack < 0 || g.Battle.ActivePack >= len(g.Packs) {
 			return rl.NewVector3(0, enemyBillboardY, 0)
 		}
 		p := g.Packs[g.Battle.ActivePack]
@@ -2187,12 +2196,10 @@ func enemyFormationPos(camera rl.Camera3D, g *core.GameState, row core.Row, slot
 	}
 	forward := horizontalForward(camera)
 	right := horizontalRight(forward)
-	// Distance forward of the camera (Debug ▸ Combat Tuning: Foe distance).
-	center := rl.NewVector3(
-		camera.Position.X+forward.X*battleTune.FoeDistance,
-		battleFormationCenterY,
-		camera.Position.Z+forward.Z*battleTune.FoeDistance,
-	)
+	// Distance forward of the camera (Debug ▸ Combat Tuning: Foe distance). Lateral 0:
+	// per-slot X offset + zigzag/depth layer on below; center is the rank's midline.
+	centerX, centerZ := formationSlotXZ(camera, forward, right, battleTune.FoeDistance, 0)
+	center := rl.NewVector3(centerX, battleFormationCenterY, centerZ)
 	// Per-row X spacing (tunable): front packs tight, back fans wide so back foes
 	// spill past the front gaps and read between them. maxWidth caps the total spread
 	// so a full row can't run off the stage.

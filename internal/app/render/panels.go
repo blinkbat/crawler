@@ -1209,6 +1209,11 @@ func drawPanelsSkills(g *core.GameState, assets Resources, body rl.Rectangle) {
 	}
 }
 
+// mapFooterBottomInset sits the zoom readout this many px up from the body bottom.
+// NOTE: intentionally tighter than footerBaselineY(…, FontSmall) (which would be
+// uiFooterMargin+FontSmall = 35px) — the readout tucks lower against the map edge.
+const mapFooterBottomInset = float32(20)
+
 // drawPanelsMap renders the zoomable Map tab. Cells-on-screen comes from g.PanelsMapZoom; explored tiles
 // paint full-color, unexplored at a heavy fade (silhouette without spoiling discovery).
 func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
@@ -1379,7 +1384,7 @@ func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 
 	// Map footer — zoom indicator only (area name is in the top info strip; the pan/
 	// zoom CONTROLS live in the shared bottom footer bar, not duplicated here).
-	footerY := body.Y + body.Height - 20
+	footerY := body.Y + body.Height - mapFooterBottomInset
 	drawTextWithShadow(font, panelsMapFooterText(zoom), body.X, footerY, FontSmall, textDim)
 }
 

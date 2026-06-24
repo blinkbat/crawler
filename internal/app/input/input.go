@@ -17,8 +17,9 @@ const stickEdgeThreshold = float32(0.55)
 // resting drift doesn't pan; < stickEdgeThreshold because free-look is analog.
 const lookStickDeadzone = float32(0.15)
 
-// mapStickDeadzone is the left-stick centered band for the Map tab's analog pan —
-// same idea as lookStickDeadzone so resting drift doesn't creep the view.
+// mapStickDeadzone is the Map tab's analog centered band for BOTH pan (left stick)
+// and zoom (right stick) — same idea as lookStickDeadzone so resting drift doesn't
+// creep the view.
 const mapStickDeadzone = float32(0.18)
 
 // stickEdgeKey identifies one of the four stick directions for the edge memory.
@@ -565,7 +566,7 @@ func MapZoomAxis() float32 {
 	if !gamepadConnected() {
 		return 0
 	}
-	return applyDeadzone(rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisRightY), lookStickDeadzone)
+	return applyDeadzone(rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisRightY), mapStickDeadzone)
 }
 
 // MapZoomWheel is the mouse-wheel zoom notch (+ = scroll up = zoom in).

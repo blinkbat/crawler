@@ -522,6 +522,14 @@ func removeSpawnsAt[T core.TileXZ](spawns []T, x, z int) []T {
 	})
 }
 
+// deleteSpawnSlice drops every spawn on (x, z) from *slice in place, reporting
+// whether the slice shrank — the one-liner body each context-menu delete closure needs.
+func deleteSpawnSlice[T core.TileXZ](slice *[]T, x, z int) bool {
+	before := len(*slice)
+	*slice = removeSpawnsAt(*slice, x, z)
+	return len(*slice) != before
+}
+
 // removeSpawnsWhere drops every spawn whose tile satisfies pred.
 func removeSpawnsWhere[T core.TileXZ](spawns []T, pred func(x, z int) bool) []T {
 	return slices.DeleteFunc(spawns, func(sp T) bool {
@@ -1479,6 +1487,40 @@ func startTileBlocker(a core.AreaDefinition) string {
 	return ""
 }
 
+// blockedTileSet marks every in-bounds spawn tile true in a fresh w*h grid,
+// skipping any tile exempt reports (nil exempt = none). Shared pre-mark for the
+// reachability BFS's chest- and door-as-wall passes.
+func blockedTileSet[T core.TileXZ](w, h int, spawns []T, exempt func(x, z int) bool) []bool {
+	mark := make([]bool, w*h)
+	for _, sp := range spawns {
+		x, z := sp.Tile()
+		if x < 0 || x >= w || z < 0 || z >= h {
+			continue
+		}
+		if exempt != nil && exempt(x, z) {
+			continue
+		}
+		mark[z*w+x] = true
+	}
+	return mark
+}
+
+// reachableViaNeighbor reports whether any of (x,z)'s four orthogonal neighbours
+// is visited — i.e. the player can stand beside the tile to interact (chests and
+// doors are blocked on their own tile, so adjacency is what "reachable" means).
+func reachableViaNeighbor(visited []bool, w, h, x, z int) bool {
+	for _, d := range [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
+		nx, nz := x+d[0], z+d[1]
+		if nx < 0 || nx >= w || nz < 0 || nz >= h {
+			continue
+		}
+		if visited[nz*w+nx] {
+			return true
+		}
+	}
+	return false
+}
+
 // reachabilityWarnings reports playability problems (empty = none). The BFS
 // treats chest tiles as impassable like walls, matching the runtime (a chest in a
 // chokepoint can sever the map).
@@ -1490,26 +1532,13 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 	h := a.Height
 	w := a.Width
 	// Pre-mark chest tiles blocked (start tile is exempt above).
-	chestBlock := make([]bool, w*h)
-	for _, c := range a.ChestSpawns {
-		if c.TileX < 0 || c.TileX >= w || c.TileZ < 0 || c.TileZ >= h {
-			continue
-		}
-		chestBlock[c.TileZ*w+c.TileX] = true
-	}
+	chestBlock := blockedTileSet(w, h, a.ChestSpawns, nil)
 	// Pre-mark door tiles blocked too: stepping onto a door fires a transition, so
 	// the player can't walk THROUGH one to reach tiles beyond — matching runtime.
 	// Exempt the start tile (the player spawns there even if it's an entrance door).
-	doorBlock := make([]bool, w*h)
-	for _, d := range a.DoorSpawns {
-		if d.TileX < 0 || d.TileX >= w || d.TileZ < 0 || d.TileZ >= h {
-			continue
-		}
-		if d.TileX == a.StartTileX && d.TileZ == a.StartTileZ {
-			continue
-		}
-		doorBlock[d.TileZ*w+d.TileX] = true
-	}
+	doorBlock := blockedTileSet(w, h, a.DoorSpawns, func(x, z int) bool {
+		return x == a.StartTileX && z == a.StartTileZ
+	})
 	visited := make([]bool, w*h)
 	stack := [][2]int{{a.StartTileX, a.StartTileZ}}
 	for len(stack) > 0 {
@@ -1571,18 +1600,7 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 			unreachableChests++
 			continue
 		}
-		hasNeighbour := false
-		for _, d := range [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
-			nx, nz := c.TileX+d[0], c.TileZ+d[1]
-			if nx < 0 || nx >= w || nz < 0 || nz >= h {
-				continue
-			}
-			if visited[nz*w+nx] {
-				hasNeighbour = true
-				break
-			}
-		}
-		if !hasNeighbour {
+		if !reachableViaNeighbor(visited, w, h, c.TileX, c.TileZ) {
 			unreachableChests++
 		}
 	}
@@ -1612,19 +1630,7 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 		// Door tiles are blocked in the BFS (you step onto one to transition, not
 		// through it), so reachable = the tile is the start (visited) OR a neighbour
 		// is visited (player can step onto it) — same rule as chests.
-		reachable := visited[d.TileZ*w+d.TileX]
-		if !reachable {
-			for _, nd := range [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
-				nx, nz := d.TileX+nd[0], d.TileZ+nd[1]
-				if nx < 0 || nx >= w || nz < 0 || nz >= h {
-					continue
-				}
-				if visited[nz*w+nx] {
-					reachable = true
-					break
-				}
-			}
-		}
+		reachable := visited[d.TileZ*w+d.TileX] || reachableViaNeighbor(visited, w, h, d.TileX, d.TileZ)
 		if !reachable {
 			doorsUnreachable++
 		}

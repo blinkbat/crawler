@@ -427,8 +427,9 @@ func AoEReachesEnemy(members []Enemy, skill SkillID, slot int) bool {
 }
 
 // BattlePendingAttackIsMelee reports whether the targeted action is MELEE (basic
-// attack off the equipped weapon, skill off its reach class). Core mirror of
-// battle.battlePendingAttackMelee so the renderer doesn't import battle.
+// attack off the equipped weapon, skill off its reach class). Shared body for the
+// renderer (which can't import battle) and battle.battlePendingAttackMelee, which
+// delegates here.
 func BattlePendingAttackIsMelee(g *GameState) bool {
 	if g.Battle.PendingSkill == SkillNone {
 		i := g.Battle.CurrentParty

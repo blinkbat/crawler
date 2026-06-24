@@ -113,6 +113,22 @@ func fireFirstMatchingTrigger(g *GameState, pred func(DialogTrigger) bool) bool 
 	return false
 }
 
+// hasEligibleEnterLocationTrigger reports whether some enterLocation trigger for
+// locID is still firable (matches and hasn't already fired as a Once). Lets the
+// caller distinguish "a trigger exists but StartDialog failed" (retry) from "no
+// trigger / already fired" (record the crossing).
+func hasEligibleEnterLocationTrigger(g *GameState, locID string) bool {
+	if g == nil {
+		return false
+	}
+	for _, t := range g.Area.Triggers {
+		if t.Kind == DialogTriggerEnterLocation && t.LocationID == locID && !triggerAlreadyFired(g, t) {
+			return true
+		}
+	}
+	return false
+}
+
 // FireEnterTileTriggers starts the first eligible enter-tile dialog for (x,z).
 func FireEnterTileTriggers(g *GameState, x, z int) bool {
 	return fireFirstMatchingTrigger(g, func(t DialogTrigger) bool {

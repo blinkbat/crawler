@@ -2046,9 +2046,10 @@ func drawGrid(s *State, font rl.Font) {
 			}
 			// Off-level tiles fade with distance from the active level (context).
 			levelFade := levelDistanceFade(s, lvl)
-			// Floor is the base, always painted.
-			if !s.layerHidden[LayerFloor] {
-				rl.DrawRectangleRec(r, fadeAlpha(floorColor(s.area.Floor[z][x]), floorAlpha*levelFade))
+			// Floor is the base, always painted. Read via cellAt like the rest of the
+			// package — a ragged (short) row returns ok=false rather than panicking.
+			if fc, ok := cellAt(s.area.Floor, x, z); ok && !s.layerHidden[LayerFloor] {
+				rl.DrawRectangleRec(r, fadeAlpha(floorColor(fc), floorAlpha*levelFade))
 			}
 			// Elevation is a voxel grid: fill cells solid at the active level.
 			// Scrub levels (Levels panel / PgUp-PgDn) to see each floor.
@@ -2057,16 +2058,16 @@ func drawGrid(s *State, font rl.Font) {
 					rl.DrawRectangleRec(r, fadeAlpha(elevationLevelColor(s.editLevel), 0.6))
 				}
 			}
-			if w := s.area.Walls[z][x]; !s.layerHidden[LayerWalls] && core.IsFaceSkinChar(w) {
+			if w, ok := cellAt(s.area.Walls, x, z); ok && !s.layerHidden[LayerWalls] && core.IsFaceSkinChar(w) {
 				// Overlay only where an explicit face skin is assigned; '.' draws
 				// nothing (matters only once elevation exposes a face).
 				rl.DrawRectangleRec(r, fadeAlpha(tileColor(LayerWalls, w), wallAlpha*levelFade))
 			}
-			if d := s.area.Decor[z][x]; !s.layerHidden[LayerDecor] && d != core.DecorAuto {
+			if d, ok := cellAt(s.area.Decor, x, z); ok && !s.layerHidden[LayerDecor] && d != core.DecorAuto {
 				df := levelDistanceFade(s, s.area.DecorLevelAt(x, z))
 				rl.DrawRectangleRec(insetRect(r, cell*decorCellInsetFrac), fadeAlpha(decorColor(d), decorAlpha*df))
 			}
-			if p := s.area.Props[z][x]; !s.layerHidden[LayerProps] && core.IsPropChar(p) {
+			if p, ok := cellAt(s.area.Props, x, z); ok && !s.layerHidden[LayerProps] && core.IsPropChar(p) {
 				// A prop fades by ITS OWN level, not the column top.
 				pf := levelDistanceFade(s, s.area.PropLevelAt(x, z))
 				rl.DrawCircle(int32(r.X+cell/2), int32(r.Y+cell/2), cell*propCellRadiusFrac, fadeAlpha(propColor(p), propAlpha*pf))
@@ -3313,19 +3314,15 @@ func drawConfirmDirtyModal(s *State, font rl.Font, theme render.Theme) {
 		id = "(unsaved)"
 	}
 	body := fmt.Sprintf("%s has unsaved edits.", id)
-	switch s.pending {
-	case pendingNew:
-		body = fmt.Sprintf("%s has unsaved edits. Discarding for new map.", id)
-	case pendingOpen:
-		body = fmt.Sprintf("%s has unsaved edits. Discarding to open another.", id)
-	}
 	saveLabel := "S  Save and exit"
 	discardLabel := "D  Discard and exit"
 	switch s.pending {
 	case pendingNew:
+		body = fmt.Sprintf("%s has unsaved edits. Discarding for new map.", id)
 		saveLabel = "S  Save then start new map"
 		discardLabel = "D  Discard then start new map"
 	case pendingOpen:
+		body = fmt.Sprintf("%s has unsaved edits. Discarding to open another.", id)
 		saveLabel = "S  Save then pick another map"
 		discardLabel = "D  Discard then pick another map"
 	}

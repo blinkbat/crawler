@@ -236,11 +236,22 @@ func EndRetroCapture(g *core.GameState, skyOnBackbuffer bool) {
 	if !skyOnBackbuffer {
 		rl.ClearBackground(rl.Black)
 	}
-	uploadRetroUniforms(g)
-	rl.BeginShaderMode(retroShader)
-	// blit flips upright; the shader filters as it composites.
+	blitRetroRT(g, true)
+}
+
+// blitRetroRT composites the capture RT onto the backbuffer. withShader ⇒ upload the
+// filter uniforms and wrap the blit in the retro shader (the filtered environment / FX
+// paths); else a plain crisp blit (the sprite pass). The blit flips upright (negative
+// height lives in previewRT.blit). Upload MUST precede BeginShaderMode.
+func blitRetroRT(g *core.GameState, withShader bool) {
+	if withShader {
+		uploadRetroUniforms(g)
+		rl.BeginShaderMode(retroShader)
+		retroRT.blit(rl.NewRectangle(0, 0, 0, 0))
+		rl.EndShaderMode()
+		return
+	}
 	retroRT.blit(rl.NewRectangle(0, 0, 0, 0))
-	rl.EndShaderMode()
 }
 
 // uploadRetroUniforms pushes the resolution / time / per-filter intensities to the
@@ -285,10 +296,7 @@ func DrawFilteredCombatFX(camera rl.Camera3D, g *core.GameState, assets Resource
 	rl.EndMode3D()
 	DrawHitGlyphs(camera, g, assets)
 	rl.EndTextureMode()
-	uploadRetroUniforms(g)
-	rl.BeginShaderMode(retroShader)
-	retroRT.blit(rl.NewRectangle(0, 0, 0, 0))
-	rl.EndShaderMode()
+	blitRetroRT(g, true)
 }
 
 // DrawCrispSpritePass draws billboards (+VFX, unless withVFX is false) UNFILTERED
@@ -332,8 +340,8 @@ func DrawCrispSpritePass(camera rl.Camera3D, g *core.GameState, assets Resources
 	rl.EndMode3D()
 	rl.EndTextureMode()
 	// Crisp blit (no shader): transparent bg alpha-composites sprites over the
-	// filtered environment. blit flips upright.
-	retroRT.blit(rl.NewRectangle(0, 0, 0, 0))
+	// filtered environment.
+	blitRetroRT(g, false)
 }
 
 // UnloadRetroFilter frees the capture texture + shader. Idempotent.

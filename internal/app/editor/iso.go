@@ -49,6 +49,15 @@ func toggleIsoView(s *State) {
 // via closeModal, so exiting to title with one open would leak it). Idempotent.
 func (s *State) Close() {
 	s.freeIsoRT()
+	closeAllEditorPreviews()
+}
+
+// closeAllEditorPreviews frees every editor preview RT (Foe / Party / Object
+// Visualizers). The roster of render closers lives here so a teardown path
+// covering ALL previews — Close to title — can't drift from the list. (closeModal
+// keeps its own per-modal switch: a normal modal close tears down only that
+// modal's preview, not all three.) Idempotent.
+func closeAllEditorPreviews() {
 	render.CloseFoePreview()
 	render.ClosePartyPreview()
 	render.CloseObjectPreview()

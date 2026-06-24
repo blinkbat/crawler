@@ -88,20 +88,26 @@ func FireEnterLocationTriggers(g *GameState, x, z, level int) bool {
 	for _, loc := range g.Area.Locations {
 		inside := loc.Contains(x, z, level)
 		was := g.InsideLocations[loc.ID]
-		// One enter-dialog per step: if another region already fired, leave this
-		// crossing UNrecorded so it fires on a later step while still inside.
-		if inside && !was && fired {
-			continue
-		}
-		g.InsideLocations[loc.ID] = inside
 		if inside && !was {
+			// One enter-dialog per step: if another region already fired, leave this
+			// crossing UNrecorded so it fires on a later step while still inside.
+			if fired {
+				continue
+			}
 			id := loc.ID
 			if fireFirstMatchingTrigger(g, func(t DialogTrigger) bool {
 				return t.Kind == DialogTriggerEnterLocation && t.LocationID == id
 			}) {
 				fired = true
+			} else if hasEligibleEnterLocationTrigger(g, id) {
+				// A trigger matched but failed to START (e.g. unresolved DialogID).
+				// Leave the crossing UNrecorded so it retries on a later step rather
+				// than silently consuming the rising edge. An already-fired Once
+				// trigger is NOT eligible here, so it records normally (no retry loop).
+				continue
 			}
 		}
+		g.InsideLocations[loc.ID] = inside
 	}
 	return fired
 }

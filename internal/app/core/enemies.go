@@ -1,6 +1,9 @@
 package core
 
-import "fmt"
+import (
+	"fmt"
+	"reflect"
+)
 
 type EnemyKind int
 
@@ -638,6 +641,58 @@ func NewEnemy(kind EnemyKind) Enemy {
 	}
 }
 
+// clearEnemyAnimTimers zeros an enemy's transient animation state (lunge / the
+// shared take-a-hit HitAnim quintet / death-fade) — the enemy twin of
+// clearMemberAnimTimers. DeathFade is the enemy-only field (no party equivalent).
+func clearEnemyAnimTimers(e *Enemy) {
+	e.AttackBump = 0
+	e.HitAnim = HitAnim{}
+	e.DeathFade = 0
+}
+
+// ClearEnemyCombatTransients clears an enemy's timed combat statuses (every *Turns
+// counter + Debuffs) and its taunt back-reference — the enemy mirror of
+// ClearMemberTransientStatuses. Used on a Flee (the revived foe must be pristine);
+// distinct from battle.clearEnemyStatusesOnDeath, which KEEPS TauntTurns (moot on a
+// corpse). TauntedBy is only meaningful while TauntTurns>0, so clearing the counter
+// makes it moot; it stays 0 (no -1 sentinel exists for it). The init assert below
+// pins this to the reflected *Turns field set so a new counter can't survive a Flee.
+func ClearEnemyCombatTransients(e *Enemy) {
+	e.BurnTurns = 0
+	e.SleepTurns = 0
+	e.StunTurns = 0
+	e.PoisonTurns = 0
+	e.BleedTurns = 0
+	e.TauntTurns = 0
+	e.TauntedBy = 0
+	e.Debuffs = nil
+}
+
+// clearedEnemyTurnsCounters names every *Turns field ClearEnemyCombatTransients
+// zeros; the init assert below trips at startup if Enemy gains a *Turns int counter
+// not listed here (so a new status can't silently survive a Flee).
+var clearedEnemyTurnsCounters = map[string]bool{
+	"BurnTurns":   true,
+	"SleepTurns":  true,
+	"StunTurns":   true,
+	"PoisonTurns": true,
+	"BleedTurns":  true,
+	"TauntTurns":  true,
+}
+
+func init() {
+	t := reflect.TypeOf(Enemy{})
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if f.Type.Kind() != reflect.Int || len(f.Name) < len("Turns") || f.Name[len(f.Name)-len("Turns"):] != "Turns" {
+			continue
+		}
+		if !clearedEnemyTurnsCounters[f.Name] {
+			panic("core: Enemy." + f.Name + " is an unlisted timed-status counter — add it to ClearEnemyCombatTransients/clearedEnemyTurnsCounters so it can't survive a Flee")
+		}
+	}
+}
+
 // RestorePackFull resets a pack to its spawn condition: drops mid-fight summons
 // (Raise Bones) so the roster reverts to what was authored, then for the survivors
 // restores full HP, revives the downed, restores steal loot + Armor from the
@@ -658,23 +713,17 @@ func RestorePackFull(pack *Pack) {
 	pack.Members = kept
 	for i := range pack.Members {
 		m := &pack.Members[i]
-		def := EnemyInfoFor(*m)
+		def := enemyGoverningDef(m)
 		m.HP = m.MaxHP
 		m.Alive = true
 		m.Item = def.Item
+		// Source Armor from the governing def, NOT EnemyInfoFor — the latter copies
+		// the live (possibly Corrosive-Vial-stripped) value through, so it would be a
+		// no-op here and leave a debuffed foe stripped after a "full" restore.
 		m.Armor = def.Armor
-		m.BurnTurns = 0
-		m.SleepTurns = 0
-		m.StunTurns = 0
-		m.PoisonTurns = 0
-		m.BleedTurns = 0
-		m.TauntTurns = 0
-		m.TauntedBy = 0
-		m.Debuffs = nil
+		ClearEnemyCombatTransients(m)
 		m.SkillCastCount = nil
-		m.DeathFade = 0
-		m.AttackBump = 0
-		m.HitAnim = HitAnim{}
+		clearEnemyAnimTimers(m)
 	}
 	ShuntEnemyFormation(pack.Members)
 }

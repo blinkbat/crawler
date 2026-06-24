@@ -172,15 +172,11 @@ func updateSkillMenu(g *core.GameState) {
 }
 
 // battlePendingAttackMelee reports whether the pending action is a melee attack
-// (front-gated): basic attack keys off the equipped weapon, a skill off its reach class.
+// (front-gated): basic attack keys off the equipped weapon, a skill off its reach
+// class. Thin alias for core.BattlePendingAttackIsMelee (the shared body the
+// renderer also uses); kept so battle call sites read locally.
 func battlePendingAttackMelee(g *core.GameState) bool {
-	if g.Battle.PendingSkill == core.SkillNone {
-		if m, ok := currentMember(g); ok {
-			return core.BasicAttackClass(core.EquippedWeapon(*m)).IsMelee()
-		}
-		return false
-	}
-	return core.SkillAttackClassFor(g.Battle.PendingSkill).IsMelee()
+	return core.BattlePendingAttackIsMelee(g)
 }
 
 // battleEnemyTargets returns selectable enemy slots: effective front row for melee,

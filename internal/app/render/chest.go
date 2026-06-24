@@ -30,6 +30,10 @@ const (
 	chestMouthLift = float32(0.005)
 )
 
+// glyphPromptRise lifts the floating in-world interact cue this many px above its
+// projected anchor (so the "[A] verb" clears the chest/crystal lid).
+const glyphPromptRise = float32(8)
+
 // Chest modal geometry.
 const (
 	chestRowH       = modalListRowH    // item / Take All row height
@@ -93,7 +97,7 @@ func drawFloatingInteractPrompt(camera rl.Camera3D, world rl.Vector3, verb strin
 		return
 	}
 	screen := rl.GetWorldToScreen(world, camera)
-	y := screen.Y - glyphBoxH(FontBody) - 8
+	y := screen.Y - glyphBoxH(FontBody) - glyphPromptRise
 	drawGlyphPrompt(assets.Font(), GlyphA, verb, screen.X, y, FontBody)
 }
 
@@ -107,8 +111,13 @@ func DrawChestModal(g *core.GameState, assets Resources) {
 
 	font := assets.Font()
 	rowH := chestRowH
-	// No header; card height budgets rows + Take All + footer only.
-	cardH := chestCardTopPad + rowH*(int32(len(stacks))+1) + chestCardBotPad
+	// No header; card height budgets rows + Take All + footer only. An empty chest
+	// draws an "(empty)" line that occupies a list row, so floor the list at 1.
+	listRows := int32(len(stacks))
+	if listRows < 1 {
+		listRows = 1
+	}
+	cardH := chestCardTopPad + rowH*(listRows+1) + chestCardBotPad
 	if cardH < modalMinCardH {
 		cardH = modalMinCardH
 	}
