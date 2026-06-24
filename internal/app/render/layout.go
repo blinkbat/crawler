@@ -1,6 +1,8 @@
 package render
 
 import (
+	"image/color"
+
 	"crawler/internal/app/core"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -54,6 +56,13 @@ func clampFrameDelta(dt float32) float32 {
 func screenSizeF() (w, h float32) {
 	sw, sh := screenSize()
 	return float32(sw), float32(sh)
+}
+
+// fillScreen paints col over the whole screen — the full-screen overlay stamp
+// shared by the tint-wipe cases (caller pre-fades col).
+func fillScreen(col color.RGBA) {
+	sw, sh := screenSize()
+	rl.DrawRectangle(0, 0, sw, sh, col)
 }
 
 // centerX returns the left X to horizontally center a panel of width w.

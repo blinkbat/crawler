@@ -85,21 +85,30 @@ func SwapFormationSlots(party []PartyMember, i, j int) {
 	party[j].Row = party[j].HomeRow
 }
 
+// flipBinary returns the OTHER of two values (v==a → b, else a) — the "toggle one
+// of two" primitive behind the 2×2 row/col flips. init asserts RowCount==ColCount==2.
+func flipBinary[T comparable](v, a, b T) T {
+	if v == a {
+		return b
+	}
+	return a
+}
+
+func init() {
+	if RowCount != 2 || ColCount != 2 {
+		panic("core: formation flips assume RowCount==ColCount==2 — generalize FlipRow/FlipCol/Ambush* before extending the grid")
+	}
+}
+
 // FlipRow / FlipCol return the other rank / column of the 2×2 — the single source
 // for "the orthogonal neighbour" so the battle swap picker and the out-of-battle
 // panel formation nav can't disagree. (Assumes RowCount==ColCount==2.)
 func FlipRow(r Row) Row {
-	if r == RowFront {
-		return RowBack
-	}
-	return RowFront
+	return flipBinary(r, RowFront, RowBack)
 }
 
 func FlipCol(c Col) Col {
-	if c == ColLeft {
-		return ColRight
-	}
-	return ColLeft
+	return flipBinary(c, ColLeft, ColRight)
 }
 
 // SwapPlacesMessage is the shared "<A> and <B> swap places." log line so battle
@@ -221,10 +230,7 @@ const (
 func AmbushLiveRow(homeRow Row, homeCol Col, side EngageSide) Row {
 	switch side {
 	case EngageBack:
-		if homeRow == RowFront {
-			return RowBack
-		}
-		return RowFront
+		return flipBinary(homeRow, RowFront, RowBack)
 	case EngageRight:
 		if homeCol == ColRight {
 			return RowFront
@@ -247,10 +253,7 @@ func AmbushLiveRow(homeRow Row, homeCol Col, side EngageSide) Row {
 func AmbushLiveCol(homeRow Row, homeCol Col, side EngageSide) Col {
 	switch side {
 	case EngageBack: // 180°: columns mirror
-		if homeCol == ColLeft {
-			return ColRight
-		}
-		return ColLeft
+		return flipBinary(homeCol, ColLeft, ColRight)
 	case EngageRight: // 90°: the old row decides the new column
 		if homeRow == RowFront {
 			return ColLeft

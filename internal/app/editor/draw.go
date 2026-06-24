@@ -613,6 +613,11 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 
 // layerMenuBtnRect is the active-layer dropdown button, right of the menu strip.
 // Single source for draw + hit-test + dropdown anchor.
+// NOTE: the start x (6) and y/height (5 / topbarH-10) deliberately kept as the
+// current literals; they differ ~1-2px from the menu strip's shared tokens
+// (buttonStripStartX=8, menuBarBtnY=6 / menuBarBtnH=topbarH-12). Aligning to
+// those tokens would nudge this button to match its neighbors — left as-is to
+// preserve the current pixels.
 func layerMenuBtnRect(s *State) rl.Rectangle {
 	x := float32(6)
 	for i := range menuBarBtns {
@@ -1621,6 +1626,8 @@ const (
 	doorMarkerInsetYFrac  = float32(0.12) // door rectangle vertical inset (taller than wide)
 	crystalMarkerRadFrac  = float32(0.30) // crystal diamond radius
 	entityGhostInsetFrac  = float32(0.22) // chest/door drag-move ghost square inset
+	decorCellInsetFrac    = float32(0.28) // per-cell decor square inset from the tile edge
+	propCellRadiusFrac    = float32(0.36) // per-cell prop circle radius
 )
 
 // metaRect geometry depends only on the panel rect + scroll (material count is
@@ -1798,9 +1805,16 @@ func (s *State) activeFieldRect() rl.Rectangle {
 	return rl.Rectangle{}
 }
 
-// reachBadgeMaxRows caps the metadata-panel reachability badge so it doesn't
-// reflow; the full list is in the Validate modal (openValidateModal).
-const reachBadgeMaxRows = 4
+// Metadata-panel reachability badge geometry. reachBadgeMaxRows caps the row
+// count so the badge doesn't reflow (full list is in the Validate modal,
+// openValidateModal); reachBadgeTopGap insets the badge below its label;
+// reachBadgeRowH is the per-warning row pitch; reachBadgeOKRowH the OK pill height.
+const (
+	reachBadgeMaxRows = 4
+	reachBadgeTopGap  = float32(22)
+	reachBadgeRowH    = float32(22)
+	reachBadgeOKRowH  = float32(30)
+)
 
 func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 	rl.DrawRectangleRec(s.rect.metadata, bgPaletteCol)
@@ -1866,7 +1880,7 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 	warnings := s.ReachabilityWarnings()
 	drawLabel(font, "Reachability (click to validate)", mr.reachLabel)
 	if len(warnings) == 0 {
-		badgeValue := rl.NewRectangle(mr.reachArea.X, mr.reachArea.Y+22, mr.reachArea.Width, 30)
+		badgeValue := rl.NewRectangle(mr.reachArea.X, mr.reachArea.Y+reachBadgeTopGap, mr.reachArea.Width, reachBadgeOKRowH)
 		rl.DrawRectangleRec(badgeValue, rl.NewColor(14, 22, 18, 255))
 		rl.DrawRectangleLinesEx(badgeValue, 1, editorReachOK)
 		render.DrawRichText(font, "OK", rl.NewVector2(badgeValue.X+8, badgeValue.Y+(badgeValue.Height-16)/2), editorFontBody, 1, editorReachOKText)
@@ -1876,13 +1890,13 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 		if len(rows) > reachBadgeMaxRows {
 			rows = rows[:reachBadgeMaxRows] // cap so the panel doesn't reflow
 		}
-		h := float32(10 + 22*len(rows))
-		box := rl.NewRectangle(mr.reachArea.X, mr.reachArea.Y+22, mr.reachArea.Width, h)
+		h := 10 + reachBadgeRowH*float32(len(rows))
+		box := rl.NewRectangle(mr.reachArea.X, mr.reachArea.Y+reachBadgeTopGap, mr.reachArea.Width, h)
 		rl.DrawRectangleRec(box, rl.NewColor(38, 16, 18, 255))
 		rl.DrawRectangleLinesEx(box, 1, editorReachWarn)
 		for i, w := range rows {
 			render.DrawRichText(font, "! "+w,
-				rl.NewVector2(box.X+6, box.Y+5+float32(i)*22),
+				rl.NewVector2(box.X+6, box.Y+5+float32(i)*reachBadgeRowH),
 				editorFontLabel, 1, editorReachWarnText)
 		}
 		if len(warnings) > len(rows) {
@@ -2062,12 +2076,12 @@ func drawGrid(s *State, font rl.Font) {
 			}
 			if d := s.area.Decor[z][x]; !s.layerHidden[LayerDecor] && d != core.DecorAuto {
 				df := levelDistanceFade(s, s.area.DecorLevelAt(x, z))
-				rl.DrawRectangleRec(insetRect(r, cell*0.28), fadeAlpha(decorColor(d), decorAlpha*df))
+				rl.DrawRectangleRec(insetRect(r, cell*decorCellInsetFrac), fadeAlpha(decorColor(d), decorAlpha*df))
 			}
 			if p := s.area.Props[z][x]; !s.layerHidden[LayerProps] && core.IsPropChar(p) {
 				// A prop fades by ITS OWN level, not the column top.
 				pf := levelDistanceFade(s, s.area.PropLevelAt(x, z))
-				rl.DrawCircle(int32(r.X+cell/2), int32(r.Y+cell/2), cell*0.36, fadeAlpha(propColor(p), propAlpha*pf))
+				rl.DrawCircle(int32(r.X+cell/2), int32(r.Y+cell/2), cell*propCellRadiusFrac, fadeAlpha(propColor(p), propAlpha*pf))
 			}
 			// Ceiling hash overlay: diagonal stripes so the cell reads as "covered".
 			if !s.layerHidden[LayerCeiling] && s.area.CeilingAt(x, z) {
@@ -2972,7 +2986,10 @@ const (
 	saveAsModalW = float32(420)
 	saveAsModalH = float32(160)
 
-	doorEditModalW = float32(480)
+	// modalCardW is the standard editor card width; the door-edit and entity/dialog
+	// list modals share it. The Open card is intentionally narrower (openModalW).
+	modalCardW     = float32(480)
+	doorEditModalW = modalCardW
 	doorEditModalH = float32(424)
 	openModalW     = float32(460)
 	openModalH     = float32(460)
@@ -2980,7 +2997,7 @@ const (
 	// openModalListBottomPad reserved for the button row. Pitch is entityListRowH.
 	openModalListTop       = float32(50)
 	openModalListBottomPad = float32(52)
-	entityEditModalW       = float32(480) // shared by the entity + dialog list modals
+	entityEditModalW       = modalCardW // shared by the entity + dialog list modals
 	entityEditModalH       = float32(440)
 	escMenuModalW          = float32(380)
 	escMenuModalH          = float32(178)

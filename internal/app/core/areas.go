@@ -505,6 +505,17 @@ func indexByName[T any](table []T, s string, name func(T) string) (int, bool) {
 	return 0, false
 }
 
+// decodeByName resolves a case-folded name to an enum value: indexByName, then
+// convert the matched index via toEnum; (zero, false) on no match. The shared body
+// behind the material/facing/style/AI name decoders (single-return callers drop ok).
+func decodeByName[R any, T any](table []R, s string, name func(R) string, toEnum func(int) T) (T, bool) {
+	if i, ok := indexByName(table, s, name); ok {
+		return toEnum(i), true
+	}
+	var zero T
+	return zero, false
+}
+
 // findByValue is the forward (value→row) mirror of indexByName: the first row
 // whose value(row) equals want, ok=false on no match. Shared by the enum→row
 // decoders whose registry carries an explicit value field (material/facing).
@@ -568,10 +579,7 @@ func MaterialName(m MaterialSet) (string, bool) {
 }
 
 func materialFromName(s string) (MaterialSet, bool) {
-	if i, ok := indexByName(materialDefs, s, func(d materialDef) string { return d.name }); ok {
-		return materialDefs[i].value, true
-	}
-	return 0, false
+	return decodeByName(materialDefs, s, func(d materialDef) string { return d.name }, func(i int) MaterialSet { return materialDefs[i].value })
 }
 
 // MaterialOptions is the editor's dropdown order, derived from materialDefs (so
@@ -625,10 +633,7 @@ func FacingName(f int) (string, bool) {
 }
 
 func facingFromName(s string) (int, bool) {
-	if i, ok := indexByName(facingDefs, s, func(d facingDef) string { return d.name }); ok {
-		return facingDefs[i].value, true
-	}
-	return 0, false
+	return decodeByName(facingDefs, s, func(d facingDef) string { return d.name }, func(i int) int { return facingDefs[i].value })
 }
 
 // init asserts facingDefs covers every facing once, in mapfile.FacingNames order,
@@ -707,8 +712,8 @@ func DoorStyleLabel(s DoorStyle) string {
 
 // doorStyleFromName maps an on-disk style string to a DoorStyle; empty/unknown → building.
 func doorStyleFromName(s string) DoorStyle {
-	if i, ok := indexByName(doorStyleDefs[:], s, func(d doorStyleDef) string { return d.name }); ok {
-		return DoorStyle(i)
+	if style, ok := decodeByName(doorStyleDefs[:], s, func(d doorStyleDef) string { return d.name }, func(i int) DoorStyle { return DoorStyle(i) }); ok {
+		return style
 	}
 	return DoorStyleBuilding
 }
@@ -753,8 +758,8 @@ func PackAIName(ai PackAI) string {
 
 // PackAIFromName maps an on-disk name to a PackAI; empty/unknown → PackAINone.
 func PackAIFromName(s string) PackAI {
-	if i, ok := indexByName(packAIDefs[:], s, func(d packAIDef) string { return d.name }); ok {
-		return PackAI(i)
+	if ai, ok := decodeByName(packAIDefs[:], s, func(d packAIDef) string { return d.name }, func(i int) PackAI { return PackAI(i) }); ok {
+		return ai
 	}
 	return PackAINone
 }
@@ -854,8 +859,10 @@ func SanitizeFilename(name, fallback string) string {
 // MapPath returns the save path for a map ID under MapsDir, stripping a trailing
 // .map first so "test.map" writes to maps/test.map, not maps/test.map.map.
 func MapPath(id string) string {
+	// Case-insensitive ext strip via TrimSuffix on the actual-case suffix, so
+	// "test.MAP" trims too (matches the old EqualFold compare).
 	if n := len(mapfile.Ext); len(id) >= n && strings.EqualFold(id[len(id)-n:], mapfile.Ext) {
-		id = id[:len(id)-n]
+		id = strings.TrimSuffix(id, id[len(id)-n:])
 	}
 	return filepath.Join(MapsDir(), id+mapfile.Ext)
 }

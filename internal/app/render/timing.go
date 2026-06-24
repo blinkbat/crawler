@@ -33,15 +33,16 @@ const timingHeadingCombo = "COMBO!"
 
 // Shared timing-bar layout + alpha tunables, read by all bars so they can't drift.
 const (
-	barRowPadPx          = float32(18)   // horizontal padding inside a bar row
-	barCellGapPx         = float32(12)   // gap between reel cells
-	arrowSizeSlotFrac    = float32(0.35) // arrow half-extent as a fraction of slot width
-	arrowSizeBarHCap     = float32(0.85) // arrow size ceiling as a fraction of bar height
-	timerStripUrgentFrac = float32(0.30) // remaining-time fraction below which the strip reads red
-	timerStripWarnFrac   = float32(0.55) // ...below which it reads warn-amber
-	barHighlightAlpha    = uint8(245)    // fully-lit element (pending arrow, locked reel frame, cursor underline)
-	iconShadowAlpha      = uint8(180)    // arrow drop-shadow alpha
-	reelRimAlpha         = uint8(150)    // dark rim behind a reel symbol (definition over glass)
+	barRowPadPx           = float32(18)   // horizontal padding inside a bar row
+	barCellGapPx          = float32(12)   // gap between reel cells
+	arrowSizeSlotFrac     = float32(0.35) // arrow half-extent as a fraction of slot width
+	arrowSizeBarHCap      = float32(0.85) // arrow size ceiling as a fraction of bar height
+	timerStripUrgentFrac  = float32(0.30) // remaining-time fraction below which the strip reads red
+	timerStripWarnFrac    = float32(0.55) // ...below which it reads warn-amber
+	barHighlightAlpha     = uint8(245)    // fully-lit element (pending arrow, locked reel frame, cursor underline)
+	iconShadowAlpha       = uint8(180)    // arrow drop-shadow alpha
+	reelRimAlpha          = uint8(150)    // dark rim behind a reel symbol (definition over glass)
+	timingStrongFillAlpha = uint8(220)    // strong fill alpha (track flood, shockwave ring, charge/decay slices, tick flash)
 )
 
 // Shared timing-bar footprint (timingBarLayout): height, min width, side edge
@@ -125,13 +126,19 @@ func drawSeqArrowSlot(g *core.GameState, cx, cy, arrowSize float32, dir int, i i
 	}
 }
 
+// drawShadowedRect paints a drop-shadow rect (shadowLight, offset by off) then the
+// bright rect on top — the "shadow then fill" idiom the underline + timer strip share.
+func drawShadowedRect(x, y, w, h, off float32, col rl.Color) {
+	rl.DrawRectangle(int32(x)+int32(off), int32(y)+int32(off), int32(w), int32(h), shadowLight)
+	rl.DrawRectangle(int32(x), int32(y), int32(w), int32(h), col)
+}
+
 // drawSequenceCursorUnderline paints the "next slot" underline (sequence + recall bars).
 func drawSequenceCursorUnderline(cx, cy, arrowSize float32) {
 	ux := cx - arrowSize*0.85
 	uw := arrowSize * 1.7
 	uy := cy + arrowSize + 8
-	rl.DrawRectangle(int32(ux)+2, int32(uy)+2, int32(uw), 4, shadowLight)
-	rl.DrawRectangle(int32(ux), int32(uy), int32(uw), 4, colorWithAlpha(timingHeldColor, barHighlightAlpha))
+	drawShadowedRect(ux, uy, uw, 4, 2, colorWithAlpha(timingHeldColor, barHighlightAlpha))
 }
 
 // drawDwindlingTimerStrip paints the center-anchored timer line that shrinks toward center
@@ -154,8 +161,7 @@ func drawDwindlingTimerStrip(drawX, y, barW, barH, remaining float32) {
 	}
 	visW := barW * remaining
 	stripX := drawX + (barW-visW)*0.5
-	rl.DrawRectangle(int32(stripX)+1, int32(stripY)+1, int32(visW), int32(stripH), shadowLight)
-	rl.DrawRectangle(int32(stripX), int32(stripY), int32(visW), int32(stripH), stripCol)
+	drawShadowedRect(stripX, stripY, visW, stripH, 1, stripCol)
 }
 
 // --- Bar juice helpers ----------------------------------------------------
@@ -363,7 +369,7 @@ func drawTimingTrack(drawX, drawY, barW, drawnH float32, quality int, isDefend, 
 	drawTimingTrackBody(ix, iy, iw, ih)
 	if flashing {
 		flood := qualityColor(quality, isDefend)
-		flood.A = uint8(220 * flashAlpha(timingFlash))
+		flood.A = uint8(float32(timingStrongFillAlpha) * flashAlpha(timingFlash))
 		drawSmallPanel(ix, iy, iw, ih, flood)
 	}
 }
@@ -403,7 +409,7 @@ func drawExcellentShockwave(curX, drawY, drawnH, flashTimer float32, isDefend bo
 	phase := 1 - flashAlpha(flashTimer) // 0 fresh → 1 done
 	radius := 14 + phase*72
 	ringCol := qualityColor(core.TimingQualityExcellent, isDefend)
-	ringCol.A = uint8(220 * (1 - phase))
+	ringCol.A = uint8(float32(timingStrongFillAlpha) * (1 - phase))
 	cy := drawY + drawnH*0.5
 	rl.DrawCircleLines(int32(curX), int32(cy), radius, ringCol)
 	rl.DrawCircleLines(int32(curX), int32(cy), radius+2, ringCol)
@@ -492,7 +498,7 @@ func drawChargeBar(timing core.TimingState, g *core.GameState, assets Resources,
 
 	if !flashing {
 		// Decay zone first (peak overlays it); Nice grade tone so a palette retune carries along.
-		decayCol := colorWithAlpha(qualityColor(core.TimingQualityNice, false), 220)
+		decayCol := colorWithAlpha(qualityColor(core.TimingQualityNice, false), timingStrongFillAlpha)
 		drawBarSlice(drawX, drawY, barW, drawnH, core.ChargePeakEnd, 1.0, decayCol)
 
 		// Peak window (release zone).
@@ -504,7 +510,7 @@ func drawChargeBar(timing core.TimingState, g *core.GameState, assets Resources,
 		if timing.Pressed {
 			fillEnd := chargeFillEnd(timing)
 			if fillEnd > 0 {
-				chargeCol := colorWithAlpha(qualityColor(core.TimingQualityGood, false), 220)
+				chargeCol := colorWithAlpha(qualityColor(core.TimingQualityGood, false), timingStrongFillAlpha)
 				drawBarSlice(drawX, drawY, barW, drawnH, 0, fillEnd, chargeCol)
 			}
 		}
@@ -550,7 +556,7 @@ func drawChargeTickWithFlash(timing core.TimingState, barX, barY, barW, barH flo
 	}
 	tx := barX + pct*barW
 	col := qualityColor(core.TimingQualityExcellent, false)
-	col.A = uint8(220 * fresh)
+	col.A = uint8(float32(timingStrongFillAlpha) * fresh)
 	width := 2 + fresh*4
 	rl.DrawRectangle(int32(tx-width/2), int32(barY)-5, int32(width), int32(barH)+10, col)
 }

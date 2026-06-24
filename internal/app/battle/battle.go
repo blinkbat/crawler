@@ -30,8 +30,14 @@ const (
 // Start begins a battle against the pack at packIndex (the whole roster becomes
 // the enemy list). fleeReturnX/Z is the pre-step tile the player retreats to on a
 // successful Flee (so a pack ambush steps them back, not onto the pack's tile).
+// validLivePack reports whether packIndex names an in-range, still-alive pack —
+// the entry guard shared by Start and DebugSkipWin.
+func validLivePack(g *core.GameState, packIndex int) bool {
+	return packIndex >= 0 && packIndex < len(g.Packs) && core.PackAlive(g.Packs[packIndex])
+}
+
 func Start(g *core.GameState, packIndex, fleeReturnX, fleeReturnZ int, engageSide core.EngageSide) {
-	if packIndex < 0 || packIndex >= len(g.Packs) || !core.PackAlive(g.Packs[packIndex]) {
+	if !validLivePack(g, packIndex) {
 		return
 	}
 	g.Battle.ActivePack = packIndex
@@ -113,10 +119,7 @@ func Update(g *core.GameState, dt float32) {
 		return
 	}
 	if g.Battle.Splash > 0 {
-		g.Battle.Splash -= dt
-		if g.Battle.Splash < 0 {
-			g.Battle.Splash = 0
-		}
+		g.Battle.Splash = core.ApproachZero(g.Battle.Splash, dt)
 	}
 
 	switch g.Battle.Phase {
@@ -372,12 +375,18 @@ func pushEnemyReadiness(g *core.GameState, slot, amount int) bool {
 	if g.Battle.Readiness == nil {
 		g.Battle.Readiness = map[core.ActorRef]int{}
 	}
-	cur := g.Battle.Readiness[ref] - amount
-	if cur < 0 {
-		cur = 0
-	}
+	cur := g.Battle.Readiness[ref]
+	subFloorZero(&cur, amount)
 	g.Battle.Readiness[ref] = cur
 	return true
+}
+
+// subFloorZero subtracts amount from *p, flooring at 0 — the shared "drain but
+// don't go negative" edit (Sunder readiness push, Corrosive Vial armor strip).
+func subFloorZero(p *int, amount int) {
+	if *p -= amount; *p < 0 {
+		*p = 0
+	}
 }
 
 // actorAppearsBefore reports whether `ref` occupies any queue slot strictly
@@ -1260,7 +1269,7 @@ func levelsShownAt(g *core.GameState, p float32) int {
 // Battles" toggle): fells every member, then runs the normal winBattle + leaveBattle
 // bookkeeping. No-ops on an invalid / already-dead pack.
 func DebugSkipWin(g *core.GameState, packIndex int) {
-	if packIndex < 0 || packIndex >= len(g.Packs) || !core.PackAlive(g.Packs[packIndex]) {
+	if !validLivePack(g, packIndex) {
 		return
 	}
 	g.Battle.ActivePack = packIndex

@@ -203,16 +203,13 @@ func drawRetroMenuOverlay(g *core.GameState, assets Resources) {
 		rowTextY := menuRowTop(panelY, i)
 		barY := rowTextY + retroBarTextDY - retroBarH/2
 		v := g.RetroFilters[i]
-		// Track + fill via the shared drawSmallPanel gauge primitives (same
-		// glass-tube language as the HP gauges, at chip scale). Fill is gilt.
-		drawSmallPanel(barX, barY, retroBarW, retroBarH, barTrack)
+		// Track + gilt fill + outline — the shared retro-slider gauge chrome (same
+		// glass-tube language as the HP gauges, at chip scale).
+		fillW := int32(0)
 		if v > 0 {
-			fillW := int32(float64(retroBarW-2) * v)
-			if fillW > 0 {
-				rl.DrawRectangle(barX+1, barY+1, fillW, retroBarH-2, fadeColor(giltBright, 0.55+0.45*float32(v)))
-			}
+			fillW = int32(float64(retroBarW-2) * v)
 		}
-		drawSmallPanelOutline(barX, barY, retroBarW, retroBarH, fadeColor(woodLight, 0.6))
+		drawIntensityGauge(barX, barY, retroBarW, retroBarH, fillW, fadeColor(giltBright, 0.55+0.45*float32(v)))
 		if g.RetroMenuIndex == i {
 			// Drawn ◂ ▸ affordance — triangles, not font runes.
 			cy := float32(barY + retroBarH/2)

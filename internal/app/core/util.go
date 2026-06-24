@@ -179,6 +179,38 @@ func RandRangeI(rng *rand.Rand, lo, hi int) int {
 	return lo + rng.Intn(hi-lo+1)
 }
 
+// rollGold / rollDuration sit beside RandRangeI on purpose: all three draw a
+// uniform int range but with DELIBERATELY DIFFERENT degenerate-bounds policies
+// (RandRangeI returns lo; rollGold swaps inverted bounds then clamps >=0; rollDuration
+// fails open to 0). Co-located so the "don't unify these" contract is visible at once.
+
+// rollGold returns a uniform int in [lo, hi], tolerant of (0,0) and inverted
+// bounds so an authoring slip can't panic the loot award: SWAP inverted bounds,
+// then clamp to >= 0. (Differs from RandRangeI / rollDuration on degenerate input.)
+func rollGold(rng *rand.Rand, lo, hi int) int {
+	if hi < lo {
+		lo, hi = hi, lo
+	}
+	if hi <= 0 {
+		return 0
+	}
+	if lo < 0 {
+		lo = 0
+	}
+	return RandRangeI(rng, lo, hi)
+}
+
+// rollDuration is the shared uniform [min, max] draw behind every SkillEffect
+// status-duration helper. Degenerate bounds (min <= 0 || max < min) return 0
+// (fail open to "no status") — note this differs from RandRangeI (returns lo)
+// and rollGold (swaps then clamps).
+func rollDuration(rng *rand.Rand, min, max int) int {
+	if min <= 0 || max < min {
+		return 0
+	}
+	return RandRangeI(rng, min, max)
+}
+
 // assertAppendOnly panics if any listed enum constant isn't at its declaration
 // index — the shared guard behind the ItemKind / EnemyKind / SkillID append-only
 // pins (each serializes as its int value, so a mid-enum insert renumbers later

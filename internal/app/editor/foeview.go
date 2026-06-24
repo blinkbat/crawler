@@ -519,11 +519,11 @@ type visualizerCallbacks struct {
 	closePreview   func()             // render close call on Esc / Close button
 	refreshPreview func()             // rebuild the asset preview when stale
 	// Draw-only fields (drawVisualizerModal): the rest of the per-modal variance.
-	title       string                       // modal heading
-	name        string                       // picker header label (incl. any ▼ suffix)
+	title       string                               // modal heading
+	name        string                               // picker header label (incl. any ▼ suffix)
 	drawPreview func(rect rl.Rectangle, gizmos bool) // blit the live 3D preview
-	footerHint  string                       // line-1 controls hint
-	footerNote  string                       // line-2 persistence note
+	footerHint  string                               // line-1 controls hint
+	footerNote  string                               // line-2 persistence note
 }
 
 // updateVisualizerModal drives one frame of either Visualizer from its callbacks.

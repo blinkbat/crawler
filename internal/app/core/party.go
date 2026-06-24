@@ -647,16 +647,8 @@ func SumStatPending(p [StatCount]int) int {
 	return n
 }
 
-// rollDuration is the shared uniform [min, max] draw behind every SkillEffect
-// status-duration helper. Degenerate bounds (min <= 0 || max < min) return 0
-// (fail open to "no status") — note this differs from RandRangeI (returns lo)
-// and rollGold (swaps then clamps).
-func rollDuration(rng *rand.Rand, min, max int) int {
-	if min <= 0 || max < min {
-		return 0
-	}
-	return RandRangeI(rng, min, max)
-}
+// rollDuration lives in util.go beside RandRangeI / rollGold (the three uniform
+// range draws with deliberately different degenerate-bounds policies).
 
 // BurnDuration rolls a uniform burn duration in [Min, Max] (via rollDuration).
 func (effect SkillEffect) BurnDuration(rng *rand.Rand) int {
@@ -1036,19 +1028,65 @@ type statSpec struct {
 	// Derive runs the level-up side effect on the WHOLE member (VIT→MaxHP,
 	// INT→MP pool), called by SpendStatPoint AFTER Add. nil = no pool effect.
 	Derive func(*PartyMember)
+	// Preview builds the "what this spend buys" line from the pre/post-spend stats
+	// (accuracyStat = the weapon's to-hit stat, consulted only by STR). Every row
+	// MUST set it — init force-calls StatPreviewLine for each stat so a nil panics.
+	Preview func(current, after Stats, accuracyStat Stat) string
 }
 
 var statTable = []statSpec{
-	StatSTR: {Label: "STR", Get: func(s Stats) int { return s.STR }, Add: func(s *Stats) { s.STR++ }},
-	StatDEX: {Label: "DEX", Get: func(s Stats) int { return s.DEX }, Add: func(s *Stats) { s.DEX++ }},
+	StatSTR: {Label: "STR", Get: func(s Stats) int { return s.STR }, Add: func(s *Stats) { s.STR++ }, Preview: previewSTR},
+	StatDEX: {Label: "DEX", Get: func(s Stats) int { return s.DEX }, Add: func(s *Stats) { s.DEX++ }, Preview: previewDEX},
 	StatINT: {Label: "INT", Get: func(s Stats) int { return s.INT }, Add: func(s *Stats) { s.INT++ },
 		// INT grows MaxMP and tops off MP by the same delta.
-		Derive: func(m *PartyMember) { m.MaxMP += MPPerINT; GainUpTo(&m.MP, m.MaxMP, MPPerINT) }},
-	StatWIS: {Label: "WIS", Get: func(s Stats) int { return s.WIS }, Add: func(s *Stats) { s.WIS++ }},
+		Derive:  func(m *PartyMember) { m.MaxMP += MPPerINT; GainUpTo(&m.MP, m.MaxMP, MPPerINT) },
+		Preview: previewINT},
+	StatWIS: {Label: "WIS", Get: func(s Stats) int { return s.WIS }, Add: func(s *Stats) { s.WIS++ }, Preview: previewWIS},
 	StatVIT: {Label: "VIT", Get: func(s Stats) int { return s.VIT }, Add: func(s *Stats) { s.VIT++ },
 		// VIT recomputes MaxHP authoritatively and heals by the per-point delta.
-		Derive: func(m *PartyMember) { m.MaxHP = MaxHPFor(m.Stats); GainUpTo(&m.HP, m.MaxHP, HPPerVIT) }},
-	StatSPD: {Label: "SPD", Get: func(s Stats) int { return s.SPD }, Add: func(s *Stats) { s.SPD++ }},
+		Derive:  func(m *PartyMember) { m.MaxHP = MaxHPFor(m.Stats); GainUpTo(&m.HP, m.MaxHP, HPPerVIT) },
+		Preview: previewVIT},
+	StatSPD: {Label: "SPD", Get: func(s Stats) int { return s.SPD }, Add: func(s *Stats) { s.SPD++ }, Preview: previewSPD},
+}
+
+// previewXXX build the level-up "what this spend buys" lines (statSpec.Preview).
+// Split out of StatPreviewLine's old switch so each stat's projection lives on its
+// table row; output strings are unchanged.
+func previewSTR(current, after Stats, accuracyStat Stat) string {
+	// STR always drives melee DAMAGE; it drives to-hit only when STR is the weapon
+	// accuracy stat — don't preview a Hit gain that won't materialize.
+	line := fmt.Sprintf("Melee %d→%d", MeleeDamage(current, 0), MeleeDamage(after, 0))
+	if accuracyStat == StatSTR {
+		h0 := MeleeAccuracy(current, TimingQualityMiss) * 100
+		h1 := MeleeAccuracy(after, TimingQualityMiss) * 100
+		line += fmt.Sprintf("  Hit %.0f→%.0f%%", h0, h1)
+	}
+	return line
+}
+
+func previewDEX(current, after Stats, _ Stat) string {
+	// DEX's active effects: dodge + crit (ranged hit is dormant, left off).
+	d0 := DodgeChance(current) * 100
+	d1 := DodgeChance(after) * 100
+	c0 := CritChance(current, TimingQualityMiss) * 100
+	c1 := CritChance(after, TimingQualityMiss) * 100
+	return fmt.Sprintf("Dodge %.0f→%.0f%%  Crit %.0f→%.0f%%", d0, d1, c0, c1)
+}
+
+func previewINT(current, after Stats, _ Stat) string {
+	return fmt.Sprintf("Magic %d→%d  MaxMP +%d", MagicDamage(current, 0), MagicDamage(after, 0), MPForINTDelta(after.INT-current.INT))
+}
+
+func previewWIS(current, after Stats, _ Stat) string {
+	return fmt.Sprintf("Heal %d→%d  MDef %d→%d", HealAmount(current, 0), HealAmount(after, 0), MagicDefense(current), MagicDefense(after))
+}
+
+func previewVIT(current, after Stats, _ Stat) string {
+	return fmt.Sprintf("MaxHP %d → %d", MaxHPFor(current), MaxHPFor(after))
+}
+
+func previewSPD(current, after Stats, _ Stat) string {
+	return fmt.Sprintf("SPD %d → %d (more turns)", current.SPD, after.SPD)
 }
 
 // statSetters is the absolute-write half of statTable (kept separate so readers
@@ -1292,36 +1330,12 @@ func StatPreviewLine(stat Stat, current Stats, pending int, accuracyStat Stat) s
 	for i := 0; i < pending; i++ {
 		statTable[stat].Add(&after)
 	}
-	switch stat {
-	case StatSTR:
-		// STR always drives melee DAMAGE; it drives to-hit only when STR is the
-		// weapon accuracy stat — don't preview a Hit gain that won't materialize.
-		line := fmt.Sprintf("Melee %d→%d", MeleeDamage(current, 0), MeleeDamage(after, 0))
-		if accuracyStat == StatSTR {
-			h0 := MeleeAccuracy(current, TimingQualityMiss) * 100
-			h1 := MeleeAccuracy(after, TimingQualityMiss) * 100
-			line += fmt.Sprintf("  Hit %.0f→%.0f%%", h0, h1)
-		}
-		return line
-	case StatDEX:
-		// DEX's active effects: dodge + crit (ranged hit is dormant, left off).
-		d0 := DodgeChance(current) * 100
-		d1 := DodgeChance(after) * 100
-		c0 := CritChance(current, TimingQualityMiss) * 100
-		c1 := CritChance(after, TimingQualityMiss) * 100
-		return fmt.Sprintf("Dodge %.0f→%.0f%%  Crit %.0f→%.0f%%", d0, d1, c0, c1)
-	case StatINT:
-		return fmt.Sprintf("Magic %d→%d  MaxMP +%d", MagicDamage(current, 0), MagicDamage(after, 0), MPForINTDelta(after.INT-current.INT))
-	case StatWIS:
-		return fmt.Sprintf("Heal %d→%d  MDef %d→%d", HealAmount(current, 0), HealAmount(after, 0), MagicDefense(current), MagicDefense(after))
-	case StatVIT:
-		return fmt.Sprintf("MaxHP %d → %d", MaxHPFor(current), MaxHPFor(after))
-	case StatSPD:
-		return fmt.Sprintf("SPD %d → %d (more turns)", current.SPD, after.SPD)
-	default:
-		// init() calls this for every Stat, so a missing case panics at STARTUP.
-		panic("core: StatPreviewLine missing case for stat")
+	preview := statTable[stat].Preview
+	if preview == nil {
+		// init() calls this for every Stat, so a missing row Preview panics at STARTUP.
+		panic("core: statTable missing Preview for stat")
 	}
+	return preview(current, after, accuracyStat)
 }
 
 // CommitLevelUp applies the staged stat-point spend via SpendStatPoint, returning

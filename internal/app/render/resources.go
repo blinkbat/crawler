@@ -566,16 +566,15 @@ var rampWedgePins [][]float32
 // ascending toward -Z: low edge (south,+Z) at y=0, high edge (north,-Z) at y=LevelStep, filled solid + opaque.
 // drawRampWedge yaw-rotates this one model per ascent direction; it meets both floors flush, fills the whole tile.
 func buildRampWedgeModel(pixels []color.RGBA, shader rl.Shader) rl.Model {
-	const half = float32(core.TileSize) / 2
 	H := core.LevelStep
-	lowSL := rl.NewVector3(-half, 0, half) // low edge (south), left
-	lowSR := rl.NewVector3(half, 0, half)  // low edge (south), right
-	hiNL := rl.NewVector3(-half, H, -half) // high edge (north), left
-	hiNR := rl.NewVector3(half, H, -half)  // high edge (north), right
-	botNL := rl.NewVector3(-half, 0, -half)
-	botNR := rl.NewVector3(half, 0, -half)
+	lowSL := rl.NewVector3(-tileHalf, 0, tileHalf) // low edge (south), left
+	lowSR := rl.NewVector3(tileHalf, 0, tileHalf)  // low edge (south), right
+	hiNL := rl.NewVector3(-tileHalf, H, -tileHalf) // high edge (north), left
+	hiNR := rl.NewVector3(tileHalf, H, -tileHalf)  // high edge (north), right
+	botNL := rl.NewVector3(-tileHalf, 0, -tileHalf)
+	botNR := rl.NewVector3(tileHalf, 0, -tileHalf)
 	// Interior reference point so each face's winding can be flipped to face outward (correct normals).
-	center := rl.NewVector3(0, H/3, -half/3)
+	center := rl.NewVector3(0, H/3, -tileHalf/3)
 
 	var verts, normals, uvs []float32
 	addTri := func(a, b, c rl.Vector3) {
@@ -621,13 +620,12 @@ var facePins [][]float32
 // drawCliffFace translates/yaw-rotates it and scales Y by level delta, so one model skins every cliff.
 // Texture maps 0..1 over one LevelStep, so multi-level faces stretch it vertically (acceptable for rock).
 func buildFaceQuadModel(pixels []color.RGBA, shader rl.Shader) rl.Model {
-	const half = float32(core.TileSize) / 2
 	H := core.LevelStep
 	// CCW as seen from +Z (outward) so the front face survives raylib's back-face cull.
-	bl := rl.NewVector3(-half, 0, half)
-	br := rl.NewVector3(half, 0, half)
-	tr := rl.NewVector3(half, H, half)
-	tl := rl.NewVector3(-half, H, half)
+	bl := rl.NewVector3(-tileHalf, 0, tileHalf)
+	br := rl.NewVector3(tileHalf, 0, tileHalf)
+	tr := rl.NewVector3(tileHalf, H, tileHalf)
+	tl := rl.NewVector3(-tileHalf, H, tileHalf)
 
 	verts := []float32{
 		bl.X, bl.Y, bl.Z, br.X, br.Y, br.Z, tr.X, tr.Y, tr.Z, // tri 1

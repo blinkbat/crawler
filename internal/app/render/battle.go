@@ -850,19 +850,8 @@ func drawActionRow(font rl.Font, x, y, rightX int32, label, suffix string, selec
 	}
 	drawTextWithShadow(font, label, float32(x), float32(y), FontBody, labelCol)
 	if suffix != "" {
-		size := FontSmall
-		measure := measureActionRowSuffix(font, suffix)
-		sx := float32(rightX) - measure.X - 12
-		sy := float32(y) + 5
-		drawTextWithShadow(font, suffix, sx, sy, size, suffixCol)
+		drawTextRightAligned(font, suffix, float32(rightX)-12, float32(y)+5, FontSmall, suffixCol)
 	}
-}
-
-// actionRowSuffixMeasureCache memoizes drawActionRow's right-side suffix measurements.
-var actionRowSuffixMeasureCache measureCache
-
-func measureActionRowSuffix(font rl.Font, suffix string) rl.Vector2 {
-	return actionRowSuffixMeasureCache.measure(font, suffix, FontSmall, 1)
 }
 
 // enemyConditionColors is the roster wound-state tint, indexed by core.EnemyCondition

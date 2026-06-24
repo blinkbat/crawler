@@ -374,7 +374,7 @@ const (
 	// StatusTurnStep: one status turn — the unit a skill tier grants/extends for the
 	// turn-counted statuses (Stun on Smite/Frost Lance T3; Burn on Firebolt/Fireball T3;
 	// Bleed on Rend/Lacerate T2).
-	StatusTurnStep = 1
+	StatusTurnStep       = 1
 	SpiderWebbedMinTurns = 3
 	SpiderWebbedMaxTurns = 3
 	WispConfuseMinTurns  = 2
@@ -400,10 +400,12 @@ const (
 	NecromancerRaiseLimit    = 2    // Necromancer: hard cap on RaiseBones casts per battle.
 
 	// Guaranteed-apply gates: read 1.0 today but go through a named seam so a
-	// future "resist" stat can plug in at one place.
-	MantrapIngestCastChance = 1.0 // Venus Mantrap: always attempts Ingest when it casts (one prey, MantrapHasPrey).
-	WebBindChance           = 1.0 // Cave Spider: Web always binds once cast (cast gate is SpiderWebCastChance).
-	WispConfuseApplyChance  = 1.0 // Wisp: Confuse always lands once cast (cast gate is WispConfuseCastChance).
+	// future "resist" stat can plug in at one place. AlwaysApplies is the shared
+	// "always lands" sentinel they alias.
+	AlwaysApplies           = 1.0
+	MantrapIngestCastChance = AlwaysApplies // Venus Mantrap: always attempts Ingest when it casts (one prey, MantrapHasPrey).
+	WebBindChance           = AlwaysApplies // Cave Spider: Web always binds once cast (cast gate is SpiderWebCastChance).
+	WispConfuseApplyChance  = AlwaysApplies // Wisp: Confuse always lands once cast (cast gate is WispConfuseCastChance).
 
 	// Day/night cycle: TimeOfDayCount phases of StepsPerPhase steps per loop.
 	// Only landed exploration steps advance it (battles preserve the phase).
@@ -678,7 +680,7 @@ const (
 	CrushingBlowStunChance = 0.50
 	// FrostLanceStunChance: Wizard freeze, always lands on Great/Excellent, but
 	// still routes through this seam for a future magic-resist stat.
-	FrostLanceStunChance = 1.0
+	FrostLanceStunChance = AlwaysApplies
 	// VenomStrikePoisonChance: Thief Poison apply (Miss timing scales it via TimingBonusMult).
 	VenomStrikePoisonChance = 0.75
 	// FireballBurnChance: per-target Burn for the AoE; lower than single-target FireboltBurnChance.

@@ -3,6 +3,7 @@ package core
 import (
 	"crawler/internal/app/core/mapfile"
 	"fmt"
+	"reflect"
 	"strings"
 )
 
@@ -25,6 +26,20 @@ type CustomEnemyDef struct {
 	SkillCastChance float64
 	SpellPower      int
 	Skills          []SkillID
+}
+
+// customEnemyDefFieldCount pins CustomEnemyDef's field count. The struct is the
+// head of a SIX-SITE lockstep chain (see Definition()'s LOCKSTEP SITES note);
+// adding a field here without walking the other five silently breaks save/runtime.
+// init reflects the live count against this so a forgotten field panics at BOOT,
+// mirroring skilltree.go's SkillEffectDelta drift-guard. Bump this AFTER updating
+// all six sites.
+const customEnemyDefFieldCount = 13
+
+func init() {
+	if got := reflect.TypeOf(CustomEnemyDef{}).NumField(); got != customEnemyDefFieldCount {
+		panic(fmt.Sprintf("core: CustomEnemyDef has %d fields, customEnemyDefFieldCount is %d — a field changed; walk the SIX LOCKSTEP SITES (see Definition()) and bump the constant", got, customEnemyDefFieldCount))
+	}
 }
 
 // statsFromMap / writeStatsTo are the single source for the Stats <-> 6-scalar

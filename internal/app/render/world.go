@@ -11,6 +11,10 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+// tileHalf is half a tile in world units — the XZ extent from a tile center to its
+// edge, shared by the cliff/voxel/floor-quad geometry.
+const tileHalf = float32(core.TileSize) / 2
+
 // init guards the enemyVisual<->core.EnemyVisualOverride round-trip: fills every
 // override field non-zero, round-trips it, and panics on any dropped field (a
 // field added to one half but not the other). Scale fields non-zero so the
@@ -727,7 +731,6 @@ func drawCliffFaces(camPos rl.Vector3, material worldMaterialResources, assets R
 	if myRamp != core.NoRamp {
 		return 0 // the ramp wedge supplies its own faces
 	}
-	const half = float32(core.TileSize) / 2
 	drawn := 0
 	for _, d := range core.CardinalDirs {
 		dx, dz := core.FacingVector(d)
@@ -735,7 +738,7 @@ func drawCliffFaces(camPos rl.Vector3, material worldMaterialResources, assets R
 		// dense heightfield issues one per exposed edge — skipping the DrawModelEx
 		// saves the per-call cost.
 		fdx, fdz := float32(dx), float32(dz)
-		if faceBackfaceCulled(camPos, cx, cz, fdx, fdz, half) {
+		if faceBackfaceCulled(camPos, cx, cz, fdx, fdz, tileHalf) {
 			continue
 		}
 		nx, nz := x+dx, z+dz

@@ -522,3 +522,14 @@ func PackIndexAtTileLevel(packs []Pack, x, z, level int) int {
 		return PackAlive(p) && p.TileX == x && p.TileZ == z && p.Level == level
 	})
 }
+
+// PackIndexAtLanding picks the right pack lookup for the landing surface: the
+// level-aware PackIndexAtTileLevel on a voxel map, else tile-only PackIndexAtTile
+// (heightfield packs aren't per-surface). Folds the IsVoxel branch the step path
+// used to inline. Caller still gates the voxel case on a resolved step (engageDirOK).
+func PackIndexAtLanding(packs []Pack, x, z, level int, isVoxel bool) int {
+	if isVoxel {
+		return PackIndexAtTileLevel(packs, x, z, level)
+	}
+	return PackIndexAtTile(packs, x, z)
+}

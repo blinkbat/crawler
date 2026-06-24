@@ -1,7 +1,5 @@
 package core
 
-import "math/rand"
-
 // Gold, loot drops, and the shop catalog. Enemies pay gold + roll item drops on
 // defeat (AwardBattleLoot); prices on ItemDefinition.Price, gold/drops on EnemyDefinition.
 
@@ -154,18 +152,5 @@ func AwardBattleLoot(g *GameState) (gold int, drops []ItemKind) {
 	return gold, drops
 }
 
-// rollGold returns a uniform int in [lo, hi], tolerant of (0,0) and inverted
-// bounds so an authoring slip can't panic the loot award: SWAP inverted bounds,
-// then clamp to >= 0. (Differs from RandRangeI / rollDuration on degenerate input.)
-func rollGold(rng *rand.Rand, lo, hi int) int {
-	if hi < lo {
-		lo, hi = hi, lo
-	}
-	if hi <= 0 {
-		return 0
-	}
-	if lo < 0 {
-		lo = 0
-	}
-	return RandRangeI(rng, lo, hi)
-}
+// rollGold lives in util.go beside RandRangeI / rollDuration (the three uniform
+// range draws with deliberately different degenerate-bounds policies).

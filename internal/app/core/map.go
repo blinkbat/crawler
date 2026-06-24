@@ -790,6 +790,16 @@ func CanEnterTileAtLevel(g *GameState, tx, tz, level int, opts EnterOpts) bool {
 	return canEnterRuntimeBlockers(g, tx, tz, opts)
 }
 
+// CanEnterLanding picks the right entry check for the landing surface: the
+// level-aware CanEnterTileAtLevel on a voxel map (walk-under-deck prop blocking),
+// else the flat CanEnterTile. Folds the IsVoxel branch the step path used to inline.
+func CanEnterLanding(g *GameState, tx, tz, level int, opts EnterOpts, isVoxel bool) bool {
+	if isVoxel {
+		return CanEnterTileAtLevel(g, tx, tz, level, opts)
+	}
+	return CanEnterTile(g, tx, tz, opts)
+}
+
 // canEnterRuntimeBlockers is the shared runtime-blocker tail (chests, doors,
 // player/pack occupancy); static terrain is checked by the caller first.
 // PlayerTileX/Z is gated on AllowPlayerTile/OccupiedPacks, else the zero-default

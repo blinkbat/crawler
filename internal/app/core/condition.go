@@ -14,6 +14,10 @@ const (
 	EnemyConditionCount = int(EnemyNearDeath) + 1
 )
 
+// enemyUnharmedLabel is EnemyUnharmed's display string — the one source for the
+// HP==Max condition, which has no woundBands row (see EnemyConditionFor's early-return).
+const enemyUnharmedLabel = "Unharmed"
+
 // woundBands: lower-bound HP fraction (strictly greater than) + label, ordered
 // healthiest to most-wounded. EnemyConditionFor picks the first row HP% clears.
 var woundBands = [...]struct {
@@ -48,7 +52,7 @@ func EnemyConditionLabel(condition EnemyCondition) string {
 			return band.Label
 		}
 	}
-	return "Unharmed"
+	return enemyUnharmedLabel
 }
 
 func init() {

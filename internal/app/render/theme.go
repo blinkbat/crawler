@@ -173,8 +173,8 @@ var (
 	logDamageFoe   = rl.NewColor(244, 244, 248, 255) // party→foe damage — white
 	logInfo        = rl.NewColor(150, 198, 238, 255) // neutral flavor / prompts — pale blue
 	logDamageParty = partyDamagePopupColor           // party takes damage — popup red
-	logHeal        = barHPHigh                        // party healed — HP green
-	logDeath       = giltBright                       // a foe falls — gilt gold
+	logHeal        = barHPHigh                       // party healed — HP green
+	logDeath       = giltBright                      // a foe falls — gilt gold
 
 	barHPHigh = mute(rl.NewColor(116, 200, 132, 255))
 	// xpGainColor fills the victory XP bars — coin-gold (reward, not HP green).
@@ -196,7 +196,7 @@ var (
 	barTrack              = rl.NewColor(8, 12, 22, 140) // near-black track, already muted
 	// barMutedFill is the plum fill drawBar swaps in for a muted (downed) gauge.
 	barMutedFill = rl.NewColor(96, 84, 92, 230)
-	// barGhostHot is the trailing "damage ghost" segment (barghost.go) — hot
+	// barGhostHot is the trailing "damage ghost" segment (drawBarState) — hot
 	// parchment-gold; gilt-family transient, NOT muted.
 	barGhostHot = rl.NewColor(255, 226, 168, 235)
 
@@ -351,6 +351,26 @@ var (
 	// borderActive.)
 	chestBodyColor = rl.NewColor(168, 116, 70, 255)
 	chestLidColor  = rl.NewColor(196, 148, 92, 255)
+	// chestMetalDark/Bright — the chest's band + lockplate tints (3D prop). Body and
+	// lid MUST share them, so the literals live here beside the chest body/lid tokens.
+	chestMetalDark   = rl.NewColor(140, 108, 64, 255)
+	chestMetalBright = rl.NewColor(182, 148, 86, 255)
+
+	// Wood-grain tints shared by the timber props (well, scarecrow, table, etc.).
+	// Distinct from the UI woodDark/woodMid/... frame tokens (those frame glass; these
+	// tint 3D meshes).
+	woodPaletteWarm = rl.NewColor(110, 78, 50, 255) // warm timber brown
+	woodPaletteDark = rl.NewColor(72, 52, 32, 255)  // dark grain / bark
+
+	// Per-class accent ("slot color") — single source for every HUD/UI/log tint
+	// keyed to a class (classes.go turnColor + classAccent). Tuned distinct on dark glass.
+	classAccentWarrior = rl.NewColor(232, 184, 82, 255)  // gold
+	classAccentCleric  = rl.NewColor(238, 236, 226, 255) // off-white
+	classAccentThief   = rl.NewColor(182, 132, 236, 255) // purple
+	classAccentWizard  = rl.NewColor(148, 198, 244, 255) // pale blue
+	// classRobeGold is the gilt trim on party robe sprites (Cleric sash, Wizard trim).
+	// (Warrior's gold is its HUD slot accent classAccentWarrior, a separate source by design.)
+	classRobeGold = rl.NewColor(226, 196, 93, 255)
 
 	// Shadow tints for text + scrims, Light → Mid → Strong → Heavy.
 	shadowLight  = rl.NewColor(0, 0, 0, 160)
@@ -996,6 +1016,18 @@ func drawSmallPanelOutline(x, y, w, h int32, col color.RGBA) {
 	}
 	rect := rl.NewRectangle(float32(x), float32(y), float32(w), float32(h))
 	rl.DrawRectangleRoundedLinesEx(rect, fixedRoundnessFor(w, h, smallCornerRadius), 6, 1, col)
+}
+
+// drawIntensityGauge paints the retro-slider chrome — barTrack well, an inner gilt
+// fill (caller supplies fillW + fillCol; width/color differ per surface), and the
+// woodLight outline. Shared by the Combat Tuning + Retro Filters slider rows; the
+// per-row adjust arrows stay at each call site (they differ in size/gap/pulse).
+func drawIntensityGauge(x, y, w, h, fillW int32, fillCol color.RGBA) {
+	drawSmallPanel(x, y, w, h, barTrack)
+	if fillW > 0 {
+		rl.DrawRectangle(x+1, y+1, fillW, h-2, fillCol)
+	}
+	drawSmallPanelOutline(x, y, w, h, fadeColor(woodLight, 0.6))
 }
 
 // drawGiltFocusRing paints the bold 3px gilt focus frame, corners matching the

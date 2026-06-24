@@ -136,9 +136,8 @@ func updateSkillMenu(g *core.GameState) {
 	if !input.ConfirmPressed() {
 		return
 	}
-	if g.Battle.SkillMenuIndex < 0 || g.Battle.SkillMenuIndex >= len(skills) {
-		g.Battle.SkillMenuIndex = 0
-	}
+	// SkillMenuIndex is already in range: CursorUpDown re-clamps to [0,len-1] every
+	// frame with this same count (len>0 ensured by the empty-list bail above).
 	skill := skills[g.Battle.SkillMenuIndex]
 	if skill == core.SkillNone {
 		setBattleStatus(g, msgNoSkillReady)
@@ -239,9 +238,8 @@ func updateItemMenu(g *core.GameState) {
 	if !input.ConfirmPressed() {
 		return
 	}
-	if g.Battle.ItemMenuIndex < 0 || g.Battle.ItemMenuIndex >= count {
-		g.Battle.ItemMenuIndex = 0
-	}
+	// ItemMenuIndex is already in range: CursorUpDown re-clamps to [0,count-1] every
+	// frame with this same count (count>0 ensured by the empty-list bail above).
 	picked := living[g.Battle.ItemMenuIndex].Kind
 	g.Battle.PendingItem = picked
 	g.Battle.ActionMode = core.ActionItemTarget

@@ -17,12 +17,11 @@ var underQuadPins [][]float32
 
 // buildUnderQuadModel builds a TileSize×TileSize XZ quad at model y=0, normal facing -Y (a floating cube's underside). drawVoxelColumn translates it to (cx, bottomY, cz).
 func buildUnderQuadModel(pixels []color.RGBA, shader rl.Shader) rl.Model {
-	const half = float32(core.TileSize) / 2
 	// CCW seen from below (-Y) so the downward face survives back-face culling.
-	a := rl.NewVector3(-half, 0, -half)
-	b := rl.NewVector3(half, 0, -half)
-	c := rl.NewVector3(half, 0, half)
-	d := rl.NewVector3(-half, 0, half)
+	a := rl.NewVector3(-tileHalf, 0, -tileHalf)
+	b := rl.NewVector3(tileHalf, 0, -tileHalf)
+	c := rl.NewVector3(tileHalf, 0, tileHalf)
+	d := rl.NewVector3(-tileHalf, 0, tileHalf)
 	verts := []float32{
 		a.X, a.Y, a.Z, b.X, b.Y, b.Z, c.X, c.Y, c.Z, // tri 1
 		a.X, a.Y, a.Z, c.X, c.Y, c.Z, d.X, d.Y, d.Z, // tri 2
@@ -64,7 +63,6 @@ var voxelSolidScratch []bool
 
 // drawVoxelColumn renders column (x,z): a floor on each standable surface, one face quad per exposed level on each visible edge, and a downward face under each floating run. Returns the face count.
 func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets Resources, m *core.AreaDefinition, x, z int, cx, cz float32) int {
-	const half = float32(core.TileSize) / 2
 	h := m.SolidStackHeight()
 
 	// Resolve each level's solidity ONCE into scratch; the passes below would otherwise re-read SolidAt per level (~5×h redundant self-column reads/frame). standable(L) = cube L solid AND L+1 air.
@@ -98,7 +96,7 @@ func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets 
 		dx, dz := core.FacingVector(d)
 		fdx, fdz := float32(dx), float32(dz)
 		// CPU backface cull — a vertical face is only visible from its outward side.
-		if faceBackfaceCulled(camPos, cx, cz, fdx, fdz, half) {
+		if faceBackfaceCulled(camPos, cx, cz, fdx, fdz, tileHalf) {
 			continue
 		}
 		nx, nz := x+dx, z+dz

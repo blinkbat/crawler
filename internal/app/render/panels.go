@@ -342,6 +342,15 @@ var memberCardHeaderMetrics = cardIdentityMetrics{
 	mpStep:   float32(uiRowPitch), // 42
 }
 
+// Member-card column split: the right (vitals) column starts at memberCardBarSplit of
+// the card width and spans memberCardBarFracW. Two tokens (not one + 1-x) so the
+// float32 widths stay bit-identical to the original literals. Shared by the formation
+// card + the Use target picker.
+const (
+	memberCardBarSplit = float32(0.46)
+	memberCardBarFracW = float32(0.54)
+)
+
 // Character-tab formation-card steps: tighter than the header so the stat grid clears the pill.
 var formationCardMetrics = cardIdentityMetrics{
 	nameStep: 34,
@@ -350,21 +359,26 @@ var formationCardMetrics = cardIdentityMetrics{
 	mpStep:   38,
 }
 
-// drawPartyMemberCardHeader paints the shared per-member card header (class rail, name, "Lv N · row" sub-label,
-// HP+MP bars) and returns the Y where tab content starts. highlight (cursored column) brightens name + washes body.
-func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangle, highlight bool) float32 {
-	classCol := classAccent(m.Class)
-
+// drawMemberCardShell paints the shared per-member card preamble: glass pane (washed
+// when highlighted), the left class rail, and the gilt focus ring on highlight.
+func drawMemberCardShell(rect rl.Rectangle, classCol rl.Color, highlight bool) {
 	cardBG := glassMid
 	if highlight {
 		cardBG = selectedGlassTint(glassMid, 0.9)
 	}
-	drawGlassPaneRect(col, cardBG)
+	drawGlassPaneRect(rect, cardBG)
 	// Class accent rail flush to the left edge.
-	drawClassRail(int32(col.X), int32(col.Y)+6, stripeWidth, int32(col.Height)-12, classCol)
+	drawClassRail(int32(rect.X), int32(rect.Y)+6, stripeWidth, int32(rect.Height)-12, classCol)
 	if highlight {
-		drawGiltFocusRing(rl.NewRectangle(col.X, col.Y, col.Width, col.Height))
+		drawGiltFocusRing(rect)
 	}
+}
+
+// drawPartyMemberCardHeader paints the shared per-member card header (class rail, name, "Lv N · row" sub-label,
+// HP+MP bars) and returns the Y where tab content starts. highlight (cursored column) brightens name + washes body.
+func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangle, highlight bool) float32 {
+	classCol := classAccent(m.Class)
+	drawMemberCardShell(col, classCol, highlight)
 
 	innerX, innerW := memberCardInner(col)
 
@@ -413,15 +427,7 @@ func drawFormationCard(font rl.Font, g *core.GameState, i int, quad rl.Rectangle
 	highlight := i == g.PanelsRowCursor
 	classCol := classAccent(m.Class)
 
-	cardBG := glassMid
-	if highlight {
-		cardBG = selectedGlassTint(glassMid, 0.9)
-	}
-	drawGlassPaneRect(quad, cardBG)
-	drawClassRail(int32(quad.X), int32(quad.Y)+6, stripeWidth, int32(quad.Height)-12, classCol)
-	if highlight {
-		drawGiltFocusRing(quad)
-	}
+	drawMemberCardShell(quad, classCol, highlight)
 	if i == g.PanelSwapSource {
 		drawPanelOutline(int32(quad.X)-2, int32(quad.Y)-2, int32(quad.Width)+4, int32(quad.Height)+4, borderTarget)
 	}
@@ -429,8 +435,8 @@ func drawFormationCard(font rl.Font, g *core.GameState, i int, quad rl.Rectangle
 	pad := memberCardGutter
 	leftX := quad.X + pad
 	leftW := quad.Width*0.44 - pad
-	rightX := quad.X + quad.Width*0.46
-	rightW := quad.Width*0.54 - pad
+	rightX := quad.X + quad.Width*memberCardBarSplit
+	rightW := quad.Width*memberCardBarFracW - pad
 
 	// --- Left: identity + vitals (shared block; formation packs tighter than the header) ---
 	nameCol := textPrimary
@@ -831,8 +837,8 @@ func drawUseTargetPicker(g *core.GameState, assets Resources) {
 			drawPartyStatusIcon(nameX+8, rect.Y+38, 7, kind, col)
 		}
 		// Right column: compact HP over MP bars (drawBarLive keyed by the stable member name).
-		barX := rect.X + rect.Width*0.46
-		barW := rect.Width*0.54 - 16
+		barX := rect.X + rect.Width*memberCardBarSplit
+		barW := rect.Width*memberCardBarFracW - 16
 		drawBarLive(font, "use:hp:"+m.Name, barX, rect.Y+8, barW, barHeightMini, "HP", m.HP, m.MaxHP, hpFillColor(m.HP, m.MaxHP), false)
 		drawBar(font, barX, rect.Y+30, barW, barHeightMini, "MP", m.MP, m.MaxMP, barMP, false)
 	})

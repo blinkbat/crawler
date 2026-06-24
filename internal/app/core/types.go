@@ -709,19 +709,12 @@ type PartyMember struct {
 	HomeRow Row
 	HomeCol Col
 
-	AttackBump  float32
-	DamageFlash float32
-	// HitKnockback is the take-a-hit recoil timer; the renderer pushes the sprite
-	// AWAY from the attacker (toward the camera) over its duration via BumpOffset.
-	// Set in damagePartyMember on real damage.
-	HitKnockback float32
-
-	// Floating damage popup, mirroring the Enemy side. Quality is the timing grade
-	// (party-received hits pass TimingQualityMiss → no "!"); Timer counts down from
-	// QualityResultDuration. Set in applyPartyDamage.
-	DamagePopup        int
-	DamagePopupQuality int
-	DamagePopupTimer   float32
+	AttackBump float32
+	// HitAnim bundles the shared take-a-hit reaction (flash / knockback / damage
+	// popup) with Enemy. Embedded — fields promote (m.DamageFlash, m.DamagePopup, …)
+	// and JSON-flatten so the save keys are unchanged. Party-received hits pass
+	// TimingQualityMiss → no "!"; set in applyPartyDamage.
+	HitAnim
 
 	// Defending (set by the Defend action) cuts incoming damage, cleared at the
 	// start of the member's NEXT turn — so a slow defender soaks more enemy turns
@@ -855,6 +848,23 @@ func StealChance(base float64) float64 {
 	return Clamp(base, 0, 1)
 }
 
+// HitAnim is the take-a-hit visual reaction shared by PartyMember and Enemy: the
+// damage flash, the recoil knockback timer, and the floating damage popup. Embedded
+// in both so ApplyDamageWithPopup/HitTarget bridge ONE field set. Fields are promoted
+// (e.DamageFlash, m.DamagePopup, …) and JSON-flatten — the on-disk PartyMember save
+// keys are unchanged.
+type HitAnim struct {
+	DamageFlash float32
+	// HitKnockback is the take-a-hit recoil timer; the renderer pushes the sprite
+	// over its duration via BumpOffset. Set on real damage.
+	HitKnockback float32
+	// Floating damage popup. Quality drives color + trailing "!"; Timer counts
+	// down from QualityResultDuration.
+	DamagePopup        int
+	DamagePopupQuality int
+	DamagePopupTimer   float32
+}
+
 type Enemy struct {
 	Kind  EnemyKind
 	HP    int
@@ -879,13 +889,13 @@ type Enemy struct {
 	// formation.go). Zero value RowFront.
 	Row Row
 
-	AttackBump  float32
-	DamageFlash float32
-	// HitKnockback is the recoil timer; the renderer pushes the sprite AWAY from
-	// the camera (deeper into the arena) over its duration. Set in damageEnemy.
-	HitKnockback float32
-	DeathFade    float32
-	BurnTurns    int
+	AttackBump float32
+	// HitAnim bundles the shared take-a-hit reaction quintet (flash / knockback /
+	// floating damage popup). Embedded — fields stay accessed as e.DamageFlash etc.,
+	// and (for PartyMember) JSON-flatten to the same save keys.
+	HitAnim
+	DeathFade float32
+	BurnTurns int
 	// SleepTurns ticks at turn-start (like BurnTurns). No party skill inflicts it
 	// on enemies yet; field exists for a future Lullaby.
 	SleepTurns int
@@ -918,12 +928,6 @@ type Enemy struct {
 	// PerBattleCastLimit; usableEnemySkills drops a capped skill once it hits the
 	// limit. Lazy-init on first cast (Necromancer's RaiseBones is the headline user).
 	SkillCastCount map[SkillID]int
-
-	// Floating damage popup. Quality drives color + trailing "!"; Timer counts
-	// down from QualityResultDuration.
-	DamagePopup        int
-	DamagePopupQuality int
-	DamagePopupTimer   float32
 }
 
 // ActorRef points at one turn-queue slot: IsParty=true → Index into Party, else

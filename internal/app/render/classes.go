@@ -16,33 +16,29 @@ type partyClassPresentation struct {
 	dance       func(float32) (float32, float32, float32, float32)
 }
 
-// classRobeGold is the gilt trim on party robe sprites (Cleric sash, Wizard trim).
-// (Warrior's gold is its HUD slot accent, turnColor, a separate source by design.)
-var classRobeGold = color.RGBA{R: 226, G: 196, B: 93, A: 255}
-
 var partyClassPresentations = map[core.PartyClass]partyClassPresentation{
 	// turnColor is the member's accent "slot color" — single source for every
-	// HUD/UI/log tint keyed to a class. Tuned distinct on the dark glass HUD.
+	// HUD/UI/log tint keyed to a class (tokens live in theme.go: classAccent*).
 	core.ClassWarrior: {
-		turnColor:   color.RGBA{R: 232, G: 184, B: 82, A: 255}, // gold
+		turnColor:   classAccentWarrior,
 		textureSeed: 1,
 		drawPixels:  drawWarriorPartyPixels,
 		dance:       warriorVictoryDance,
 	},
 	core.ClassCleric: {
-		turnColor:   color.RGBA{R: 238, G: 236, B: 226, A: 255}, // off-white
+		turnColor:   classAccentCleric,
 		textureSeed: 2,
 		drawPixels:  drawClericPartyPixels,
 		dance:       clericVictoryDance,
 	},
 	core.ClassThief: {
-		turnColor:   color.RGBA{R: 182, G: 132, B: 236, A: 255}, // purple
+		turnColor:   classAccentThief,
 		textureSeed: 3,
 		drawPixels:  drawThiefPartyPixels,
 		dance:       thiefVictoryDance,
 	},
 	core.ClassWizard: {
-		turnColor:   color.RGBA{R: 148, G: 198, B: 244, A: 255}, // pale blue
+		turnColor:   classAccentWizard,
 		textureSeed: 4,
 		drawPixels:  drawWizardPartyPixels,
 		dance:       wizardVictoryDance,

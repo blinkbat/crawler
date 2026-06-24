@@ -507,8 +507,14 @@ func drawMinimapTimeOfDay(font rl.Font, stepCount int, x, y, width int32) {
 	phase, progress := core.PhaseAtStep(stepCount)
 	name := core.PhaseName(phase)
 	drawTextWithShadow(font, name, float32(x), float32(y), FontSmall, textPrimary)
-	trackY := y + 30
-	trackH := int32(4)
+	// Sharp-cornered phase strip (NOT the rounded drawSmallPanel/drawGaugeWell gauge —
+	// this is a multi-segment brass-on-wood track with its own tints, ticks, and needle).
+	const (
+		phaseTrackDY = int32(30) // strip top below the phase name's text top
+		phaseTrackH  = int32(4)  // strip height
+	)
+	trackY := y + phaseTrackDY
+	trackH := phaseTrackH
 	trackW := width
 	rl.DrawRectangle(x-2, trackY-2, trackW+4, trackH+4, fadeColor(woodDark, 0.72))
 	rl.DrawRectangle(x, trackY, trackW, trackH, barTrack)

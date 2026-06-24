@@ -191,6 +191,13 @@ type enemySpellCtx struct {
 	effect    core.SkillEffect
 }
 
+// enemyLine builds "<Enemy><rest>" — the subject-prefixed log line for bespoke
+// enemy-spell phrasings that DON'T follow the "casts <Skill> —" convention
+// (enemySpellLog). Caller picks the log category (setBattleMessage / …Cat).
+func (ctx enemySpellCtx) enemyLine(rest string, args ...any) string {
+	return core.TheEnemy(ctx.def) + fmt.Sprintf(rest, args...)
+}
+
 // enemySpellHandlers is the dispatch table resolveEnemySpell walks (init guard
 // asserts both directions against EnemyCastable). Each handler returns whether the
 // cast FIRED — a cancelled cast returns false so it can't burn a PerBattleCastLimit charge.
@@ -230,7 +237,7 @@ func handleEnemyFirebolt(ctx enemySpellCtx) bool {
 	dealt, killed := damagePartyMemberDefendable(g, ctx.target, enemySpellDamage(ctx.def, ctx.effect), core.SkillTagFor(core.SkillFirebolt))
 	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillFirebolt), ctx.target)
 	if killed {
-		setBattleMessageCat(g, fmt.Sprintf("%s incinerates %s.", core.TheEnemy(ctx.def), g.Party[ctx.target].Name), core.LogDamageParty)
+		setBattleMessageCat(g, ctx.enemyLine(" incinerates %s.", g.Party[ctx.target].Name), core.LogDamageParty)
 	} else {
 		enemySpellLogCat(ctx, core.LogDamageParty, "%s burns for %d.", g.Party[ctx.target].Name, dealt)
 	}
@@ -250,14 +257,14 @@ func handleEnemyIngest(ctx enemySpellCtx) bool {
 		picked = core.FirstAvailablePartyMember(g.Party)
 	}
 	if picked < 0 {
-		setBattleMessage(g, fmt.Sprintf("%s lunges, but finds no one to seize.", core.TheEnemy(ctx.def)))
+		setBattleMessage(g, ctx.enemyLine(" lunges, but finds no one to seize."))
 		return false
 	}
 	m := &g.Party[picked]
 	// Webbed targets refuse Ingest — Webbed is "tempo control without removal," so
 	// the web shields the prey. The mantrap bites instead this turn.
 	if m.WebbedTurns > 0 {
-		setBattleMessage(g, fmt.Sprintf("%s lunges, but %s is too tangled to swallow.", core.TheEnemy(ctx.def), m.Name))
+		setBattleMessage(g, ctx.enemyLine(" lunges, but %s is too tangled to swallow.", m.Name))
 		return false
 	}
 	m.Ingested = true
@@ -267,7 +274,7 @@ func handleEnemyIngest(ctx enemySpellCtx) bool {
 	// VFX anchors at the MANTRAP (ctx.slot), not the prey: spawnIngest converges
 	// motes inward, reading as "prey's essence flowing INTO the swallower."
 	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillIngest), ctx.slot)
-	setBattleMessage(g, fmt.Sprintf("%s engulfs %s!", core.TheEnemy(ctx.def), m.Name))
+	setBattleMessage(g, ctx.enemyLine(" engulfs %s!", m.Name))
 	audio.Play(audio.SoundEnemyHit)
 	return true
 }
@@ -351,7 +358,7 @@ func handleEnemyWeb(ctx enemySpellCtx) bool {
 		floor:    core.SpiderWebbedMinTurns,
 		vfxSkill: core.SkillWeb,
 		already: func(ctx enemySpellCtx, m *core.PartyMember) {
-			setBattleMessage(ctx.g, fmt.Sprintf("%s spins a fresh web at %s — already webbed.", core.TheEnemy(ctx.def), m.Name))
+			setBattleMessage(ctx.g, ctx.enemyLine(" spins a fresh web at %s — already webbed.", m.Name))
 		},
 		success: func(ctx enemySpellCtx, m *core.PartyMember) {
 			enemySpellLog(ctx, "%s is wrapped in sticky webs.", m.Name)
@@ -368,7 +375,7 @@ func handleEnemyConfuse(ctx enemySpellCtx) bool {
 		floor:    core.WispConfuseMinTurns,
 		vfxSkill: core.SkillConfuse,
 		already: func(ctx enemySpellCtx, m *core.PartyMember) {
-			setBattleMessage(ctx.g, fmt.Sprintf("%s flickers at %s — already disoriented.", core.TheEnemy(ctx.def), m.Name))
+			setBattleMessage(ctx.g, ctx.enemyLine(" flickers at %s — already disoriented.", m.Name))
 		},
 		success: func(ctx enemySpellCtx, m *core.PartyMember) { enemySpellLog(ctx, "%s grows confused.", m.Name) },
 	})
@@ -1107,10 +1114,7 @@ func applyCorrosiveVial(g *core.GameState, quality int) bool {
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	effect := core.EffectiveSkillEffect(actor, core.SkillCorrosiveVial)
 	before := enemy.Armor
-	enemy.Armor -= effect.ArmorReduction
-	if enemy.Armor < 0 {
-		enemy.Armor = 0
-	}
+	subFloorZero(&enemy.Armor, effect.ArmorReduction)
 	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillCorrosiveVial), g.Battle.EnemyIndex)
 	if stripped := before - enemy.Armor; stripped > 0 {
 		setBattleMessage(g, fmt.Sprintf("%s's vial eats %d Armor off the %s.", actor.Name, stripped, core.EnemySingularNoun(*enemy)))
@@ -1181,9 +1185,9 @@ func applyMassMend(g *core.GameState, quality int) bool {
 	}
 	core.HealWholeParty(g, heal)
 	if healed == 0 {
-		setBattleMessage(g, fmt.Sprintf("%s%s's Mass Mend finds no wounds.", qualityTag(quality), actor.Name))
+		setBattleMessage(g, qualityLine(quality, actor.Name, "'s Mass Mend finds no wounds."))
 	} else {
-		setBattleMessageCat(g, fmt.Sprintf("%s%s mends %d allies for %d each.", qualityTag(quality), actor.Name, healed, heal), core.LogHeal)
+		setBattleMessageCat(g, qualityLine(quality, actor.Name, " mends %d allies for %d each.", healed, heal), core.LogHeal)
 	}
 	finishActorTurn(g)
 	return true
@@ -1198,8 +1202,8 @@ func applyBless(g *core.GameState, quality int) bool {
 	effect := core.EffectiveSkillEffect(actor, core.SkillBless)
 	blessed := stampPartyWideBuff(g, effect, core.SkillBless)
 	// Report the EFFECTIVE per-stat boost (all four share one magnitude), not the base.
-	setBattleMessage(g, fmt.Sprintf("%s%s blesses %d allies (+%d stats, %d turns).",
-		qualityTag(quality), actor.Name, blessed, effect.BuffStats.STR, effect.BuffTurns))
+	setBattleMessage(g, qualityLine(quality, actor.Name, " blesses %d allies (+%d stats, %d turns).",
+		blessed, effect.BuffStats.STR, effect.BuffTurns))
 	finishActorTurn(g)
 	return true
 }
@@ -1433,10 +1437,10 @@ func applySunder(g *core.GameState, quality int) bool {
 	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillSunder, rawDamage, quality)
 	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillSunder), g.Battle.EnemyIndex)
 	shoved := !defeated && pushEnemyReadiness(g, g.Battle.EnemyIndex, effect.ATBPush)
-	msg := fmt.Sprintf("%s%s sunders the %s for %d.", qualityTag(quality), actor.Name, core.EnemySingularNoun(target), damage)
+	msg := qualityLine(quality, actor.Name, " sunders the %s for %d.", core.EnemySingularNoun(target), damage)
 	switch {
 	case defeated:
-		msg = fmt.Sprintf("%s%s sunders the %s for %d — it falls.", qualityTag(quality), actor.Name, core.EnemySingularNoun(target), damage)
+		msg = qualityLine(quality, actor.Name, " sunders the %s for %d — it falls.", core.EnemySingularNoun(target), damage)
 	case shoved:
 		msg = fmt.Sprintf("%s Its turn is shoved back.", msg)
 	}
@@ -1464,8 +1468,8 @@ func applyWarBanner(g *core.GameState, quality int) bool {
 	actor := beginPartyAction(g)
 	effect := core.EffectiveSkillEffect(actor, core.SkillWarBanner)
 	rallied := stampPartyWideBuff(g, effect, core.SkillWarBanner)
-	setBattleMessage(g, fmt.Sprintf("%s%s plants a war banner — %d allies rally (+%d STR, +%d Armor, %d turns).",
-		qualityTag(quality), actor.Name, rallied, effect.BuffStats.STR, effect.BuffArmor, effect.BuffTurns))
+	setBattleMessage(g, qualityLine(quality, actor.Name, " plants a war banner — %d allies rally (+%d STR, +%d Armor, %d turns).",
+		rallied, effect.BuffStats.STR, effect.BuffArmor, effect.BuffTurns))
 	finishActorTurn(g)
 	return true
 }
@@ -1479,8 +1483,8 @@ func applyStoneSkin(g *core.GameState, quality int) bool {
 		eff.BuffTurns += selfCastTurnBonus(g, g.Battle.PartyTarget)
 		core.StampPartyBuff(target, core.SkillStoneSkin, eff)
 		// Report the STAMPED duration (carries the self-cast +1), not the base.
-		return fmt.Sprintf("%s%s wards %s in stone (+%d Armor, +%d MDef, %d turns).",
-			qualityTag(quality), actor.Name, target.Name, eff.BuffArmor, eff.BuffMDef, eff.BuffTurns)
+		return qualityLine(quality, actor.Name, " wards %s in stone (+%d Armor, +%d MDef, %d turns).",
+			target.Name, eff.BuffArmor, eff.BuffMDef, eff.BuffTurns)
 	})
 }
 
@@ -1500,8 +1504,8 @@ func applyAegis(g *core.GameState, quality int) bool {
 	return applyAllyTargetSkill(g, core.SkillAegis, core.LogInfo, func(actor, target *core.PartyMember) string {
 		effect := core.EffectiveSkillEffect(actor, core.SkillAegis)
 		target.ShieldHP = effect.ShieldHP
-		return fmt.Sprintf("%s%s raises an aegis over %s — absorbs the next %d damage.",
-			qualityTag(quality), actor.Name, target.Name, target.ShieldHP)
+		return qualityLine(quality, actor.Name, " raises an aegis over %s — absorbs the next %d damage.",
+			target.Name, target.ShieldHP)
 	})
 }
 
@@ -1524,8 +1528,8 @@ func applySmokeBomb(g *core.GameState, quality int) bool {
 			}
 		})
 	}
-	setBattleMessage(g, fmt.Sprintf("%s%s drops a smoke bomb — %d allies gain evasion, %d foes lose their aim.",
-		qualityTag(quality), actor.Name, buffed, blinded))
+	setBattleMessage(g, qualityLine(quality, actor.Name, " drops a smoke bomb — %d allies gain evasion, %d foes lose their aim.",
+		buffed, blinded))
 	finishActorTurn(g)
 	return true
 }
@@ -1543,8 +1547,8 @@ func applyIceArmor(g *core.GameState, quality int) bool {
 	actor.IceArmorTurns = turns
 	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillIceArmor), g.Battle.CurrentParty)
 	// Log the stamped duration (incl. self-cast +1), not the base.
-	setBattleMessage(g, fmt.Sprintf("%s%s sheathes in ice — +%d MDef, attackers chilled for %d turns.",
-		qualityTag(quality), actor.Name, core.IceArmorMDef, turns))
+	setBattleMessage(g, qualityLine(quality, actor.Name, " sheathes in ice — +%d MDef, attackers chilled for %d turns.",
+		core.IceArmorMDef, turns))
 	finishActorTurn(g)
 	return true
 }
@@ -1623,9 +1627,9 @@ func applyCleanse(g *core.GameState, quality int) bool {
 	return applyAllyTargetSkill(g, core.SkillCleanse, core.LogInfo, func(actor, target *core.PartyMember) string {
 		cured := core.CureDebuffs(target)
 		if cured == 0 {
-			return fmt.Sprintf("%s%s cleanses %s — nothing ailed them.", qualityTag(quality), actor.Name, target.Name)
+			return qualityLine(quality, actor.Name, " cleanses %s — nothing ailed them.", target.Name)
 		}
-		return fmt.Sprintf("%s%s cleanses %s — %d cured.", qualityTag(quality), actor.Name, target.Name, cured)
+		return qualityLine(quality, actor.Name, " cleanses %s — %d cured.", target.Name, cured)
 	})
 }
 
@@ -1637,9 +1641,9 @@ func applySecondWind(g *core.GameState, quality int) bool {
 	heal := core.ScaleHeal(core.SkillHealFor(actor, core.SkillSecondWind), quality)
 	if healPartyMember(g, g.Battle.CurrentParty, heal) {
 		core.EnqueuePartyVFX(g, vfxKindFor(core.SkillSecondWind), g.Battle.CurrentParty)
-		setBattleMessageCat(g, fmt.Sprintf("%s%s catches a second wind — recovers %d HP.", qualityTag(quality), actor.Name, heal), core.LogHeal)
+		setBattleMessageCat(g, qualityLine(quality, actor.Name, " catches a second wind — recovers %d HP.", heal), core.LogHeal)
 	} else {
-		setBattleMessage(g, fmt.Sprintf("%s%s is already at full health.", qualityTag(quality), actor.Name))
+		setBattleMessage(g, qualityLine(quality, actor.Name, " is already at full health."))
 	}
 	finishActorTurn(g)
 	return true
@@ -1660,8 +1664,8 @@ func applyRenewal(g *core.GameState, quality int) bool {
 		}
 		target.RegenPerTurn = perTurn
 		target.RegenTurns = effect.RegenTurns
-		return fmt.Sprintf("%s%s lays a renewal on %s — +%d HP at the end of their next %d turns.",
-			qualityTag(quality), actor.Name, target.Name, perTurn, effect.RegenTurns)
+		return qualityLine(quality, actor.Name, " lays a renewal on %s — +%d HP at the end of their next %d turns.",
+			target.Name, perTurn, effect.RegenTurns)
 	})
 }
 
@@ -2260,16 +2264,14 @@ func attackResultMessage(name string, target core.Enemy, damage, quality int, de
 }
 
 func swipeMessage(name string, hits, quality int) string {
-	tag := qualityTag(quality)
-	return fmt.Sprintf("%s%s swipes through %d foes.", tag, name, hits)
+	return qualityLine(quality, name, " swipes through %d foes.", hits)
 }
 
 func prayerMessage(name, targetName string, heal, quality int, self bool) string {
-	tag := qualityTag(quality)
 	if self {
-		return fmt.Sprintf("%s%s prays for themselves (+%d HP).", tag, name, heal)
+		return qualityLine(quality, name, " prays for themselves (+%d HP).", heal)
 	}
-	return fmt.Sprintf("%s%s prays over %s (+%d HP).", tag, name, targetName, heal)
+	return qualityLine(quality, name, " prays over %s (+%d HP).", targetName, heal)
 }
 
 func stealMessage(name string, kind core.ItemKind, quality int) string {
@@ -2365,6 +2367,14 @@ func aoeSkillMessage(name, skillNoun, hitVerb string, hits, damage, quality int)
 
 func aoeEmptyMessage(skillNoun, emptyVerb string) string {
 	return fmt.Sprintf("%s %s.", skillNoun, emptyVerb)
+}
+
+// qualityLine builds a "<grade><name><rest>" log line: qualityTag(quality) + name,
+// then the rest formatted. `rest` is everything AFTER the name (e.g. "'s Mass Mend
+// finds no wounds." or " mends %d allies."). The shared head for the buff/utility
+// handlers that all open with the quality tag + caster name.
+func qualityLine(quality int, name, rest string, args ...any) string {
+	return qualityTag(quality) + name + fmt.Sprintf(rest, args...)
 }
 
 // qualityTag returns the leading "Grade! " log prefix on a hit. Miss/Nice return

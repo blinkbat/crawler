@@ -101,10 +101,6 @@ func drawShadedBillboard(camera rl.Camera3D, tex rl.Texture2D, pos rl.Vector3, s
 	)
 }
 
-// drawSpriteOutline stamps the sprite's silhouette in black at four cardinal offsets,
-// just behind the sprite, to ring it with a dark rim. Cardinal (not scale-up) so it
-// reads as an even edge and doesn't fill interior gaps. Offset scales with sprite size
-// so the rim stays ~constant in screen pixels near vs far.
 // billboardBasis returns the camera-facing forward + right axes shared by the
 // billboard draws (matches raylib's DrawBillboardRec basis: world-up vertical).
 func billboardBasis(camera rl.Camera3D) (fwd, right rl.Vector3) {
@@ -113,6 +109,10 @@ func billboardBasis(camera rl.Camera3D) (fwd, right rl.Vector3) {
 	return fwd, right
 }
 
+// drawSpriteOutline stamps the sprite's silhouette in black at four cardinal offsets,
+// just behind the sprite, to ring it with a dark rim. Cardinal (not scale-up) so it
+// reads as an even edge and doesn't fill interior gaps. Offset scales with sprite size
+// so the rim stays ~constant in screen pixels near vs far.
 func drawSpriteOutline(camera rl.Camera3D, tex rl.Texture2D, pos rl.Vector3, size rl.Vector2, px float32, alpha uint8) {
 	if alpha == 0 || px <= 0 {
 		return

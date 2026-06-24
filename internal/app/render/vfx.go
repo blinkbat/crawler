@@ -60,19 +60,18 @@ const (
 
 // particle is one live FX dot: position drifts under velocity + gravity·t; size/color animate over [0, Duration].
 type particle struct {
-	X, Y, Z       float32
-	VX, VY, VZ    float32
-	GX, GY, GZ    float32 // constant accel (gravity, drag substitute)
-	Elapsed       float32
-	Duration      float32
-	SizeStart     float32
-	SizeEnd       float32
-	ColorStart    color.RGBA
-	ColorEnd      color.RGBA
-	Rotation      float32
-	Spin          float32
-	Shape         particleShape
-	GroundAligned bool // ring/disc shapes drawn flat on the floor
+	X, Y, Z    float32
+	VX, VY, VZ float32
+	GX, GY, GZ float32 // constant accel (gravity, drag substitute)
+	Elapsed    float32
+	Duration   float32
+	SizeStart  float32
+	SizeEnd    float32
+	ColorStart color.RGBA
+	ColorEnd   color.RGBA
+	Rotation   float32
+	Spin       float32
+	Shape      particleShape
 }
 
 // alive reports whether the particle still has lifetime left.
@@ -639,13 +638,12 @@ func pickConfuseTone(i int) color.RGBA {
 func pushRing(o rl.Vector3, col color.RGBA, sizeStart, sizeEnd, duration float32) {
 	pushParticle(particle{
 		X: o.X, Y: 0.06, Z: o.Z,
-		Duration:      duration,
-		SizeStart:     sizeStart,
-		SizeEnd:       sizeEnd,
-		ColorStart:    col,
-		ColorEnd:      colorWithAlpha(col, 0),
-		Shape:         shapeRing,
-		GroundAligned: true,
+		Duration:   duration,
+		SizeStart:  sizeStart,
+		SizeEnd:    sizeEnd,
+		ColorStart: col,
+		ColorEnd:   colorWithAlpha(col, 0),
+		Shape:      shapeRing,
 	})
 }
 

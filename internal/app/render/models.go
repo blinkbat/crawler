@@ -18,6 +18,14 @@ func textureAndShade(models []rl.Model, shader rl.Shader, tex rl.Texture2D) {
 	}
 }
 
+// shadeAll binds the lighting shader to every model without touching textures —
+// for loaders that texture a subset (or none) and tint the rest at part level.
+func shadeAll(models []rl.Model, shader rl.Shader) {
+	for i := range models {
+		attachShader(&models[i], shader)
+	}
+}
+
 // skinExceptMoss textures + shades every model EXCEPT mossIdx (moss reads as
 // granite if textured, so it stays untextured and tinted at part level). Shared
 // by the rock boulder/cairn/formation loaders.
@@ -519,12 +527,6 @@ var (
 	stonePaletteLight = rl.NewColor(232, 224, 210, 255)
 )
 
-// Wood-grain tints shared by the timber props (well, scarecrow, table, etc.).
-var (
-	woodPaletteWarm = rl.NewColor(110, 78, 50, 255) // warm timber brown
-	woodPaletteDark = rl.NewColor(72, 52, 32, 255)  // dark grain / bark
-)
-
 // loadRockProp builds a chunky polygonal boulder: faceted lumps fused at varied
 // angles in close-grouped stone greys. Low slice/ring counts (4–6) keep the
 // lumps polygonal, not billiard-ball smooth.
@@ -698,9 +700,7 @@ func loadBushProp(shader rl.Shader, leafTex rl.Texture2D) propModel {
 	models := []rl.Model{leafLump, leafLumpSm, bloom, twig}
 	setModelTexture(&models[0], leafTex)
 	setModelTexture(&models[1], leafTex)
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	// Pastel-saturated bush — spring-green lumps with soft blooms.
 	leafBase := color.RGBA{R: 142, G: 200, B: 112, A: 255}
 	leafDeep := color.RGBA{R: 102, G: 164, B: 100, A: 255}
@@ -744,9 +744,7 @@ func loadMushroomProp(shader rl.Shader) propModel {
 	// sees at their low angle; without it the cap floats on a bare stick.
 	gill := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.125, 0.035, 12))
 	models := []rl.Model{stem, capDome, spot, smallStem, smallCap, gill}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	stemTint := color.RGBA{R: 224, G: 218, B: 200, A: 255}
 	stemDarker := color.RGBA{R: 200, G: 192, B: 172, A: 255}
 	capRed := color.RGBA{R: 188, G: 92, B: 86, A: 255}
@@ -778,13 +776,6 @@ func loadMushroomProp(shader rl.Shader) propModel {
 	}
 }
 
-// chestMetalDark/Bright are the band + lockplate tints shared by the chest body
-// and lid; they MUST stay in sync, so the literals live here once.
-var (
-	chestMetalDark   = rl.NewColor(140, 108, 64, 255)
-	chestMetalBright = rl.NewColor(182, 148, 86, 255)
-)
-
 // loadChestBodyProp builds the wooden chest body: corner straps, two hoop
 // bands, a front lockplate, and a jewel pip. Bark texture on wood; default
 // material on metal parts so they read as cast bronze. Dimensions match the
@@ -797,9 +788,7 @@ func loadChestBodyProp(shader rl.Shader, barkTex rl.Texture2D) propModel {
 	lockplate := rl.LoadModelFromMesh(rl.GenMeshCube(0.20, 0.22, 0.04))
 	jewel := rl.LoadModelFromMesh(rl.GenMeshSphere(0.045, 8, 10))
 	models := []rl.Model{wood, strap, hoop, lockplate, jewel}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	woodTint := chestBodyColor
 	// Brass banding shared with the lid via chestMetal* so the pieces can't drift.
 	metalDark := chestMetalDark
@@ -835,9 +824,7 @@ func loadChestLidProp(shader rl.Shader, barkTex rl.Texture2D) propModel {
 	cornerCap := rl.LoadModelFromMesh(rl.GenMeshCube(0.10, 0.20, 0.10))
 	hoop := rl.LoadModelFromMesh(rl.GenMeshCube(0.70, 0.05, 0.58))
 	models := []rl.Model{wood, cornerCap, hoop}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	woodTint := chestLidColor
 	metalDark := chestMetalDark
 	return propModel{
@@ -1088,9 +1075,7 @@ func loadFountainProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 	for _, i := range []int{0, 2, 3, 4} {
 		setModelTexture(&models[i], marbleTex)
 	}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	stone := rl.NewColor(208, 202, 188, 255)
 	rim := rl.NewColor(186, 178, 164, 255)
 	water := rl.NewColor(100, 168, 222, 245)
@@ -1143,9 +1128,7 @@ func loadFlowerProp(shader rl.Shader) propModel {
 	pistil := rl.LoadModelFromMesh(rl.GenMeshSphere(0.022, 6, 8))
 	leaf := rl.LoadModelFromMesh(rl.GenMeshCube(0.055, 0.022, 0.075))
 	models := []rl.Model{stem, petal, bloom, pistil, leaf}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	stemTint := rl.NewColor(98, 138, 88, 255)
 	leafTint := rl.NewColor(118, 158, 100, 255)
 	yellow := rl.NewColor(214, 196, 116, 255)
@@ -1216,9 +1199,7 @@ func loadReedProp(shader rl.Shader) propModel {
 	reed := rl.LoadModelFromMesh(rl.GenMeshCube(0.025, 0.62, 0.025))
 	tip := rl.LoadModelFromMesh(rl.GenMeshCube(0.04, 0.07, 0.04))
 	models := []rl.Model{reed, tip}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	stem := rl.NewColor(110, 132, 90, 255)
 	stemDark := rl.NewColor(82, 102, 70, 255)
 	pod := rl.NewColor(132, 96, 56, 255)
@@ -1249,9 +1230,7 @@ func loadExoticFlowerProp(shader rl.Shader) propModel {
 	pistil := rl.LoadModelFromMesh(rl.GenMeshSphere(0.045, 8, 10))
 	leaf := rl.LoadModelFromMesh(rl.GenMeshCube(0.07, 0.02, 0.12))
 	models := []rl.Model{stem, petalOuter, petalInner, bloom, pistil, leaf}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	stemTint := rl.NewColor(86, 132, 80, 255)
 	leafTint := rl.NewColor(104, 150, 92, 255)
 	magenta := rl.NewColor(206, 92, 168, 255)
@@ -1337,9 +1316,7 @@ func loadBoneProp(shader rl.Shader) propModel {
 	longBone := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.025, 0.32, 8))
 	knuckle := rl.LoadModelFromMesh(rl.GenMeshSphere(0.045, 6, 8))
 	models := []rl.Model{skull, jaw, longBone, knuckle}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	bone := rl.NewColor(228, 220, 198, 255)
 	stain := rl.NewColor(178, 162, 132, 255)
 	return propModel{
@@ -1364,9 +1341,7 @@ func loadScorchProp(shader rl.Shader) propModel {
 	outer := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.42, 0.02, 20))
 	inner := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.24, 0.02, 18))
 	models := []rl.Model{outer, inner}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	ash := rl.NewColor(44, 38, 36, 255)
 	char := rl.NewColor(22, 18, 16, 255)
 	return propModel{
@@ -1403,9 +1378,7 @@ func loadCobwebProp(shader rl.Shader) propModel {
 	panel := rl.LoadModelFromMesh(rl.GenMeshCube(0.42, 0.012, 0.42))
 	strand := rl.LoadModelFromMesh(rl.GenMeshCube(0.34, 0.008, 0.020))
 	models := []rl.Model{panel, strand}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	web := rl.NewColor(220, 222, 226, 200)
 	wisp := rl.NewColor(196, 200, 208, 220)
 	return propModel{
@@ -1427,9 +1400,7 @@ func loadStumpProp(shader rl.Shader, barkTex rl.Texture2D) propModel {
 	face := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.32, 0.04, 14))
 	models := []rl.Model{body, face}
 	setModelTexture(&models[0], barkTex)
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	// Pastel pecan stump with pale-cream cut-face rings.
 	bark := rl.NewColor(172, 132, 96, 255)
 	rings := rl.NewColor(214, 184, 144, 255)
@@ -1451,9 +1422,7 @@ func loadLogProp(shader rl.Shader, barkTex, leafTex rl.Texture2D) propModel {
 	models := []rl.Model{trunk, cap, moss}
 	setModelTexture(&models[0], barkTex)
 	setModelTexture(&models[2], leafTex)
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	// Pastel pecan log with pale cut faces + soft mint moss.
 	bark := rl.NewColor(170, 130, 94, 255)
 	cut := rl.NewColor(210, 178, 138, 255)
@@ -1492,9 +1461,7 @@ func loadDoorProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	for _, i := range []int{0, 1, 2, 3, 4, 8} {
 		setModelTexture(&models[i], woodTex)
 	}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	// Muted wood family matching the bark/crate/stump palette.
 	wood := rl.NewColor(118, 84, 56, 255)
 	woodDark := rl.NewColor(84, 60, 42, 255)
@@ -1547,9 +1514,7 @@ func loadCaveDoorProp(shader rl.Shader, stoneTex rl.Texture2D) propModel {
 	for _, i := range []int{0, 1, 3, 4} {
 		setModelTexture(&models[i], stoneTex)
 	}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	stone := rl.NewColor(150, 146, 138, 255)
 	stoneDark := rl.NewColor(112, 108, 102, 255)
 	stoneShade := rl.NewColor(96, 92, 88, 255)
@@ -1591,9 +1556,7 @@ func loadFieldDoorProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	for _, i := range []int{0, 1, 2, 3} {
 		setModelTexture(&models[i], woodTex)
 	}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	wood := rl.NewColor(150, 112, 72, 255)
 	woodDark := rl.NewColor(112, 82, 52, 255)
 	signWood := rl.NewColor(168, 132, 90, 255)
@@ -1631,9 +1594,7 @@ func loadLilypadProp(shader rl.Shader) propModel {
 	bloom := rl.LoadModelFromMesh(rl.GenMeshSphere(0.06, 8, 8))
 	bud := rl.LoadModelFromMesh(rl.GenMeshSphere(0.035, 6, 8))
 	models := []rl.Model{pad, smallPad, bloom, bud}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	leaf := rl.NewColor(72, 138, 78, 255)
 	leafDark := rl.NewColor(54, 108, 60, 255)
 	flower := rl.NewColor(244, 180, 210, 255)
@@ -1681,9 +1642,7 @@ func loadWellProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 	bucket := rl.LoadModelFromMesh(rl.GenMeshCube(0.16, 0.16, 0.16))
 	models := []rl.Model{rim, water, post, beam, bucket}
 	setModelTexture(&models[0], rockTex)
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	stone := rl.NewColor(170, 168, 156, 255)
 	stoneDark := rl.NewColor(110, 108, 100, 255)
 	waterCol := rl.NewColor(56, 96, 138, 255)
@@ -1751,9 +1710,7 @@ func loadHayBaleProp(shader rl.Shader) propModel {
 	bale := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.45, 0.70, 14))
 	band := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.47, 0.04, 14))
 	models := []rl.Model{bale, band}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	straw := rl.NewColor(216, 184, 110, 255)
 	strawDark := rl.NewColor(168, 132, 76, 255)
 	cord := rl.NewColor(118, 86, 52, 255)
@@ -1780,9 +1737,7 @@ func loadScarecrowProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	torso := rl.LoadModelFromMesh(rl.GenMeshCube(0.40, 0.50, 0.20))
 	hat := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.20, 0.16, 12))
 	models := []rl.Model{pole, arm, head, torso, hat}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	setModelTexture(&models[0], woodTex)
 	setModelTexture(&models[1], woodTex)
 	wood := woodPaletteWarm
@@ -1860,9 +1815,7 @@ func loadBedProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	models := []rl.Model{frame, mattress, headboard, pillow}
 	setModelTexture(&models[0], woodTex)
 	setModelTexture(&models[2], woodTex)
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	wood := rl.NewColor(112, 78, 50, 255)
 	bedding := rl.NewColor(176, 90, 96, 255)
 	beddingDark := rl.NewColor(132, 64, 70, 255)
@@ -1941,9 +1894,7 @@ func loadRugProp(shader rl.Shader) propModel {
 	pad := rl.LoadModelFromMesh(rl.GenMeshCube(0.78, 0.02, 0.58))
 	border := rl.LoadModelFromMesh(rl.GenMeshCube(0.84, 0.025, 0.64))
 	models := []rl.Model{pad, border}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	rug := rl.NewColor(176, 84, 68, 255)
 	rugDark := rl.NewColor(120, 56, 48, 255)
 	trim := rl.NewColor(232, 196, 124, 255)
@@ -1965,9 +1916,7 @@ func loadCandleProp(shader rl.Shader) propModel {
 	flame := rl.LoadModelFromMesh(rl.GenMeshSphere(0.04, 6, 8))
 	tip := rl.LoadModelFromMesh(rl.GenMeshSphere(0.02, 6, 6))
 	models := []rl.Model{puddle, candle, flame, tip}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	wax := rl.NewColor(244, 220, 156, 255)
 	waxDark := rl.NewColor(196, 168, 108, 255)
 	fire := rl.NewColor(232, 144, 64, 255)
@@ -1988,9 +1937,7 @@ func loadBootprintsProp(shader rl.Shader) propModel {
 	print := rl.LoadModelFromMesh(rl.GenMeshCube(0.10, 0.015, 0.18))
 	heel := rl.LoadModelFromMesh(rl.GenMeshCube(0.10, 0.015, 0.06))
 	models := []rl.Model{print, heel}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	mud := rl.NewColor(90, 68, 44, 255)
 	mudDark := rl.NewColor(60, 44, 28, 255)
 	return propModel{
@@ -2010,9 +1957,7 @@ func loadAshHeapProp(shader rl.Shader) propModel {
 	heap := rl.LoadModelFromMesh(rl.GenMeshSphere(0.16, 8, 8))
 	dust := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.22, 0.02, 12))
 	models := []rl.Model{heap, dust}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	ash := rl.NewColor(132, 124, 116, 255)
 	ashDark := rl.NewColor(80, 72, 64, 255)
 	dustTone := rl.NewColor(160, 150, 138, 255)
@@ -2031,9 +1976,7 @@ func loadPuddleProp(shader rl.Shader) propModel {
 	disc := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.26, 0.015, 14))
 	highlight := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.18, 0.02, 12))
 	models := []rl.Model{disc, highlight}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	shadeAll(models, shader)
 	water := rl.NewColor(108, 154, 188, 255)
 	waterBright := rl.NewColor(180, 214, 232, 255)
 	return propModel{

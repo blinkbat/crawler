@@ -16,6 +16,20 @@ import (
 
 const battleWipeDuration = core.BattleWipePreviewSeconds
 
+// Screen-wipe FX tuning magnitudes (were inline magics across the camera + overlay
+// cases).
+const (
+	wipeZoomFovDrop   = float32(32)   // WipeZoom: degrees of FOV narrowing at entry
+	wipeZoomFovFloor  = float32(12)   // WipeZoom: FOV floor
+	wipeWobbleFreq    = float32(38)   // WipeWobble: oscillation frequency
+	wipeWobbleRoll    = float32(0.16) // WipeWobble: roll amplitude (radians)
+	wipeTintMaxAlpha  = float32(0.6)  // WipeTint: peak overlay opacity at entry
+	wipeVignetteAlpha = float32(0.92) // WipeVignette: dark-iris ring opacity
+)
+
+// wipeTintColor is the warm overlay tone the WipeTint case washes the frame with.
+var wipeTintColor = rl.NewColor(255, 170, 80, 255)
+
 // battleWipeProgress returns (t in 0..1, active). The debug preview timer wins;
 // otherwise the early window of Battle.Splash drives it. t goes 0 (full FX) → 1
 // (settled). Inactive for WipeNone.
@@ -48,14 +62,14 @@ func battleWipeCamera(g *core.GameState, dir rl.Vector3, fov float32) (rl.Vector
 	r := 1 - wipeEase(t) // 1 at entry → 0 settled
 	switch g.BattleWipe {
 	case core.WipeZoom:
-		if fov -= 32 * r; fov < 12 {
-			fov = 12
+		if fov -= wipeZoomFovDrop * r; fov < wipeZoomFovFloor {
+			fov = wipeZoomFovFloor
 		}
 	case core.WipeSpin:
 		up = wipeRollUp(dir, r*0.6)
 	case core.WipeWobble:
-		osc := float32(math.Sin(float64(t*38))) * r
-		up = wipeRollUp(dir, osc*0.16)
+		osc := float32(math.Sin(float64(t*wipeWobbleFreq))) * r
+		up = wipeRollUp(dir, osc*wipeWobbleRoll)
 		fov -= osc * 6
 	}
 	return up, fov
@@ -82,16 +96,16 @@ func DrawBattleWipeOverlay(g *core.GameState, _ Resources) {
 	w, h := screenSizeF()
 	switch g.BattleWipe {
 	case core.WipeTint:
-		rl.DrawRectangle(0, 0, int32(w), int32(h), fadeColor(rl.NewColor(255, 170, 80, 255), (1-t)*0.6))
+		fillScreen(fadeColor(wipeTintColor, (1-t)*wipeTintMaxAlpha))
 	case core.WipeFlash:
 		if a := 1 - t/0.5; a > 0 { // gone by half
-			rl.DrawRectangle(0, 0, int32(w), int32(h), fadeColor(rl.White, a*0.9))
+			fillScreen(fadeColor(rl.White, a*0.9))
 		}
 	case core.WipeVignette:
 		// Dark iris opening from the center: a ring from the growing hole radius out
 		// to past the corner. inner=0 (full dark) → diag (revealed).
 		diag := float32(math.Hypot(float64(w), float64(h))) / 2
-		rl.DrawRing(rl.NewVector2(w/2, h/2), wipeEase(t)*diag, diag+4, 0, 360, 64, fadeColor(rl.Black, 0.92))
+		rl.DrawRing(rl.NewVector2(w/2, h/2), wipeEase(t)*diag, diag+4, 0, 360, 64, fadeColor(rl.Black, wipeVignetteAlpha))
 	case core.WipePixelate:
 		drawWipePixelate(t)
 	}
@@ -180,8 +194,7 @@ func drawWipePixelate(t float32) {
 	for gy := int32(0); gy < wipeGridRows; gy += stride {
 		bh := stride * wipeBlockW
 		for gx := int32(0); gx < wipeGridCols; gx += stride {
-			c := wipeGridColors[gy*wipeGridCols+gx]
-			c.A = alpha
+			c := colorWithAlpha(wipeGridColors[gy*wipeGridCols+gx], alpha)
 			rl.DrawRectangle(gx*wipeBlockW, gy*wipeBlockW, stride*wipeBlockW, bh, c)
 		}
 	}

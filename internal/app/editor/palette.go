@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"crawler/internal/app/core"
 	"crawler/internal/app/render"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -123,16 +124,11 @@ var (
 // tintSwatch nudges a base swatch by per-channel deltas (clamped [0,255]),
 // keeping alpha. Derives a family of related brush colors (e.g. wall variants).
 func tintSwatch(base rl.Color, dr, dg, db int) rl.Color {
-	clamp := func(v, d int) uint8 {
-		v += d
-		if v < 0 {
-			v = 0
-		} else if v > 255 {
-			v = 255
-		}
-		return uint8(v)
-	}
-	return rl.NewColor(clamp(int(base.R), dr), clamp(int(base.G), dg), clamp(int(base.B), db), base.A)
+	return rl.NewColor(
+		core.ClampByte(int(base.R)+dr),
+		core.ClampByte(int(base.G)+dg),
+		core.ClampByte(int(base.B)+db),
+		base.A)
 }
 
 // withAlpha returns c with its alpha overridden. Thin alias over

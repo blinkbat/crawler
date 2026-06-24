@@ -268,8 +268,14 @@ func randomizedPressWindow(rng *rand.Rand, minStart, maxStart, width, maxEnd flo
 		end = maxEnd
 		start = end - width
 	}
-	sweet = (start + end) * 0.5
+	sweet = midpoint(start, end)
 	return
+}
+
+// midpoint returns the average of two fractions — the open-coded (a+b)*0.5 window
+// center. (chargePeakSweet is a const and can't call this; it inlines the same form.)
+func midpoint(a, b float32) float32 {
+	return (a + b) * 0.5
 }
 
 // chargePeakSweet is the peak window midpoint (Excellent sweet spot), shared by

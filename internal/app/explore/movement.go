@@ -22,9 +22,7 @@ func Update(g *core.GameState) {
 	// Screen Wipe FX preview countdown — ticks even with the debug submenu open so the
 	// previewed effect plays over the field.
 	if g.BattleWipePreview > 0 {
-		if g.BattleWipePreview -= dt; g.BattleWipePreview < 0 {
-			g.BattleWipePreview = 0
-		}
+		g.BattleWipePreview = core.ApproachZero(g.BattleWipePreview, dt)
 	}
 
 	// Modal dispatch order is ActiveModal's enum ladder (single source of truth).
@@ -585,7 +583,7 @@ func startStep(p *core.Player, g *core.GameState, forward int) {
 		// on the player's own surface, so gate the level-aware lookup on engageDirOK.
 		packHit = -1
 		if engageDirOK {
-			packHit = core.PackIndexAtTileLevel(g.Packs, targetX, targetZ, engageLevel)
+			packHit = core.PackIndexAtLanding(g.Packs, targetX, targetZ, engageLevel, true)
 		}
 	}
 	if packHit >= 0 && !g.EnemiesDisabled && engageReachable {
@@ -626,11 +624,7 @@ func startStep(p *core.Player, g *core.GameState, forward int) {
 	// CanEnterTile. AllowDoorTile=true (stepping onto a door fires a transition);
 	// the engagement branch already consumed the pack-tile case. The voxel
 	// level-aware variant lets a prop block only its own levels (walk under a deck).
-	if g.Area.IsVoxel() {
-		if !core.CanEnterTileAtLevel(g, targetX, targetZ, landLevel, core.EnterOpts{AllowDoorTile: true}) {
-			return
-		}
-	} else if !core.CanEnterTile(g, targetX, targetZ, core.EnterOpts{AllowDoorTile: true}) {
+	if !core.CanEnterLanding(g, targetX, targetZ, landLevel, core.EnterOpts{AllowDoorTile: true}, g.Area.IsVoxel()) {
 		return
 	}
 	// Ground height left from — captured before the TileX/Z/Level advance so a

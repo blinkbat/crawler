@@ -1265,17 +1265,7 @@ func makeRatPixelsWithPalette(w, h int, p ratPalette) []color.RGBA {
 		fillEllipsePixels(pixels, w, h, 58, 52, 3, 1, poisonDark)
 	}
 
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			i := y*w + x
-			if pixels[i].A == 0 {
-				continue
-			}
-			if hashByteXY(x, y)%7 == 0 {
-				pixels[i] = adjust(pixels[i], -12)
-			}
-		}
-	}
+	ditherPixels(pixels, w, h, 7, -12)
 	return pixels
 }
 
@@ -1338,17 +1328,7 @@ func makeBatPixels(w, h int) []color.RGBA {
 	fillEllipsePixels(pixels, w, h, cx, h-6, 14, 3, color.RGBA{R: 0, G: 0, B: 0, A: 90})
 
 	// Per-pixel dither for the pixel-art feel.
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			i := y*w + x
-			if pixels[i].A == 0 {
-				continue
-			}
-			if hashByteXY(x, y)%9 == 0 {
-				pixels[i] = adjust(pixels[i], -10)
-			}
-		}
-	}
+	ditherPixels(pixels, w, h, 9, -10)
 	return pixels
 }
 
@@ -1422,17 +1402,7 @@ func makeGoblinPixels(w, h int) []color.RGBA {
 	fillTrianglePixels(pixels, w, h, cx-2, 49, cx, 53, cx+1, 49, tooth)
 
 	// Per-pixel dither.
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			i := y*w + x
-			if pixels[i].A == 0 {
-				continue
-			}
-			if hashByteXY(x, y)%8 == 0 {
-				pixels[i] = adjust(pixels[i], -10)
-			}
-		}
-	}
+	ditherPixels(pixels, w, h, 8, -10)
 	return pixels
 }
 
@@ -1500,17 +1470,7 @@ func makeGoblinMagePixels(w, h int) []color.RGBA {
 	// Hood gold rim.
 	drawLinePixels(pixels, w, h, cx-14, 58, cx+14, 58, gold, 1)
 
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			i := y*w + x
-			if pixels[i].A == 0 {
-				continue
-			}
-			if hashByteXY(x, y)%9 == 0 {
-				pixels[i] = adjust(pixels[i], -10)
-			}
-		}
-	}
+	ditherPixels(pixels, w, h, 9, -10)
 	return pixels
 }
 
@@ -1564,17 +1524,7 @@ func makeAmoebaPixels(w, h int) []color.RGBA {
 	}
 
 	// Subtle dither (less than other sprites).
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			i := y*w + x
-			if pixels[i].A == 0 {
-				continue
-			}
-			if hashByteXY(x, y)%12 == 0 {
-				pixels[i] = adjust(pixels[i], -8)
-			}
-		}
-	}
+	ditherPixels(pixels, w, h, 12, -8)
 	return pixels
 }
 
@@ -1655,17 +1605,7 @@ func makeVenusMantrapPixels(w, h int) []color.RGBA {
 	fillEllipsePixels(pixels, w, h, cx-2, 46, 1, 1, pupil)
 
 	// Per-pixel dither.
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			i := y*w + x
-			if pixels[i].A == 0 {
-				continue
-			}
-			if hashByteXY(x, y)%9 == 0 {
-				pixels[i] = adjust(pixels[i], -10)
-			}
-		}
-	}
+	ditherPixels(pixels, w, h, 9, -10)
 	return pixels
 }
 
@@ -1742,17 +1682,7 @@ func makeCaveSpiderPixels(w, h int) []color.RGBA {
 	fillTrianglePixels(pixels, w, h, cx+5, h-32, cx+2, h-32, cx+3, h-28, fang)
 
 	// Per-pixel dither.
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			i := y*w + x
-			if pixels[i].A == 0 {
-				continue
-			}
-			if hashByteXY(x, y)%9 == 0 {
-				pixels[i] = adjust(pixels[i], -12)
-			}
-		}
-	}
+	ditherPixels(pixels, w, h, 9, -12)
 	return pixels
 }
 
@@ -1830,17 +1760,7 @@ func makeVampireBatPixels(w, h int) []color.RGBA {
 	fillEllipsePixels(pixels, w, h, cx-2, 44, 1, 2, blood)
 
 	// Per-pixel dither.
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			i := y*w + x
-			if pixels[i].A == 0 {
-				continue
-			}
-			if hashByteXY(x, y)%9 == 0 {
-				pixels[i] = adjust(pixels[i], -10)
-			}
-		}
-	}
+	ditherPixels(pixels, w, h, 9, -10)
 	return pixels
 }
 
@@ -1968,17 +1888,7 @@ func makeStoneGolemPixels(w, h int) []color.RGBA {
 	fillEllipsePixels(pixels, w, h, cx+18, 112, 4, 1, moss)
 
 	// Heavy stone-grain dither (denser) so the surface reads as rock.
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			i := y*w + x
-			if pixels[i].A == 0 {
-				continue
-			}
-			if hashByteXY(x, y)%5 == 0 {
-				pixels[i] = adjust(pixels[i], -14)
-			}
-		}
-	}
+	ditherPixels(pixels, w, h, 5, -14)
 	return pixels
 }
 
@@ -2063,17 +1973,7 @@ func makeNecromancerPixels(w, h int) []color.RGBA {
 	fillEllipsePixels(pixels, w, h, cx-22, 76, 3, 3, skullDark)
 
 	// Per-pixel dither.
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			i := y*w + x
-			if pixels[i].A == 0 {
-				continue
-			}
-			if hashByteXY(x, y)%9 == 0 {
-				pixels[i] = adjust(pixels[i], -12)
-			}
-		}
-	}
+	ditherPixels(pixels, w, h, 9, -12)
 	return pixels
 }
 
@@ -2183,17 +2083,7 @@ func makeSkeletonPixels(w, h int) []color.RGBA {
 	drawLinePixels(pixels, w, h, cx-6, 35, cx+2, 37, socket, 1)
 
 	// Per-pixel dither (denser) so bone reads as pitted.
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			i := y*w + x
-			if pixels[i].A == 0 {
-				continue
-			}
-			if hashByteXY(x, y)%7 == 0 {
-				pixels[i] = adjust(pixels[i], -12)
-			}
-		}
-	}
+	ditherPixels(pixels, w, h, 7, -12)
 	return pixels
 }
 
@@ -2313,6 +2203,22 @@ func drawLinePixels(pixels []color.RGBA, w, h, x0, y0, x1, y1 int, col color.RGB
 // hashByteXY is hashXY masked to a byte, for "% N" bucketing in pixel loops.
 func hashByteXY(x, y int) int {
 	return int(hashXY(x, y) & 0xff)
+}
+
+// ditherPixels darkens ~1/mod of the opaque pixels by delta (a per-pixel hash, NOT
+// seeded) for the pixel-art grain pass shared by the enemy sprite generators.
+func ditherPixels(pixels []color.RGBA, w, h, mod, delta int) {
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			i := y*w + x
+			if pixels[i].A == 0 {
+				continue
+			}
+			if hashByteXY(x, y)%mod == 0 {
+				pixels[i] = adjust(pixels[i], delta)
+			}
+		}
+	}
 }
 
 func jitter(c color.RGBA, x, y, amount int) color.RGBA {

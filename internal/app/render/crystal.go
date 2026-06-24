@@ -97,6 +97,12 @@ const crystalPulseHz = 3.0 / (2 * math.Pi)
 // breathe so the shine twinkles rather than pulsing in lockstep with the gem.
 const crystalGlintHz = 1.1
 
+// scaleRG scales c's R/G by f (the breathing/glint factor), pinning B and A — the
+// crystal's "ride R/G, keep the blue/alpha to match the editor marker" pattern.
+func scaleRG(c rl.Color, f float32) rl.Color {
+	return rl.NewColor(uint8(float32(c.R)*f), uint8(float32(c.G)*f), c.B, c.A)
+}
+
 // crystalColor: pulsing bright cyan while charged, dim slate while dormant.
 func crystalColor(charged bool) rl.Color {
 	if !charged {
@@ -104,13 +110,13 @@ func crystalColor(charged bool) rl.Color {
 	}
 	// Breathe brightness 0.82-1.0; modulate only R/G (blue/alpha pinned to match editor marker).
 	breathe := 0.82 + 0.18*pulse(crystalPulseHz)
-	return rl.NewColor(uint8(float32(crystalChargedBody.R)*breathe), uint8(float32(crystalChargedBody.G)*breathe), crystalChargedBody.B, crystalChargedBody.A)
+	return scaleRG(crystalChargedBody, breathe)
 }
 
 // crystalCoreColor is the bright near-white tip glint, twinkling on crystalGlintHz.
 func crystalCoreColor() rl.Color {
 	glint := 0.7 + 0.3*pulse(crystalGlintHz)
-	return rl.NewColor(uint8(float32(crystalChargedCore.R)*glint), uint8(float32(crystalChargedCore.G)*glint), crystalChargedCore.B, crystalChargedCore.A)
+	return scaleRG(crystalChargedCore, glint)
 }
 
 // crystalEdge is the faceted wire tint paired with crystalColor.

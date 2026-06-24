@@ -57,11 +57,8 @@ func drawCombatTuneOverlay(g *core.GameState, assets Resources) {
 		drawTextRightAligned(font, val, barX-8, y+3, FontTiny, textCol)
 		// Gauge: track + gilt fill + outline (same chrome as the retro sliders).
 		barY := y + 5
-		drawSmallPanel(int32(barX), int32(barY), int32(tuneBarW), 9, barTrack)
-		if fw := int32((tuneBarW - 2) * core.BattleTuneFrac(&g.BattleTuning, i)); fw > 0 {
-			rl.DrawRectangle(int32(barX)+1, int32(barY)+1, fw, 7, fadeColor(giltBright, 0.72))
-		}
-		drawSmallPanelOutline(int32(barX), int32(barY), int32(tuneBarW), 9, fadeColor(woodLight, 0.6))
+		fw := int32((tuneBarW - 2) * core.BattleTuneFrac(&g.BattleTuning, i))
+		drawIntensityGauge(int32(barX), int32(barY), int32(tuneBarW), 9, fw, fadeColor(giltBright, 0.72))
 		if sel {
 			cy := barY + 4.5
 			col := fadeColor(giltBright, 0.85)
@@ -86,7 +83,10 @@ func tuneActionLabel(i int) string {
 		return "Reset to defaults"
 	case i == core.BattleTuneDumpRow():
 		return "Dump values → " + core.BattleTuneDumpFileName
-	default:
+	case i == core.BattleTuneCloseRow():
 		return "Close"
+	default:
+		// An inserted row not wired here — surface it rather than mislabel "Close".
+		return "?"
 	}
 }
