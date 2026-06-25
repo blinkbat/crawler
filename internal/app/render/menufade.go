@@ -31,6 +31,8 @@ func menuFadeDrawer(g *core.GameState) func(*core.GameState, Resources) {
 	switch {
 	case g.MenuOpen:
 		return drawMenuOverlay
+	case g.SoundMenuOpen:
+		return drawSoundMenuOverlay
 	case g.OptionsMenuOpen:
 		return drawOptionsMenuOverlay
 	case g.ShopOpen:

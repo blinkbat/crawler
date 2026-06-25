@@ -103,6 +103,13 @@ func Run() {
 		// outside battle) so a rumble armed just before a battle ends eases off.
 		input.ApplyRumble(core.TickRumble(&state.game.Battle, dt), state.game.RumbleEnabled)
 
+		// Feed + crossfade the BGM every frame. Music plays in the adventure scene
+		// (not title/editor); inBattle swaps the explore theme for the battle theme, so
+		// entering/exiting combat crossfades between them. No-ops without a device.
+		inAdventure := state.scene == sceneAdventure
+		inBattle := inAdventure && state.game.Battle.Active()
+		audio.UpdateMusic(dt, inAdventure, inBattle)
+
 		rl.BeginDrawing()
 		// Re-read state.scene: update may have changed it this frame (the draw should
 		// follow the scene we're transitioning into, as the switch did).

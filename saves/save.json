@@ -5,8 +5,8 @@
   "playerTileZ": 24,
   "playerFacing": 0,
   "playerLevel": 10,
-  "stepCount": 108,
-  "gold": 3,
+  "stepCount": 1064,
+  "gold": 39,
   "party": [
     {
       "Class": 0,
@@ -31,21 +31,21 @@
         0,
         0
       ],
-      "Row": 1,
+      "Row": 0,
       "Col": 0,
       "HomeRow": 0,
       "HomeCol": 0,
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 4,
+      "DamagePopup": 2,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "SwapSlide": 0,
       "SwapFromRow": 0,
       "SwapFromCol": 0,
       "Defending": false,
-      "PoisonTurns": 2,
+      "PoisonTurns": 1,
       "SleepTurns": 0,
       "StunTurns": 0,
       "Ingested": false,
@@ -57,12 +57,16 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 1,
-      "XP": 15,
-      "PendingLevelUps": 0,
+      "Level": 2,
+      "XP": 17,
+      "PendingLevelUps": 3,
       "SkillPoints": 1,
-      "SkillTiers": null,
-      "TreeRanks": null,
+      "SkillTiers": {
+        "1": 0
+      },
+      "TreeRanks": {
+        "cleave": 1
+      },
       "SkillCursor": 0
     },
     {
@@ -88,7 +92,7 @@
         0,
         0
       ],
-      "Row": 0,
+      "Row": 1,
       "Col": 0,
       "HomeRow": 1,
       "HomeCol": 0,
@@ -114,12 +118,16 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 1,
-      "XP": 15,
-      "PendingLevelUps": 0,
+      "Level": 2,
+      "XP": 17,
+      "PendingLevelUps": 3,
       "SkillPoints": 1,
-      "SkillTiers": null,
-      "TreeRanks": null,
+      "SkillTiers": {
+        "8": 0
+      },
+      "TreeRanks": {
+        "smite": 1
+      },
       "SkillCursor": 0
     },
     {
@@ -171,12 +179,16 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 1,
-      "XP": 15,
-      "PendingLevelUps": 0,
+      "Level": 2,
+      "XP": 17,
+      "PendingLevelUps": 3,
       "SkillPoints": 1,
-      "SkillTiers": null,
-      "TreeRanks": null,
+      "SkillTiers": {
+        "9": 0
+      },
+      "TreeRanks": {
+        "backstab": 1
+      },
       "SkillCursor": 0
     },
     {
@@ -196,7 +208,7 @@
       "MaxMP": 10,
       "Armor": 0,
       "Equipped": [
-        0,
+        11,
         0,
         0,
         0,
@@ -228,12 +240,16 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 1,
-      "XP": 15,
-      "PendingLevelUps": 0,
+      "Level": 2,
+      "XP": 17,
+      "PendingLevelUps": 3,
       "SkillPoints": 1,
-      "SkillTiers": null,
-      "TreeRanks": null,
+      "SkillTiers": {
+        "12": 0
+      },
+      "TreeRanks": {
+        "arc-bolt": 1
+      },
       "SkillCursor": 0
     }
   ],
@@ -249,10 +265,6 @@
     {
       "Kind": 2,
       "Count": 1
-    },
-    {
-      "Kind": 11,
-      "Count": 1
     }
   ],
   "quests": [
@@ -265,7 +277,16 @@
   ],
   "bestiary": {
     "0": {
+      "kills": 11
+    },
+    "1": {
       "kills": 3
+    },
+    "2": {
+      "kills": 2
+    },
+    "3": {
+      "kills": 1
     }
   },
   "crystals": [

@@ -356,6 +356,11 @@ type GameState struct {
 	// row). DebugMenuIndex is its row cursor.
 	DebugMenuOpen  bool
 	DebugMenuIndex int
+	// SoundMenuOpen: Sound sub-submenu (music + SFX volume sliders) showing, opened
+	// from the Options menu's Sound row; SoundMenuIndex its cursor. The volumes
+	// themselves live in the audio package (persisted globally), not here.
+	SoundMenuOpen  bool
+	SoundMenuIndex int
 	// RetroMenuOpen: Retro Filters sub-submenu showing; RetroMenuIndex its cursor.
 	// RetroFilters holds per-filter 0..1 intensities the post-process pass reads;
 	// all zeros = pass skipped. Runtime preference (not in SaveData), kept across

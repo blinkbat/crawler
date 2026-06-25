@@ -102,6 +102,11 @@ func reloadCueSlot(cue Sound, assigns map[string]string) (failed bool) {
 	fileName, assigned := resolveAssignedFile(assigns, row.Canonical)
 	newSound, fromFile := readOrSynthSound(fileName, row.PCM)
 	replaceSound(&bank[cue], newSound)
+	// Keep the live SFX volume on the freshly-swapped slot (else a reloaded cue
+	// would play at full volume until the next SetSFXVolume). Effective = 0 if muted.
+	if bank[cue].Stream.Buffer != nil {
+		rl.SetSoundVolume(bank[cue], effectiveSFXVolume())
+	}
 	return !fromFile && assigned
 }
 

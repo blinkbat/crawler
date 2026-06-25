@@ -872,6 +872,7 @@ type OptionsMenuItem int
 const (
 	OptionsMenuDisplay   OptionsMenuItem = iota // Fullscreen / Windowed toggle
 	OptionsMenuVibration                        // controller rumble On / Off
+	OptionsMenuSound                            // music + SFX volume sliders (Sound submenu)
 	OptionsMenuSave                             // write the run to the save file
 	OptionsMenuRestart
 	OptionsMenuClose
@@ -879,6 +880,28 @@ const (
 
 // OptionsMenuCount is the wrap modulus for the Options submenu cursor.
 const OptionsMenuCount = int(OptionsMenuClose) + 1
+
+// SoundMenuItem enumerates the Sound submenu rows; values double as the
+// g.SoundMenuIndex cursor. The first SoundMenuSliderCount rows are the
+// Left/Right-adjustable volume sliders; the rest are actions.
+type SoundMenuItem int
+
+const (
+	SoundMenuMusic SoundMenuItem = iota // music volume slider
+	SoundMenuSFX                        // sound-effects volume slider
+	SoundMenuMute                       // master mute toggle (Confirm flips it)
+	SoundMenuClose
+)
+
+// SoundMenuCount is the wrap modulus for the Sound submenu cursor.
+const SoundMenuCount = int(SoundMenuClose) + 1
+
+// SoundMenuSliderCount is the leading run of adjustable slider rows (Music, SFX); the
+// trailing rows (Mute, Close) are Confirm-activated, not Left/Right-adjusted.
+const SoundMenuSliderCount = int(SoundMenuSFX) + 1
+
+// VolumeAdjustStep is one Left/Right nudge of a volume slider (fraction of 0..1).
+const VolumeAdjustStep = float32(0.05)
 
 // DebugMenuItem enumerates the Debug submenu rows; values double as the
 // g.DebugMenuIndex cursor.

@@ -3,6 +3,7 @@ package render
 import (
 	"fmt"
 
+	"crawler/internal/app/audio"
 	"crawler/internal/app/core"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -32,6 +33,7 @@ type optionsMenuRow struct {
 var optionsMenuRows = []optionsMenuRow{
 	{Item: core.OptionsMenuDisplay, Label: func(*core.GameState) string { return DisplayMenuRowLabel() }},
 	{Item: core.OptionsMenuVibration, Label: func(g *core.GameState) string { return "Vibration: " + onOff(g.RumbleEnabled) }},
+	{Item: core.OptionsMenuSound, Label: func(*core.GameState) string { return "Sound ▸" }},
 	{Item: core.OptionsMenuSave, Label: func(*core.GameState) string { return "Save Game" }},
 	{Item: core.OptionsMenuRestart, Label: func(*core.GameState) string { return "Restart" }},
 	{Item: core.OptionsMenuClose, Label: func(*core.GameState) string { return "Close" }},
@@ -133,6 +135,11 @@ func init() {
 	if core.RetroMenuCount != int(core.RetroFilterCount)+5 {
 		panic(fmt.Sprintf("retroMenuRowLabel switch handles RetroFilterCount+5 slots but RetroMenuCount is %d (RetroFilterCount %d)", core.RetroMenuCount, core.RetroFilterCount))
 	}
+	// drawSoundMenuOverlay draws SoundMenuSliderCount gauge rows, then Mute + Close as
+	// plain rows; assert that shape so a new Sound row trips here instead of mislabeling.
+	if core.SoundMenuCount != core.SoundMenuSliderCount+2 {
+		panic(fmt.Sprintf("Sound menu assumes SoundMenuSliderCount sliders + Mute + Close but SoundMenuCount is %d (sliders %d)", core.SoundMenuCount, core.SoundMenuSliderCount))
+	}
 }
 
 func onOff(b bool) string {
@@ -212,6 +219,61 @@ func drawRetroMenuOverlay(g *core.GameState, assets Resources) {
 		drawIntensityGauge(barX, barY, retroBarW, retroBarH, fillW, fadeColor(giltBright, 0.55+0.45*float32(v)))
 		if g.RetroMenuIndex == i {
 			// Drawn ◂ ▸ affordance — triangles, not font runes.
+			cy := float32(barY + retroBarH/2)
+			col := fadeColor(giltBright, 0.65+0.35*flick)
+			drawArrowMarker(rl.NewVector2(float32(barX)-retroArrowGap, cy), -7, 0, 6, col)
+			drawArrowMarker(rl.NewVector2(float32(barX+retroBarW)+retroArrowGap, cy), 7, 0, 6, col)
+		}
+	}
+}
+
+// soundMenuRowLabel formats one Sound submenu row: the two sliders show a percent,
+// the trailing row is Close (positional, like retroMenuRowLabel).
+func soundMenuRowLabel(i int) string {
+	switch core.SoundMenuItem(i) {
+	case core.SoundMenuMusic:
+		return fmt.Sprintf("Music: %.0f%%", audio.MusicVolume()*100)
+	case core.SoundMenuSFX:
+		return fmt.Sprintf("SFX: %.0f%%", audio.SFXVolume()*100)
+	case core.SoundMenuMute:
+		return "Mute: " + onOff(audio.Muted())
+	default:
+		return "Close"
+	}
+}
+
+// soundMenuRowValue is the 0..1 gauge fill for slider row i (music / SFX volume).
+func soundMenuRowValue(i int) float32 {
+	switch core.SoundMenuItem(i) {
+	case core.SoundMenuMusic:
+		return audio.MusicVolume()
+	case core.SoundMenuSFX:
+		return audio.SFXVolume()
+	}
+	return 0
+}
+
+// drawSoundMenuOverlay paints the Sound submenu: a Music + SFX volume slider (gauge +
+// ◂▸ adjust arrows on the cursored row) then Close. Reuses the Retro Filters slider
+// chrome; reads the live volumes from the audio package.
+func drawSoundMenuOverlay(g *core.GameState, assets Resources) {
+	panelX, panelY := drawTitledMenuCard(assets, "SOUND", pauseMenuPanelW, core.SoundMenuCount,
+		func(i int) string { return soundMenuRowLabel(i) },
+		func(i int) bool { return g.SoundMenuIndex == i })
+
+	rowX := panelX + pauseMenuRowInsetX
+	barX := rowX + menuRowInnerW(pauseMenuPanelW) - retroBarW - 14
+	flick := candleFlicker()
+	for i := 0; i < core.SoundMenuSliderCount; i++ {
+		rowTextY := menuRowTop(panelY, i)
+		barY := rowTextY + retroBarTextDY - retroBarH/2
+		v := soundMenuRowValue(i)
+		fillW := int32(0)
+		if v > 0 {
+			fillW = int32(float32(retroBarW-2) * v)
+		}
+		drawIntensityGauge(barX, barY, retroBarW, retroBarH, fillW, fadeColor(giltBright, 0.55+0.45*v))
+		if g.SoundMenuIndex == i {
 			cy := float32(barY + retroBarH/2)
 			col := fadeColor(giltBright, 0.65+0.35*flick)
 			drawArrowMarker(rl.NewVector2(float32(barX)-retroArrowGap, cy), -7, 0, 6, col)

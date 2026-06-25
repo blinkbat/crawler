@@ -68,6 +68,9 @@ func Update(g *core.GameState) {
 	case core.ModalOptionsMenu:
 		updateOptionsMenu(g)
 		return
+	case core.ModalSoundMenu:
+		updateSoundMenu(g)
+		return
 	case core.ModalPauseMenu:
 		updateMenu(g)
 		return
@@ -247,6 +250,8 @@ func updateOptionsMenu(g *core.GameState) {
 			render.ToggleDisplayMode()
 		case core.OptionsMenuVibration:
 			g.RumbleEnabled = !g.RumbleEnabled
+		case core.OptionsMenuSound:
+			openSoundMenu(g)
 		case core.OptionsMenuSave:
 			saveGame(g)
 		case core.OptionsMenuRestart:
@@ -257,6 +262,40 @@ func updateOptionsMenu(g *core.GameState) {
 			panic(fmt.Sprintf("updateOptionsMenu: no handler for OptionsMenuItem %d", item))
 		}
 	})
+}
+
+// openSoundMenu swaps the Options menu for the Sound submenu (music + SFX sliders).
+func openSoundMenu(g *core.GameState) {
+	openSubmenu(&g.OptionsMenuOpen, &g.SoundMenuOpen, &g.SoundMenuIndex)
+}
+
+// updateSoundMenu drives the Sound submenu: two Left/Right volume sliders (Music,
+// SFX) then Close. Each nudge applies live (audible at once via the audio package);
+// the volumes persist once on CLOSE (Back or the Close row), not per-nudge, so a
+// held adjust isn't a disk thrash.
+func updateSoundMenu(g *core.GameState) {
+	wasOpen := g.SoundMenuOpen
+	updateSliderLeafMenu(&g.SoundMenuOpen, &g.SoundMenuIndex, core.SoundMenuCount, core.SoundMenuSliderCount,
+		func(item int) {
+			switch core.SoundMenuItem(item) {
+			case core.SoundMenuMute:
+				audio.ToggleMute()
+			case core.SoundMenuClose:
+				g.SoundMenuOpen = false
+			}
+		},
+		func(row, delta int) {
+			step := float32(delta) * core.VolumeAdjustStep
+			switch core.SoundMenuItem(row) {
+			case core.SoundMenuMusic:
+				audio.SetMusicVolume(audio.MusicVolume() + step)
+			case core.SoundMenuSFX:
+				audio.SetSFXVolume(audio.SFXVolume() + step)
+			}
+		})
+	if wasOpen && !g.SoundMenuOpen {
+		audio.SaveVolumeSettings() // persist on close (Back-out or Close row)
+	}
 }
 
 // openDebugMenu swaps the pause menu for the Debug submenu. The master "Debug

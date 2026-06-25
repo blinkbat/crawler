@@ -329,6 +329,7 @@ const (
 	ModalNone ModalKind = iota
 	ModalPauseMenu
 	ModalOptionsMenu
+	ModalSoundMenu
 	ModalDebugMenu
 	ModalRetroMenu
 	ModalCombatTune
@@ -379,6 +380,10 @@ func ActiveModal(g *GameState) ModalKind {
 		return ModalWipeMenu
 	case g.DebugMenuOpen:
 		return ModalDebugMenu
+	case g.SoundMenuOpen:
+		// Child of the Options menu — above it so a stray double-open can't let the
+		// parent shadow the child's input.
+		return ModalSoundMenu
 	case g.OptionsMenuOpen:
 		return ModalOptionsMenu
 	case g.MenuOpen:

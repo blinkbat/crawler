@@ -167,6 +167,12 @@ func Init() {
 	// assigned .wav) — no separate ReloadUserAssignments pass at boot. The
 	// editor still calls ReloadUserAssignments on a mid-session change.
 	loadBank()
+	// Volume settings + streamed BGM: load persisted volumes, push SFX volume onto
+	// the freshly-built bank, then start the (silent) looping music — UpdateMusic
+	// fades it in once exploration begins.
+	loadVolumeSettings()
+	applySFXVolume()
+	startMusic()
 	ready = true
 }
 
@@ -175,6 +181,7 @@ func Close() {
 	if !ready {
 		return
 	}
+	stopMusic()
 	unloadBank()
 	unloadPreviewRing()
 	rl.CloseAudioDevice()

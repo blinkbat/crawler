@@ -161,6 +161,7 @@ func NewGameState(area AreaDefinition) GameState {
 func CloseTransitionOverlays(g *GameState) {
 	g.MenuOpen = false
 	g.OptionsMenuOpen = false
+	g.SoundMenuOpen = false
 	g.DebugMenuOpen = false
 	g.RetroMenuOpen = false
 	g.CombatTuneOpen = false

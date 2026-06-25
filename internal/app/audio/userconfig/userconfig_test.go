@@ -23,6 +23,31 @@ func withWorkingDir(t *testing.T, dir string, fn func()) {
 	fn()
 }
 
+// TestVolumesRoundTrip: saved volumes reload exactly; a missing file falls back to
+// defaults; and out-of-range values clamp to [0,1] on save.
+func TestVolumesRoundTrip(t *testing.T) {
+	withWorkingDir(t, t.TempDir(), func() {
+		// No file yet → defaults, mute off.
+		if m, s, mute := LoadVolumes(); m != DefaultMusicVolume || s != DefaultSFXVolume || mute {
+			t.Fatalf("missing file should yield defaults+unmuted, got music=%v sfx=%v mute=%v", m, s, mute)
+		}
+		// Round-trip a normal triple (muted).
+		if err := SaveVolumes(0.4, 0.65, true); err != nil {
+			t.Fatalf("SaveVolumes: %v", err)
+		}
+		if m, s, mute := LoadVolumes(); m != 0.4 || s != 0.65 || !mute {
+			t.Fatalf("round-trip mismatch: music=%v sfx=%v mute=%v, want 0.4 / 0.65 / true", m, s, mute)
+		}
+		// Out-of-range clamps on save; mute back off.
+		if err := SaveVolumes(1.8, -0.3, false); err != nil {
+			t.Fatalf("SaveVolumes(clamp): %v", err)
+		}
+		if m, s, mute := LoadVolumes(); m != 1 || s != 0 || mute {
+			t.Fatalf("clamp mismatch: music=%v sfx=%v mute=%v, want 1 / 0 / false", m, s, mute)
+		}
+	})
+}
+
 // TestSanitizeName freezes the filename contract (lowercase ASCII/digits/_/-).
 func TestSanitizeName(t *testing.T) {
 	cases := []struct {

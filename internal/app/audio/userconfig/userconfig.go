@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -24,6 +25,77 @@ const AssignmentFile = "assignments.txt"
 // SoundsDir resolves the on-disk sounds folder via core.ResolveAssetDir.
 func SoundsDir() string {
 	return core.ResolveAssetDir(SoundsDirName)
+}
+
+// MusicDirName is the folder streamed-music tracks live in (e.g. the exploration
+// BGM); MusicDir resolves it the same cwd-then-exe way as SoundsDir.
+const MusicDirName = "maps/music"
+
+func MusicDir() string {
+	return core.ResolveAssetDir(MusicDirName)
+}
+
+// MusicTrackPath returns the on-disk path for a named music file (filename incl.
+// extension, e.g. "bg_explore.ogg") — no existence check.
+func MusicTrackPath(filename string) string {
+	return filepath.Join(MusicDir(), filename)
+}
+
+// VolumesFile persists the player's music + SFX volume (0..1) so they survive a
+// restart — global audio settings, NOT per-save. Two "key=value" lines; a missing
+// or unparsable file falls back to the defaults below.
+const VolumesFile = "volumes.txt"
+
+// Default music/SFX volumes for a first run (no volumes.txt yet). Music sits well
+// below SFX — the BGM is a bed, not a foreground element.
+const (
+	DefaultMusicVolume = float32(0.4)
+	DefaultSFXVolume   = float32(0.8)
+)
+
+// LoadVolumes reads maps/sounds/volumes.txt, returning the saved music + SFX volumes
+// (clamped to [0,1]) and the master mute flag. Any missing key keeps its default, so a
+// partial or absent file is safe (mute defaults off).
+func LoadVolumes() (music, sfx float32, muted bool) {
+	music, sfx = DefaultMusicVolume, DefaultSFXVolume
+	data, err := os.ReadFile(filepath.Join(SoundsDir(), VolumesFile))
+	if err != nil {
+		return music, sfx, false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		key, val, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok {
+			continue
+		}
+		key, val = strings.TrimSpace(key), strings.TrimSpace(val)
+		if key == "mute" {
+			muted, _ = strconv.ParseBool(val) // unparsable → false
+			continue
+		}
+		f, err := strconv.ParseFloat(val, 32)
+		if err != nil {
+			continue
+		}
+		v := core.Clamp(float32(f), 0, 1)
+		switch key {
+		case "music":
+			music = v
+		case "sfx":
+			sfx = v
+		}
+	}
+	return music, sfx, muted
+}
+
+// SaveVolumes writes music + SFX volume + mute to maps/sounds/volumes.txt (creating
+// the dir if needed). Volumes clamped to [0,1] so a stray value can't persist out of range.
+func SaveVolumes(music, sfx float32, muted bool) error {
+	dir := SoundsDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	body := fmt.Sprintf("music=%.3f\nsfx=%.3f\nmute=%t\n", core.Clamp(music, 0, 1), core.Clamp(sfx, 0, 1), muted)
+	return os.WriteFile(filepath.Join(dir, VolumesFile), []byte(body), 0o644)
 }
 
 // SanitizeName normalizes a name into a safe filename stem; empty stays empty

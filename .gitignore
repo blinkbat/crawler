@@ -1,5 +1,6 @@
 .codex-build/
 .gotmp/
+dist/
 *.exe
 # raylib.dll lives at the repo root for runtime use; copies under internal/
 # are test fixtures (raylib's init loads the DLL from the CWD, which is the
