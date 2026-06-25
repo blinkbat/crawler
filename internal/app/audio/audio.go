@@ -20,6 +20,7 @@ import (
 	"crawler/internal/app/audio/userconfig"
 	"crawler/internal/app/audio/wavsynth"
 	"fmt"
+	"math/rand"
 	"os"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -40,6 +41,9 @@ const (
 	SoundItemGet                 // a loot row revealed on the spoils screen
 	SoundXPTick                  // subtle blip as the spoils XP bars count up
 	SoundCrystal                 // touched a charged healing crystal — bright cyan shimmer
+	SoundFootstepA               // walk-step variant — PlayFootstep picks one at random
+	SoundFootstepB               // walk-step variant
+	SoundFootstepC               // walk-step variant
 	soundCount
 )
 
@@ -95,6 +99,15 @@ var soundCues = [soundCount]soundCue{
 	// an octave above Victory's chord so it reads as crystalline, not a win fanfare.
 	SoundCrystal: {Display: "Crystal", Canonical: "crystal",
 		PCM: func() []int16 { return wavsynth.SynthChord(0.6, []float64{1047, 1319, 1568, 2093}, 0.16) }},
+	// Footsteps — soft, low, noise-heavy thuds; quiet by design (~half a combat
+	// cue) so a held walk doesn't fatigue. Three variants differing in pitch/length
+	// give the base variation; PlayFootstep adds a random variant pick + pitch jitter.
+	SoundFootstepA: {Display: "Footstep A", Canonical: "footstep_a",
+		PCM: func() []int16 { return wavsynth.SynthClick(0.060, 135, 0.60, 0.85, 0.11) }},
+	SoundFootstepB: {Display: "Footstep B", Canonical: "footstep_b",
+		PCM: func() []int16 { return wavsynth.SynthClick(0.070, 160, 0.65, 0.90, 0.10) }},
+	SoundFootstepC: {Display: "Footstep C", Canonical: "footstep_c",
+		PCM: func() []int16 { return wavsynth.SynthClick(0.050, 115, 0.55, 0.80, 0.12) }},
 }
 
 // A missing soundCues row is the zero value (nil PCM), not a compile
@@ -236,6 +249,31 @@ func Play(id Sound) {
 		return
 	}
 	rl.PlaySound(bank[id])
+}
+
+// footstepCues are the interchangeable walk-step variants PlayFootstep draws from.
+var footstepCues = [...]Sound{SoundFootstepA, SoundFootstepB, SoundFootstepC}
+
+// footstepRng drives footstep variant + pitch-jitter selection. Fixed seed so a
+// run is deterministic (matches wavsynth's fixed-seed convention); like the rest
+// of the bank it MUST be touched only on the single game goroutine (no lock).
+var footstepRng = rand.New(rand.NewSource(1))
+
+// PlayFootstep fires a random walk-step variant at a slightly randomized pitch, so
+// a held walk varies instead of looping like a jackhammer. No-op if not ready.
+// Doesn't route through Play: it sets pitch on the chosen slot before firing.
+func PlayFootstep() {
+	if !ready {
+		return
+	}
+	snd := bank[footstepCues[footstepRng.Intn(len(footstepCues))]]
+	if snd.Stream.Buffer == nil {
+		return
+	}
+	// ±8% pitch jitter on top of the per-variant timbre. Persists on the slot, but
+	// every PlayFootstep re-sets it, and nothing else reads these slots' pitch.
+	rl.SetSoundPitch(snd, 1+(footstepRng.Float32()*2-1)*0.08)
+	rl.PlaySound(snd)
 }
 
 // PlayResult fires SoundInputGreat on ok, the SoundInputMiss buzz otherwise.

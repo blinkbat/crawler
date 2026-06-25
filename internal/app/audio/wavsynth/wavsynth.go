@@ -339,6 +339,12 @@ func SynthSweep(duration, startHz, endHz, volume, attack, release float64) []int
 // SynthChord sums sines at the given frequencies into one note under a bell
 // envelope.
 func SynthChord(duration float64, freqs []float64, volume float64) []int16 {
+	// NaN slips past `<= 0` (all NaN comparisons are false) and int(NaN) is
+	// unspecified — it can land large-positive and dodge the samples<=0 guard,
+	// blowing up the make below. Pin it first (mirrors SynthShapeParams).
+	if math.IsNaN(duration) {
+		return nil
+	}
 	samples := int(duration * SampleRate)
 	if samples <= 0 {
 		// No time → no samples. (A non-positive duration must NOT fall through to

@@ -78,7 +78,9 @@ func updateHotkeys(s *State) {
 		// A key pressed this frame while Alt held = a chord, not a tap. Drain the
 		// queue.
 		s.altChordUsed = true
-		for rl.GetKeyPressed() != 0 {
+		// raylib's key-press queue is bounded (MAX_KEY_PRESSED_QUEUE == 16); cap the
+		// drain anyway so a backend that never returns 0 can't wedge this frame.
+		for i := 0; i < 64 && rl.GetKeyPressed() != 0; i++ {
 		}
 	}
 	if altReleased && !s.altChordUsed {
@@ -1342,8 +1344,8 @@ func validateModalState(s *State) {
 			closeModal(s)
 		}
 	case modalDialogTriggerList:
-		if s.modalDialogTriggerIdx >= len(s.area.Triggers) {
-			s.modalDialogTriggerIdx = -1 // list always valid; just guard a stale index
+		if s.modalDialogTriggerIdx < -1 || s.modalDialogTriggerIdx >= len(s.area.Triggers) {
+			s.modalDialogTriggerIdx = -1 // list always valid; -1 = no selection (see dialog.go currentTrigger)
 		}
 	case modalDialogTriggerEdit:
 		if !dialogTriggerInRange(s) {

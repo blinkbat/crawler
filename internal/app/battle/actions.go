@@ -629,6 +629,11 @@ func applyStatusRoll(rng *rand.Rand, counter *int, defeated bool, chance float64
 func refundSkillMP(g *core.GameState, refundSkill core.SkillID) {
 	if refundSkill != core.SkillNone && !g.DebugAllSkills {
 		if cost := core.SkillCost(refundSkill); cost > 0 {
+			// Mirror chargeMP's setup-side guard: bail if the caster's slot went out
+			// of range between confirm and apply rather than panicking on the index.
+			if !partyIndexValid(g, g.Battle.CurrentParty) {
+				return
+			}
 			actor := &g.Party[g.Battle.CurrentParty]
 			core.GainUpTo(&actor.MP, actor.MaxMP, cost)
 		}
@@ -1193,7 +1198,9 @@ func applyMassMend(g *core.GameState, quality int) bool {
 	if healed == 0 {
 		setBattleMessage(g, qualityLine(quality, actor.Name, "'s Mass Mend finds no wounds."))
 	} else {
-		setBattleMessageCat(g, qualityLine(quality, actor.Name, " mends %d allies for %d each.", healed, heal), core.LogHeal)
+		// No "for %d each": HealWholeParty clamps each member at MaxHP, so a single
+		// per-ally figure would overstate a near-full member's actual gain.
+		setBattleMessageCat(g, qualityLine(quality, actor.Name, " mends %d allies.", healed), core.LogHeal)
 	}
 	finishActorTurn(g)
 	return true

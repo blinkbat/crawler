@@ -702,6 +702,8 @@ func startStep(p *core.Player, g *core.GameState, forward int) {
 		battle.Start(g, engagedPack, fleeFromX, fleeFromZ, core.EngageBack)
 		return
 	}
+	// A clean walking step (no battle/ambush consumed it above) — play a footstep.
+	audio.PlayFootstep()
 	p.Anim = core.Animation{
 		Kind:     core.AnimStep,
 		Duration: core.StepDuration,
