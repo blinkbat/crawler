@@ -626,12 +626,15 @@ func spawnIngest(o rl.Vector3) {
 	}
 }
 
+// confuseViolet is the odd-index tone of the Confuse swirl, paired with giltBright.
+var confuseViolet = rl.NewColor(196, 132, 220, 255)
+
 // pickConfuseTone alternates two tones for the Confuse swirl by even/odd index (no RNG roll).
 func pickConfuseTone(i int) color.RGBA {
 	if i&1 == 0 {
 		return giltBright
 	}
-	return rl.NewColor(196, 132, 220, 255)
+	return confuseViolet
 }
 
 // pushRing seeds one expanding ground-aligned ring — the shockwave companion to impact patterns.

@@ -50,34 +50,7 @@ func DrawPartyPreview(rect rl.Rectangle, assets Resources, class core.PartyClass
 	if previewTex.ID != 0 {
 		v.texture = previewTex
 	}
-	w, h := int32(rect.Width), int32(rect.Height)
-	if w <= 0 || h <= 0 {
-		return
-	}
-	if !partyPreviewRT.ensure(w, h) {
-		return
-	}
-	cam := zoomedPreviewCamera(zoom)
-
-	partyPreviewRT.beginVisualizerScene(cam, visualizerGroundSize, true)
-
-	place := resolveBillboardPlacement(cam, foeAnchor, &v)
-	if v.shadowRadius > 0 {
-		drawGroundShadow(place.shadowX, place.shadowZ, v.shadowRadius)
-	}
-	drawFriendlyTargetMarker(cam, place.chevron, v.effectiveMarkerScale())
-	drawTextureBillboard(cam, v.texture, place.sprite, v.size, v.resolveTint())
-
-	// Authoring gizmos for the anchor sliders (orange = particle origin, cyan = hit-glyph anchor).
-	// Layout-tab only; the Asset tab hides them so the bare sprite reads clean.
-	if showGizmos {
-		drawPreviewGizmos(cam, v)
-	}
-
-	rl.EndMode3D()
-	rl.EndTextureMode()
-
-	partyPreviewRT.blit(rect)
+	drawVisualizerPreview(rect, &partyPreviewRT, v, zoom, foeAnchor, showGizmos, drawFriendlyTargetMarker)
 }
 
 // ClosePartyPreview unloads the cached off-screen texture when the Party

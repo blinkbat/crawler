@@ -120,7 +120,7 @@ func statusTurnDigit(n int) string {
 
 // partyNamePlusLabels memoizes the "<Name> +" badge so the ribbon path is a map
 // lookup, not a concat.
-var partyNamePlusLabels = make(map[string]string, 8)
+var partyNamePlusLabels = make(map[string]string, core.PartyMemberCount)
 
 // partyNameSpaceWidth measures "<Name> " at FontBody (positions the "+" overlay).
 var partyNameSpaceWidth measureCache
@@ -136,7 +136,7 @@ func partyNamePlusBadge(name string) string {
 
 // partyHPBarKeys memoizes the "hp:<Name>" bar-ghost key so drawBarLive's
 // per-frame ribbon path is a map lookup, not a concat.
-var partyHPBarKeys = make(map[string]string, 8)
+var partyHPBarKeys = make(map[string]string, core.PartyMemberCount)
 
 func partyHPBarKey(name string) string {
 	if v, ok := partyHPBarKeys[name]; ok {

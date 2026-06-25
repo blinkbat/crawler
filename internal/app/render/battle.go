@@ -99,8 +99,8 @@ func init() {
 
 // rosterBackBuf / rosterFrontBuf split the visible slots into ranks (single-threaded draw).
 var (
-	rosterBackBuf  = make([]int, 0, 8)
-	rosterFrontBuf = make([]int, 0, 8)
+	rosterBackBuf  = make([]int, 0, core.EnemyBackRowCap)
+	rosterFrontBuf = make([]int, 0, core.EnemyFrontRowCap)
 )
 
 // drawEnemyRoster shows the active pack at the top of the screen, laid out as a
@@ -783,22 +783,37 @@ func drawActionIconFlee(cx, cy, r float32, col rl.Color) {
 	chevron(cx+r*0.5, col)                  // leading
 }
 
+// drawEmptyMenuRow draws the "(no skills)" / "(no items)" placeholder for an empty
+// action submenu.
+func drawEmptyMenuRow(font rl.Font, x, y int32, label string) {
+	drawTextWithShadow(font, label, float32(x), float32(y), FontSmall, textDim)
+}
+
+// drawMenuList lays out n action rows from y down at uiRowPitch with selIdx
+// highlighted; row(i) yields the label, right-aligned suffix, and disabled flag.
+func drawMenuList(font rl.Font, x, y, rightX int32, n, selIdx int, row func(i int) (label, suffix string, disabled bool)) {
+	for i := 0; i < n; i++ {
+		label, suffix, disabled := row(i)
+		drawActionRow(font, x, y+int32(i)*uiRowPitch, rightX, label, suffix, selIdx == i, disabled)
+	}
+}
+
 // drawSkillMenuList renders the skill submenu (one row per learned skill, MP cost right).
 // Reads the prebuilt g.Battle.SkillMenuList.
 func drawSkillMenuList(g *core.GameState, assets Resources, x, y, rightX int32) {
 	skills := g.Battle.SkillMenuList
 	if len(skills) == 0 {
-		drawTextWithShadow(assets.hudFont, "(no skills)", float32(x), float32(y), FontSmall, textDim)
+		drawEmptyMenuRow(assets.hudFont, x, y, "(no skills)")
 		return
 	}
-	for i, s := range skills {
-		label := core.SkillName(s)
+	drawMenuList(assets.hudFont, x, y, rightX, len(skills), g.Battle.SkillMenuIndex, func(i int) (string, string, bool) {
+		s := skills[i]
 		suffix := ""
 		if cost := core.SkillCost(s); cost > 0 {
 			suffix = skillCostMPLabel(cost)
 		}
-		drawActionRow(assets.hudFont, x, y+int32(i)*uiRowPitch, rightX, label, suffix, g.Battle.SkillMenuIndex == i, skillUnusable(g, g.Battle.CurrentParty, s))
-	}
+		return core.SkillName(s), suffix, skillUnusable(g, g.Battle.CurrentParty, s)
+	})
 }
 
 // skillUnusable mirrors updateSkillMenu's refusal gates (MP cost + back-row melee
@@ -818,20 +833,29 @@ func skillUnusable(g *core.GameState, idx int, skill core.SkillID) bool {
 func drawItemMenuList(g *core.GameState, assets Resources, x, y, rightX int32) {
 	living := g.Battle.ItemMenuList
 	if len(living) == 0 {
-		drawTextWithShadow(assets.hudFont, "(no items)", float32(x), float32(y), FontSmall, textDim)
+		drawEmptyMenuRow(assets.hudFont, x, y, "(no items)")
 		return
 	}
-	for i, slot := range living {
-		def := core.ItemInfo(slot.Kind)
-		label := def.Name
-		suffix := panelsItemCountLabel(slot.Count)
-		drawActionRow(assets.hudFont, x, y+int32(i)*uiRowPitch, rightX, label, suffix, g.Battle.ItemMenuIndex == i, false)
-	}
+	drawMenuList(assets.hudFont, x, y, rightX, len(living), g.Battle.ItemMenuIndex, func(i int) (string, string, bool) {
+		def := core.ItemInfo(living[i].Kind)
+		return def.Name, panelsItemCountLabel(living[i].Count), false
+	})
 }
 
 // actionRowPlateInsetX is how far the selection plate bleeds left past the text origin,
 // so the highlight reaches the content edge regardless of where the label starts.
 const actionRowPlateInsetX = int32(8)
+
+// actionRowPlateLift seats the plate above the text baseline so the row's glyphs sit
+// centered within it.
+const actionRowPlateLift = int32(4)
+
+// drawGlassRowPlate fills an unselected action-row plate: a glassDeep pane under a
+// woodMid outline, both at the given alphas (disabled rows go fainter).
+func drawGlassRowPlate(x, y, w int32, fillAlpha, outlineAlpha float32) {
+	drawGlassPane(x, y, w, uiRowH, fadeColor(glassDeep, fillAlpha))
+	drawSmallPanelOutline(x, y, w, uiRowH, fadeColor(woodMid, outlineAlpha))
+}
 
 // actionMenuListTopGap is extra vertical air between the member-name header and the
 // first action row, so the list doesn't crowd the name above it.
@@ -843,15 +867,14 @@ const actionMenuListTopGap = int32(10)
 func drawActionRow(font rl.Font, x, y, rightX int32, label, suffix string, selected, disabled bool) {
 	plateX := x - actionRowPlateInsetX
 	plateW := rightX - plateX
+	py := y - actionRowPlateLift
 	switch {
 	case selected:
-		DrawSelectedRowI(plateX, y-4, plateW, uiRowH)
+		DrawSelectedRowI(plateX, py, plateW, uiRowH)
 	case disabled:
-		drawGlassPane(plateX, y-4, plateW, uiRowH, fadeColor(glassDeep, 0.3))
-		drawSmallPanelOutline(plateX, y-4, plateW, uiRowH, fadeColor(woodMid, 0.25))
+		drawGlassRowPlate(plateX, py, plateW, 0.3, 0.25)
 	default:
-		drawGlassPane(plateX, y-4, plateW, uiRowH, fadeColor(glassDeep, 0.5))
-		drawSmallPanelOutline(plateX, y-4, plateW, uiRowH, fadeColor(woodMid, 0.45))
+		drawGlassRowPlate(plateX, py, plateW, 0.5, 0.45)
 	}
 	labelCol, suffixCol := textPrimary, textLabel
 	if disabled {

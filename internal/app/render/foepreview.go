@@ -180,39 +180,41 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 	if previewTex.ID != 0 {
 		v.texture = previewTex
 	}
+	// Foot-anchor the sprite + cursor exactly like drawBattlePack (feet on FoeFloorY,
+	// not floating at the formation center), so the preview matches battle grounding.
+	// Gizmos stay at foeAnchor — the battle VFX origin (formation center).
+	spriteAnchor := rl.NewVector3(foeAnchor.X, core.DefaultBattleTuning().FoeFloorY+v.size.Y/2, foeAnchor.Z)
+	drawVisualizerPreview(rect, &foePreviewRT, v, zoom, spriteAnchor, showGizmos, drawTargetChevron)
+}
+
+// drawVisualizerPreview renders the resolved visual v into rect through rt with the
+// shared diorama sequence (camera, ground, shadow, cursor, sprite, gizmos, blit).
+// anchor positions the sprite + cursor; drawMarker paints the target cursor (the
+// party/foe wrappers differ only in lookup, RT, anchor, and friendly-vs-hostile cursor).
+func drawVisualizerPreview(rect rl.Rectangle, rt *previewRT, v enemyVisual, zoom float32, anchor rl.Vector3, showGizmos bool, drawMarker func(cam rl.Camera3D, at rl.Vector3, scale float32)) {
 	w, h := int32(rect.Width), int32(rect.Height)
 	if w <= 0 || h <= 0 {
 		return
 	}
-	if !foePreviewRT.ensure(w, h) {
+	if !rt.ensure(w, h) {
 		return
 	}
 	cam := zoomedPreviewCamera(zoom)
-
-	foePreviewRT.beginVisualizerScene(cam, visualizerGroundSize, true)
-
-	// Foot-anchor the sprite + cursor exactly like drawBattlePack (feet on FoeFloorY,
-	// not floating at the formation center), so the preview matches battle grounding.
-	// Gizmos below stay at foeAnchor — the battle VFX origin (formation center).
-	spriteAnchor := rl.NewVector3(foeAnchor.X, core.DefaultBattleTuning().FoeFloorY+v.size.Y/2, foeAnchor.Z)
-	place := resolveBillboardPlacement(cam, spriteAnchor, &v)
+	rt.beginVisualizerScene(cam, visualizerGroundSize, true)
+	place := resolveBillboardPlacement(cam, anchor, &v)
 	if v.shadowRadius > 0 {
 		drawGroundShadow(place.shadowX, place.shadowZ, v.shadowRadius)
 	}
-	drawTargetChevron(cam, place.chevron, v.effectiveMarkerScale())
+	drawMarker(cam, place.chevron, v.effectiveMarkerScale())
 	drawTextureBillboard(cam, v.texture, place.sprite, v.size, v.resolveTint())
-
-	// Layout-tab authoring gizmos (Asset tab hides them). Anchored at foeAnchor,
-	// NOT place.base, to match the battle VFX origin (resolveAnchor uses the
-	// pre-depthOffset formation center). See drawPreviewGizmos.
+	// Authoring gizmos (Layout tab only; Asset tab hides them). drawPreviewGizmos
+	// anchors at foeAnchor — the battle VFX origin — not place.base.
 	if showGizmos {
 		drawPreviewGizmos(cam, v)
 	}
-
 	rl.EndMode3D()
 	rl.EndTextureMode()
-
-	foePreviewRT.blit(rect)
+	rt.blit(rect)
 }
 
 // drawPreviewGizmos paints the three authoring anchor gizmos (particle = orange,

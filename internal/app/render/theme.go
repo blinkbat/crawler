@@ -440,8 +440,11 @@ const (
 	// modalListRowH is the shared row height for the simple modal list overlays
 	// (dialog choices, chest items, shop rows). Taller than uiRowH(32) — these
 	// FontBody rows want a bit more air than the dense combat menus.
-	modalListRowH  = int32(34)
-	uiFooterMargin = int32(14) // visual gap below a footer hint's glyphs/text to the card bottom edge
+	modalListRowH = int32(34)
+	// modalValueInsetX pulls a right-aligned value/price column in from the card's
+	// right content edge (shop prices, level-up stat values).
+	modalValueInsetX = int32(12)
+	uiFooterMargin   = int32(14) // visual gap below a footer hint's glyphs/text to the card bottom edge
 	// actionMenuHintMinH is the height floor below which the action menu drops its
 	// hint footer (it would collide with rows). Above the hudPanelMinH floor.
 	actionMenuHintMinH = int32(260)
@@ -633,6 +636,11 @@ func drawDustMotes(screenW, screenH int32, flick float32) {
 	}
 }
 
+// BackdropTopColor is the candlelit backdrop's top gradient stop. Exported so the
+// title's load-bearing ClearBackground uses the SAME value the gradient overdraws,
+// instead of re-spelling the literal in the title package.
+var BackdropTopColor = rl.NewColor(8, 10, 20, 255)
+
 // DrawCandlelitBackdrop paints a full-screen candlelit background (gradient +
 // radial pool + dust motes + grain) for the title screen. Exported for the title
 // package.
@@ -641,7 +649,7 @@ func DrawCandlelitBackdrop(screenW, screenH int32) {
 		return
 	}
 	rl.DrawRectangleGradientV(0, 0, screenW, screenH,
-		rl.NewColor(8, 10, 20, 255), rl.NewColor(22, 15, 12, 255))
+		BackdropTopColor, rl.NewColor(22, 15, 12, 255))
 	flick := candleFlicker()
 	poolY := int32(float32(screenH) * 0.34)
 	poolR := float32(min(int(screenW), int(screenH))) * 0.72

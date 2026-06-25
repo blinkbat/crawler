@@ -743,8 +743,11 @@ func RestorePackFull(pack *Pack) {
 	ShuntEnemyFormation(pack.Members)
 }
 
-func EnemySingularNoun(enemy Enemy) string {
-	return enemyGoverningDef(&enemy).SingularNoun
+// EnemySingularNoun reads the bare singular noun ("rat") via enemyGoverningDef
+// without materializing the whole struct — matches its EnemyName/EnemyDisplayName
+// siblings (all *Enemy) so the log path never copies the ~200-byte Enemy.
+func EnemySingularNoun(e *Enemy) string {
+	return enemyGoverningDef(e).SingularNoun
 }
 
 // These battle-string builders take *GameState to avoid copying the whole

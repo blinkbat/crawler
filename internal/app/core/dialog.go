@@ -36,6 +36,12 @@ const (
 	DialogActionEvent DialogActionKind = "event"
 )
 
+// DialogActionKinds returns the non-empty end-action kinds in canonical order — the
+// source the editor's action picker asserts coverage against.
+func DialogActionKinds() []DialogActionKind {
+	return []DialogActionKind{DialogActionQuest, DialogActionEvent}
+}
+
 // DialogAction is the optional effect a node/choice fires on resolve (quest add/complete, or event seam).
 type DialogAction struct {
 	Kind    DialogActionKind `json:"kind,omitempty"`

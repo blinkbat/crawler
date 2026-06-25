@@ -10,19 +10,19 @@ import (
 
 // Level-up modal layout. Header/row offsets are relative to the card; column/baseline offsets to each row's origin.
 const (
-	levelUpHeaderX    = hudContentInsetX // header text inset from card left (shared HUD content gutter)
-	levelUpHeaderY    = int32(46)        // primary readout baseline from card top
-	levelUpHeaderSubY = int32(76)        // skill-point reminder baseline from card top
-	levelUpRowTop     = int32(112)       // first stat row's top from card top
-	levelUpRowH       = int32(64)        // per-stat row height
-	levelUpRowX       = modalGutterWide  // row inset from card left (margin 2× this); large screen-relative card wants more side air than modalContentInsetX
-	levelUpIconX      = float32(16)      // stat sigil x from row left
-	levelUpIconY      = float32(24)      // stat sigil y from row top
-	levelUpLabelX     = int32(44)        // label x from row left
-	levelUpLabelY     = int32(6)         // label / value baseline y from row top
-	levelUpSubX       = int32(96)        // sub-text x from row left
-	levelUpSubY       = int32(36)        // sub-text baseline y from row top
-	levelUpValueInset = float32(12)      // right-aligned value inset from row right edge
+	levelUpHeaderX    = hudContentInsetX          // header text inset from card left (shared HUD content gutter)
+	levelUpHeaderY    = int32(46)                 // primary readout baseline from card top
+	levelUpHeaderSubY = int32(76)                 // skill-point reminder baseline from card top
+	levelUpRowTop     = int32(112)                // first stat row's top from card top
+	levelUpRowH       = int32(64)                 // per-stat row height
+	levelUpRowX       = modalGutterWide           // row inset from card left (margin 2× this); large screen-relative card wants more side air than modalContentInsetX
+	levelUpIconX      = float32(16)               // stat sigil x from row left
+	levelUpIconY      = float32(24)               // stat sigil y from row top
+	levelUpLabelX     = int32(44)                 // label x from row left
+	levelUpLabelY     = int32(6)                  // label / value baseline y from row top
+	levelUpSubX       = int32(96)                 // sub-text x from row left
+	levelUpSubY       = int32(36)                 // sub-text baseline y from row top
+	levelUpValueInset = float32(modalValueInsetX) // right-aligned value inset from row right edge
 	// levelUpRowGlassAlpha: glass fill shared by unfocused stat rows and the Apply tint. Untyped to satisfy both fadeColor (float32) and selectedGlassTint (float64).
 	levelUpRowGlassAlpha = 0.45
 )
@@ -130,11 +130,15 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 	}
 
 	// A stages (stat row) or applies (Apply row); B undoes a staged point.
-	drawModalFooterGlyphs(font, card, []HintSeg{
-		Hint("Pick", GlyphUpDown),
-		Hint("Stage / Apply", GlyphA),
-		Hint("Undo", GlyphB),
-	})
+	drawModalFooterGlyphs(font, card, levelUpHints)
+}
+
+// levelUpHints is the level-up overlay's footer, built once (like shopHints) so the
+// panel doesn't reallocate a hint bar every frame.
+var levelUpHints = []HintSeg{
+	Hint("Pick", GlyphUpDown),
+	Hint("Stage / Apply", GlyphA),
+	Hint("Undo", GlyphB),
 }
 
 // drawLevelUpRowChrome paints the shared focusable-row backing: the gilt selection

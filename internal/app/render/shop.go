@@ -17,7 +17,7 @@ const (
 	shopFootH       = int32(50)
 	shopRowInsetX   = int32(40)
 	shopRowTextDY   = int32(4) // baseline drop shared by label/name/price columns
-	shopPriceInsetX = int32(12)
+	shopPriceInsetX = modalValueInsetX
 	// shopHintDrop seats the footer hint in the middle of the shopFootH band. Shop
 	// hand-centers at FontSmall rather than via drawModalFooterGlyphs (FontTiny).
 	shopHintDrop = int32(16)

@@ -278,10 +278,16 @@ func updateSoundMenu(g *core.GameState) {
 	updateSliderLeafMenu(&g.SoundMenuOpen, &g.SoundMenuIndex, core.SoundMenuCount, core.SoundMenuSliderCount,
 		func(item int) {
 			switch core.SoundMenuItem(item) {
+			case core.SoundMenuMusic, core.SoundMenuSFX:
+				// Slider rows: Left/Right adjusts (below); Confirm is intentionally a no-op.
 			case core.SoundMenuMute:
 				audio.ToggleMute()
 			case core.SoundMenuClose:
 				g.SoundMenuOpen = false
+			default:
+				// All current rows are handled above; a new SoundMenuItem without a case
+				// lands loudly instead of silently eating the confirm.
+				panic(fmt.Sprintf("updateSoundMenu: no handler for SoundMenuItem %d", item))
 			}
 		},
 		func(row, delta int) {

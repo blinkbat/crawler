@@ -404,64 +404,60 @@ func startBlockers(a *core.AreaDefinition, x, z int) []blockerCheck {
 	}
 }
 
+// commonEntityBlockers is the prefix every entity-placement rule shares: no player
+// start, wall, prop, or deep water on the target tile (noun labels the rejection).
+// Each *PlaceBlockers appends its own one-per-tile tail.
+func commonEntityBlockers(a *core.AreaDefinition, x, z int, noun string) []blockerCheck {
+	return []blockerCheck{
+		blkStart(a, x, z),
+		blkWall(a, x, z, noun),
+		blkProp(a, x, z),
+		blkDeepWater(a, x, z, noun),
+	}
+}
+
 // doorPlaceBlockers / chestPlaceBlockers are the shared legality rule sets for
 // dropping or drag-relocating a door / chest. Used by both the placement brushes
 // and the drag-move release. On a relocation the dragged entity is still at its
 // OLD tile, so blkChestHere/blkDoorHere flag only a DIFFERENT entity already there.
 func doorPlaceBlockers(a *core.AreaDefinition, x, z int) []blockerCheck {
-	return []blockerCheck{
-		blkStart(a, x, z),
-		blkWall(a, x, z, "Door"),
-		blkProp(a, x, z),
-		blkDeepWater(a, x, z, "Door"),
+	return append(commonEntityBlockers(a, x, z, "Door"),
 		blkPackHere(a, x, z),
 		blkChestHere(a, x, z, true),
 		blkDoorHere(a, x, z),
 		blkCrystalHere(a, x, z),
-	}
+	)
 }
 
 func chestPlaceBlockers(a *core.AreaDefinition, x, z int) []blockerCheck {
-	return []blockerCheck{
-		blkStart(a, x, z),
-		blkWall(a, x, z, "Chest"),
-		blkProp(a, x, z),
-		blkDeepWater(a, x, z, "Chest"),
+	return append(commonEntityBlockers(a, x, z, "Chest"),
 		blkPackHere(a, x, z),
 		blkChestHere(a, x, z, false),
 		blkCrystalHere(a, x, z),
-	}
+	)
 }
 
 // packPlaceBlockers is the shared pack place/relocate rule: no wall/prop/deep
 // water/start/chest/door/crystal. Omits blkPackHere — the brush merges into an
 // existing pack and the drag replaces it, so a pack there isn't a blocker.
 func packPlaceBlockers(a *core.AreaDefinition, x, z int) []blockerCheck {
-	return []blockerCheck{
-		blkStart(a, x, z),
-		blkWall(a, x, z, "Pack"),
-		blkProp(a, x, z),
-		blkDeepWater(a, x, z, "Pack"),
+	return append(commonEntityBlockers(a, x, z, "Pack"),
 		blkChestHere(a, x, z, true),
 		blkDoorHere(a, x, z),
 		blkCrystalHere(a, x, z),
-	}
+	)
 }
 
 // crystalPlaceBlockers is the crystal placement rule (mirrors chestPlaceBlockers:
 // one entity per tile). Crystals are non-blocking in play, but walls/props/deep
 // water are still refused so the billboard has a clear tile.
 func crystalPlaceBlockers(a *core.AreaDefinition, x, z int) []blockerCheck {
-	return []blockerCheck{
-		blkStart(a, x, z),
-		blkWall(a, x, z, "Crystal"),
-		blkProp(a, x, z),
-		blkDeepWater(a, x, z, "Crystal"),
+	return append(commonEntityBlockers(a, x, z, "Crystal"),
 		blkPackHere(a, x, z),
 		blkChestHere(a, x, z, true),
 		blkDoorHere(a, x, z),
 		blkCrystalHere(a, x, z),
-	}
+	)
 }
 
 func placeDoorAt(s *State, x, z int) {

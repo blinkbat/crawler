@@ -546,7 +546,7 @@ func drawChargeBar(timing core.TimingState, g *core.GameState, assets Resources,
 	curPct := timing.Progress()
 	curX := drawX + curPct*barW
 	cursorW := timingCursorWidth
-	cursorCol := colorWithAlpha(timingCursorColor, 220)
+	cursorCol := colorWithAlpha(timingCursorColor, timingStrongFillAlpha)
 	if timing.Pressed && !timing.Resolved {
 		// Held: punchier cursor + halo.
 		cursorW = timingCursorWidthHeld

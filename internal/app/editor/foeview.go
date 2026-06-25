@@ -231,6 +231,24 @@ type foeViewLayout struct {
 	closeBtn     rl.Rectangle
 }
 
+// twoColTracks lays n slider tracks into two equal columns (left column gets the
+// ceil half), each row foeSliderRowH tall from baseY; colX steps from rightX and the
+// track insets by labelW. Shared by the Layout and Asset tabs.
+func twoColTracks(n int, rightX, colW, colTrackW, baseY float32) []rl.Rectangle {
+	firstColRows := (n + 1) / 2
+	tracks := make([]rl.Rectangle, n)
+	for i := 0; i < n; i++ {
+		col, row := 0, i
+		if i >= firstColRows {
+			col, row = 1, i-firstColRows
+		}
+		colX := rightX + float32(col)*(colW+foeColGap)
+		y := baseY + float32(row)*foeSliderRowH + (foeSliderRowH-foeSliderMetrics.trackH)/2
+		tracks[i] = rl.NewRectangle(colX+foeSliderMetrics.labelW, y, colTrackW, foeSliderMetrics.trackH)
+	}
+	return tracks
+}
+
 // computeFoeViewLayout is the single geometry source for the modal's draw and
 // hit-test (so widgets and click rects can't drift).
 func computeFoeViewLayout() foeViewLayout {
@@ -254,37 +272,14 @@ func computeFoeViewLayout() foeViewLayout {
 	tabBtns := buttonRowAt(rightX, tabY, foeViewTabLabels)
 	contentTop := tabY + float32(modalBtnH) + foeContentGap
 
-	// Two-column slider stack (Layout tab): rightW split into two equal columns.
-	// Left column gets the ceil half (odd count → extra row left).
+	// Two-column slider stacks (Layout + Asset tabs): rightW split into two equal
+	// columns, left column getting the ceil half (odd count → extra row left).
 	colW := (rightW - foeColGap) / 2
 	colTrackW := colW - foeSliderMetrics.trackReserve(0)
-	firstColRows := (len(foeFields) + 1) / 2
-	tracks := make([]rl.Rectangle, len(foeFields))
-	rowBase := contentTop
-	for i := range foeFields {
-		col, row := 0, i
-		if i >= firstColRows {
-			col, row = 1, i-firstColRows
-		}
-		colX := rightX + float32(col)*(colW+foeColGap)
-		y := rowBase + float32(row)*foeSliderRowH + (foeSliderRowH-foeSliderMetrics.trackH)/2
-		tracks[i] = rl.NewRectangle(colX+foeSliderMetrics.labelW, y, colTrackW, foeSliderMetrics.trackH)
-	}
-
-	// Asset tab: same two-column split. Left column gets the ceil half; action
-	// buttons sit below the taller column.
-	assetFirstColRows := (len(assetFields) + 1) / 2
-	assetTracks := make([]rl.Rectangle, len(assetFields))
-	for i := range assetFields {
-		col, row := 0, i
-		if i >= assetFirstColRows {
-			col, row = 1, i-assetFirstColRows
-		}
-		colX := rightX + float32(col)*(colW+foeColGap)
-		y := contentTop + float32(row)*foeSliderRowH + (foeSliderRowH-foeSliderMetrics.trackH)/2
-		assetTracks[i] = rl.NewRectangle(colX+foeSliderMetrics.labelW, y, colTrackW, foeSliderMetrics.trackH)
-	}
-	assetBtnY := contentTop + float32(assetFirstColRows)*foeSliderRowH + foeAssetBtnGap
+	tracks := twoColTracks(len(foeFields), rightX, colW, colTrackW, contentTop)
+	assetTracks := twoColTracks(len(assetFields), rightX, colW, colTrackW, contentTop)
+	// Action buttons sit below the taller (left) asset column.
+	assetBtnY := contentTop + float32((len(assetFields)+1)/2)*foeSliderRowH + foeAssetBtnGap
 	assetBtns := buttonRowAt(rightX, assetBtnY, assetActionLabels)
 
 	btns := buttonRowAt(rightX, card.Y+card.Height-modalBtnH-modalBottomInset, foeViewBtnLabels)
@@ -742,11 +737,7 @@ func assetPreviewTexFor() rl.Texture2D {
 // button + a hint. Shared (override + cursor passed in).
 func drawAssetTab(font rl.Font, theme render.Theme, l foeViewLayout, ov *core.EnemyVisualOverride, cursor int) {
 	for i := range assetFields {
-		f := assetFields[i]
-		track := l.assetTracks[i]
-		drawSliderField(font, theme, f, ov,
-			rl.NewVector2(track.X-foeSliderMetrics.labelW, track.Y-4), rl.NewVector2(track.X+track.Width+8, track.Y-4),
-			editorFontAccent, track, 6, cursor == i)
+		drawFoeSliderRow(font, theme, assetFields[i], ov, l.assetTracks[i], cursor == i)
 	}
 	for i := range l.assetBtns {
 		drawButton(font, l.assetBtns[i], assetActionLabels[i], false)
@@ -759,14 +750,18 @@ func drawAssetTab(font rl.Font, theme render.Theme, l foeViewLayout, ov *core.En
 	}
 }
 
+// drawFoeSliderRow draws one visualizer slider row: label left of the track, value
+// right, at the foe metrics + accent font. Shared by the Layout and Asset tabs.
+func drawFoeSliderRow(font rl.Font, theme render.Theme, f sliderField[core.EnemyVisualOverride], ov *core.EnemyVisualOverride, track rl.Rectangle, focused bool) {
+	drawSliderField(font, theme, f, ov,
+		rl.NewVector2(track.X-foeSliderMetrics.labelW, track.Y-4), rl.NewVector2(track.X+track.Width+8, track.Y-4),
+		editorFontAccent, track, 6, focused)
+}
+
 // drawVisualSlider draws foeFields row i against override ov and cursor (the
 // Layout tab; both Visualizers route here via drawVisualizerModal).
 func drawVisualSlider(font rl.Font, theme render.Theme, l foeViewLayout, i int, ov *core.EnemyVisualOverride, cursor int) {
-	f := foeFields[i]
-	track := l.sliderTracks[i]
-	drawSliderField(font, theme, f, ov,
-		rl.NewVector2(track.X-foeSliderMetrics.labelW, track.Y-4), rl.NewVector2(track.X+track.Width+8, track.Y-4),
-		editorFontAccent, track, 6, cursor == i)
+	drawFoeSliderRow(font, theme, foeFields[i], ov, l.sliderTracks[i], cursor == i)
 }
 
 // sliderRowMetrics is the shared geometry contract for an editor slider row: the label

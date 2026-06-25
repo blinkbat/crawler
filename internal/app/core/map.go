@@ -339,7 +339,8 @@ func (a *AreaDefinition) FaceSkinAt(x, z int) byte {
 }
 
 // FaceOverride is a per-tile cliff-face skin override: Skins[dir] (0=N,1=E,2=S,
-// 3=W) names that face's skin, or 0/PropLevelAuto to fall back to FaceSkinAt.
+// 3=W) names that face's skin, or PropLevelAuto to fall back to FaceSkinAt
+// (PropLevelAuto, not 0 — see defaultFaceSkins).
 type FaceOverride struct {
 	X, Z  int
 	Skins [FacingCount]byte

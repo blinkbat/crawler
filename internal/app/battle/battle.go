@@ -32,10 +32,24 @@ const (
 // Start begins a battle against the pack at packIndex (the whole roster becomes
 // the enemy list). fleeReturnX/Z is the pre-step tile the player retreats to on a
 // successful Flee (so a pack ambush steps them back, not onto the pack's tile).
+// packIndexInRange reports whether idx names a slot in g.Packs — the shared
+// bounds rule for the pack-index domain (mirrors partyIndexValid for the party).
+func packIndexInRange(g *core.GameState, idx int) bool {
+	return idx >= 0 && idx < len(g.Packs)
+}
+
+// dropPackAt removes pack idx from g.Packs when in range (no-op otherwise). The
+// single pack-removal seam shared by fleeBattle and clearBattleResidual.
+func dropPackAt(g *core.GameState, idx int) {
+	if packIndexInRange(g, idx) {
+		g.Packs = append(g.Packs[:idx], g.Packs[idx+1:]...)
+	}
+}
+
 // validLivePack reports whether packIndex names an in-range, still-alive pack —
 // the entry guard shared by Start and DebugSkipWin.
 func validLivePack(g *core.GameState, packIndex int) bool {
-	return packIndex >= 0 && packIndex < len(g.Packs) && core.PackAlive(g.Packs[packIndex])
+	return packIndexInRange(g, packIndex) && core.PackAlive(g.Packs[packIndex])
 }
 
 func Start(g *core.GameState, packIndex, fleeReturnX, fleeReturnZ int, engageSide core.EngageSide) {
@@ -895,6 +909,13 @@ func enemyActionIsMelee(enemy *core.Enemy, skill core.SkillID) bool {
 	return core.SkillAttackClassFor(skill).IsMelee()
 }
 
+// enemyAttackWhiffs rolls the foe's accuracy (EffectiveEnemyStats so Blind lowers
+// it) and reports a clean miss. Nil-safe; the one place the attack accuracy roll
+// lives so the skill-melee and plain-melee branches can't drift.
+func enemyAttackWhiffs(g *core.GameState, enemy *core.Enemy) bool {
+	return enemy != nil && !core.RollEnemyHit(g.Rand(), core.EffectiveEnemyStats(enemy))
+}
+
 // beginEnemyAttack arms the defend bar against the enemy at slot (index into the
 // active pack's Members).
 func beginEnemyAttack(g *core.GameState, slot int) bool {
@@ -923,8 +944,8 @@ func beginEnemyAttack(g *core.GameState, slot int) bool {
 		// a basic swing — a physical lunge can whiff. On a miss, EnemyAttackMisses wins
 		// the resolve switch over the pending skill, so the skill never lands. Magic/
 		// ranged casts and AoE melee (Stoneslam, countered by Defend) still auto-connect.
-		if enemy != nil && enemyActionIsMelee(enemy, skill) && !core.SkillEffectFor(skill).AppliesAOEParty &&
-			!core.RollEnemyHit(g.Rand(), core.EffectiveEnemyStats(enemy)) {
+		if enemyActionIsMelee(enemy, skill) && !core.SkillEffectFor(skill).AppliesAOEParty &&
+			enemyAttackWhiffs(g, enemy) {
 			g.Battle.EnemyAttackMisses = true
 		}
 		// Pre-resolve Timing so the defend bar never arms — the intro elapses and
@@ -935,7 +956,7 @@ func beginEnemyAttack(g *core.GameState, slot int) bool {
 	// Plain melee: roll accuracy NOW, before the defend bar. A clean whiff has
 	// nothing to defend, so skip the minigame (same Resolved=true short-circuit) and
 	// let the intro elapse into the miss. EffectiveEnemyStats so Blind lowers it.
-	if enemy != nil && !core.RollEnemyHit(g.Rand(), core.EffectiveEnemyStats(enemy)) {
+	if enemyAttackWhiffs(g, enemy) {
 		g.Battle.EnemyAttackMisses = true
 		g.Battle.Timing = core.TimingState{Resolved: true}
 		return true
@@ -1316,9 +1337,7 @@ func loseBattle(g *core.GameState, message string) {
 // fleeBattle is the debug "Easy Battle Quit" exit: drop the engaged pack and
 // return to explore. No XP, no win/loss. Gated on g.EasyBattleQuit at the call site.
 func fleeBattle(g *core.GameState) {
-	if g.Battle.ActivePack >= 0 && g.Battle.ActivePack < len(g.Packs) {
-		g.Packs = append(g.Packs[:g.Battle.ActivePack], g.Packs[g.Battle.ActivePack+1:]...)
-	}
+	dropPackAt(g, g.Battle.ActivePack)
 	// Clear ActivePack BEFORE leaveBattle so clearBattleResidual's pack-defeated
 	// drop can't re-remove whatever pack shifted into the now-stale slot.
 	g.Battle.ActivePack = -1
@@ -1354,8 +1373,8 @@ func clearBattleResidual(g *core.GameState) {
 	// desynced kill). LivingBattleCount==0 means wiped; on loss/flee enemies survive
 	// and the pack stays.
 	packDefeated := g.Battle.Phase == core.BattleWon || core.LivingBattleCount(g) == 0
-	if packDefeated && g.Battle.ActivePack >= 0 && g.Battle.ActivePack < len(g.Packs) {
-		g.Packs = append(g.Packs[:g.Battle.ActivePack], g.Packs[g.Battle.ActivePack+1:]...)
+	if packDefeated {
+		dropPackAt(g, g.Battle.ActivePack)
 	}
 	g.Battle.ActivePack = -1
 	g.Battle.EnemyIndex = -1

@@ -157,9 +157,13 @@ func DrawChestModal(g *core.GameState, assets Resources) {
 			drawTextWithShadow(font, "Take All", float32(rowX), float32(rowY), FontBody, col)
 		})
 	}
-	drawModalFooterGlyphs(font, card, []HintSeg{
-		Hint("Move", GlyphUpDown),
-		Hint("Take", GlyphA),
-		Hint("Close", GlyphB),
-	})
+	drawModalFooterGlyphs(font, card, chestHints)
+}
+
+// chestHints is the chest overlay's footer, built once (like shopHints) so the
+// panel doesn't reallocate a hint bar every frame.
+var chestHints = []HintSeg{
+	Hint("Move", GlyphUpDown),
+	Hint("Take", GlyphA),
+	Hint("Close", GlyphB),
 }

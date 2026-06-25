@@ -552,7 +552,7 @@ func EnemyColumnCovered(members []Enemy, i int) bool {
 	}
 	frontCount, backSlot := 0, 0
 	for j := range members {
-		if !enemyHoldsFormationSlot(members[j]) {
+		if !enemyVisible(&members[j]) {
 			continue
 		}
 		if members[j].Row == RowFront {
@@ -562,13 +562,6 @@ func EnemyColumnCovered(members []Enemy, i int) bool {
 		}
 	}
 	return backSlot < frontCount
-}
-
-// enemyHoldsFormationSlot reports whether an enemy still occupies a visible
-// formation slot — alive, or mid death-fade (its corpse is still drawn). The single
-// predicate shared by the melee-cover test and render's slot layout so they agree.
-func enemyHoldsFormationSlot(e Enemy) bool {
-	return e.Alive || e.DeathFade > 0
 }
 
 // EnemyInEffectiveFront reports whether enemy i is reachable by melee: front-row

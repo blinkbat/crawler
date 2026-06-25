@@ -344,6 +344,22 @@ func init() {
 			panic("editor: triggerKindLabel missing a case for dialog trigger kind " + string(k))
 		}
 	}
+	// Every authorable end-action kind must be reachable from the action picker's
+	// setters (a kind added to core without a picker row would be uneditable).
+	for _, k := range core.DialogActionKinds() {
+		found := false
+		for _, set := range dialogActionSetters {
+			var probe core.DialogAction
+			set(&probe)
+			if probe.Kind == k {
+				found = true
+				break
+			}
+		}
+		if !found {
+			panic("editor: dialog action picker missing a row for action kind " + string(k))
+		}
+	}
 }
 
 // condSummary is the one-line row label for a choice's condition list.
@@ -379,21 +395,15 @@ func triggerSummary(t core.DialogTrigger) string {
 }
 
 func dialogCondKindEntries(s *State) []dropdownEntry {
-	kinds := core.DialogCondKinds()
-	out := make([]dropdownEntry, 0, len(kinds))
-	for _, k := range kinds {
-		k := k
-		out = append(out, dropdownEntry{label: condKindLabel(k), apply: func(s *State) {
-			// Only on a real kind CHANGE; reset to a clean condition so a stale
-			// value from the old kind can't serialize. DisabledMessage carries over.
-			if c := currentDialogCond(s); c != nil && c.Kind != k {
-				pushUndo(s)
-				*c = core.DialogChoiceCondition{Kind: k, DisabledMessage: c.DisabledMessage}
-				s.dirty = true
-			}
-		}})
-	}
-	return out
+	return fieldEntries(core.DialogCondKinds(), condKindLabel, func(s *State, k core.DialogCondKind) {
+		// Only on a real kind CHANGE; reset to a clean condition so a stale value from
+		// the old kind can't serialize. DisabledMessage carries over.
+		if c := currentDialogCond(s); c != nil && c.Kind != k {
+			pushUndo(s)
+			*c = core.DialogChoiceCondition{Kind: k, DisabledMessage: c.DisabledMessage}
+			s.dirty = true
+		}
+	})
 }
 
 func dialogQuestStatusEntries(s *State) []dropdownEntry {
@@ -417,21 +427,15 @@ func dialogCondFoeEntries(s *State) []dropdownEntry {
 }
 
 func dialogTriggerKindEntries(s *State) []dropdownEntry {
-	kinds := core.DialogTriggerKinds()
-	out := make([]dropdownEntry, 0, len(kinds))
-	for _, k := range kinds {
-		k := k
-		out = append(out, dropdownEntry{label: triggerKindLabel(k), apply: func(s *State) {
-			// Like dialogCondKindEntries: only on a real CHANGE, reset to a clean
-			// trigger so old params can't serialize. ID/DialogID/Once carry over.
-			if t := currentDialogTrigger(s); t != nil && t.Kind != k {
-				pushUndo(s)
-				*t = core.DialogTrigger{ID: t.ID, Kind: k, DialogID: t.DialogID, Once: t.Once}
-				s.dirty = true
-			}
-		}})
-	}
-	return out
+	return fieldEntries(core.DialogTriggerKinds(), triggerKindLabel, func(s *State, k core.DialogTriggerKind) {
+		// Like dialogCondKindEntries: only on a real CHANGE, reset to a clean trigger
+		// so old params can't serialize. ID/DialogID/Once carry over.
+		if t := currentDialogTrigger(s); t != nil && t.Kind != k {
+			pushUndo(s)
+			*t = core.DialogTrigger{ID: t.ID, Kind: k, DialogID: t.DialogID, Once: t.Once}
+			s.dirty = true
+		}
+	})
 }
 
 func dialogTriggerDialogEntries(s *State) []dropdownEntry {
@@ -842,8 +846,7 @@ type dialogNodeLayout struct {
 
 func dialogNodeLayoutFor(cursor, choiceCount int) dialogNodeLayout {
 	r := centeredCardRect(dialogNodeModalW, dialogNodeModalH)
-	x := r.X + modalContentInset
-	fw := r.Width - 2*modalContentInset
+	x, fw := cardContentBox(r)
 	fieldH := dialogFieldH
 	rowGap := dialogRowGap
 	y := r.Y + dialogHeaderInset
@@ -926,7 +929,7 @@ func updateDialogNodeEditModal(s *State) Action {
 		mp := rl.GetMousePosition()
 		switch {
 		case pointIn(mp, l.speakerBtn):
-			openDropdownBelow(s, ddDialogSpeaker, l.speakerBtn)
+			openFieldDropdown(s, ddDialogSpeaker, l.speakerBtn)
 			return ActionNone
 		case pointIn(mp, l.textField):
 			s.focus = focusDialogNodeText
@@ -1076,8 +1079,7 @@ type dialogChoiceLayout struct {
 
 func dialogChoiceLayoutFor(cursor, condCount int) dialogChoiceLayout {
 	r := centeredCardRect(dialogChoiceModalW, dialogChoiceModalH)
-	x := r.X + modalContentInset
-	fw := r.Width - 2*modalContentInset
+	x, fw := cardContentBox(r)
 	fieldH := dialogFieldH
 	rowGap := dialogRowGap
 	y := r.Y + dialogHeaderInset
@@ -1240,8 +1242,7 @@ type dialogActionLayout struct {
 
 func dialogActionLayoutFor() dialogActionLayout {
 	r := centeredCardRect(dialogActionModalW, dialogActionModalH)
-	x := r.X + modalContentInset
-	fw := r.Width - 2*modalContentInset
+	x, fw := cardContentBox(r)
 	fieldH := dialogFieldH
 	y := r.Y + dialogHeaderInset
 	fields := stackRows(x, y, fw, fieldH, dialogActionRowGap, 2)
@@ -1300,25 +1301,28 @@ func dialogActionIDTarget(s *State) *string {
 	return nil
 }
 
+// dialogActionSetters FULLY specify each non-None action-picker row's payload
+// (clearing the other kind's id so a stale QuestID/EventID can't linger). Shared by
+// the picker builder and the init() coverage assert against core.DialogActionKinds.
+var dialogActionSetters = []func(*core.DialogAction){
+	func(a *core.DialogAction) {
+		a.Kind = core.DialogActionQuest
+		a.QuestOp = core.DialogQuestStart
+		a.EventID = ""
+	},
+	func(a *core.DialogAction) {
+		a.Kind = core.DialogActionQuest
+		a.QuestOp = core.DialogQuestComplete
+		a.EventID = ""
+	},
+	func(a *core.DialogAction) { a.Kind = core.DialogActionEvent; a.QuestOp = ""; a.QuestID = "" },
+}
+
 // dialogActionKindEntries are the action picker's rows (None + flattened
-// start/complete/event). set == nil is "None"; the others each FULLY specify the
-// payload (clearing the other kind's id) so a stale QuestID/EventID can't linger.
+// start/complete/event). set == nil is "None"; labels derive from dialogActionLabel
+// against a probe so they can't drift.
 func dialogActionKindEntries(s *State) []dropdownEntry {
-	// Labels derive from dialogActionLabel against a probe so they can't drift.
-	sets := []func(*core.DialogAction){
-		nil,
-		func(a *core.DialogAction) {
-			a.Kind = core.DialogActionQuest
-			a.QuestOp = core.DialogQuestStart
-			a.EventID = ""
-		},
-		func(a *core.DialogAction) {
-			a.Kind = core.DialogActionQuest
-			a.QuestOp = core.DialogQuestComplete
-			a.EventID = ""
-		},
-		func(a *core.DialogAction) { a.Kind = core.DialogActionEvent; a.QuestOp = ""; a.QuestID = "" },
-	}
+	sets := append([]func(*core.DialogAction){nil}, dialogActionSetters...)
 	out := make([]dropdownEntry, 0, len(sets))
 	for _, set := range sets {
 		set := set
@@ -1409,8 +1413,7 @@ func updateDialogActionEditModal(s *State) Action {
 		mp := rl.GetMousePosition()
 		switch {
 		case pointIn(mp, l.kindBtn):
-			s.focus = focusNone
-			openDropdownBelow(s, ddDialogActionKind, l.kindBtn)
+			openFieldDropdown(s, ddDialogActionKind, l.kindBtn)
 			return ActionNone
 		case pointIn(mp, l.backBtn):
 			returnFromDialogActionEdit(s)
@@ -1462,8 +1465,7 @@ type dialogCondLayout struct {
 
 func dialogCondLayoutFor() dialogCondLayout {
 	r := centeredCardRect(dialogCondModalW, dialogCondModalH)
-	x := r.X + modalContentInset
-	fw := r.Width - 2*modalContentInset
+	x, fw := cardContentBox(r)
 	fieldH := dialogFieldH
 	y := r.Y + dialogHeaderInset
 	fields := stackRows(x, y, fw, fieldH, dialogCondRowGap, 4)
@@ -1547,8 +1549,7 @@ func updateDialogCondEditModal(s *State) Action {
 		mp := rl.GetMousePosition()
 		switch {
 		case pointIn(mp, l.kindBtn):
-			s.focus = focusNone
-			openDropdownBelow(s, ddDialogCondKind, l.kindBtn)
+			openFieldDropdown(s, ddDialogCondKind, l.kindBtn)
 			return ActionNone
 		case pointIn(mp, l.msgField):
 			s.focus = focusDialogCondMessage
@@ -1569,14 +1570,12 @@ func updateDialogCondEditModal(s *State) Action {
 				return ActionNone
 			}
 			if pointIn(mp, l.row2) {
-				s.focus = focusNone
-				openDropdownBelow(s, ddDialogQuestStatus, l.row2)
+				openFieldDropdown(s, ddDialogQuestStatus, l.row2)
 				return ActionNone
 			}
 		case core.DialogCondFoeKilled:
 			if pointIn(mp, l.row1) {
-				s.focus = focusNone
-				openDropdownBelow(s, ddDialogCondFoe, l.row1)
+				openFieldDropdown(s, ddDialogCondFoe, l.row1)
 				return ActionNone
 			}
 			if pointIn(mp, l.row2) {
@@ -1699,8 +1698,7 @@ type dialogTrigLayout struct {
 
 func dialogTrigLayoutFor() dialogTrigLayout {
 	r := centeredCardRect(dialogTrigModalW, dialogTrigModalH)
-	x := r.X + modalContentInset
-	fw := r.Width - 2*modalContentInset
+	x, fw := cardContentBox(r)
 	fieldH := dialogFieldH
 	y := r.Y + dialogHeaderInset
 	fields := stackRows(x, y, fw, fieldH, dialogTrigRowGap, 5)
@@ -1780,12 +1778,10 @@ func updateDialogTriggerEditModal(s *State) Action {
 		mp := rl.GetMousePosition()
 		switch {
 		case pointIn(mp, l.kindBtn):
-			s.focus = focusNone
-			openDropdownBelow(s, ddDialogTriggerKind, l.kindBtn)
+			openFieldDropdown(s, ddDialogTriggerKind, l.kindBtn)
 			return ActionNone
 		case pointIn(mp, l.dialogBtn):
-			s.focus = focusNone
-			openDropdownBelow(s, ddDialogTriggerDialog, l.dialogBtn)
+			openFieldDropdown(s, ddDialogTriggerDialog, l.dialogBtn)
 			return ActionNone
 		case pointIn(mp, l.onceToggle):
 			toggleTriggerOnce(s)
@@ -1806,14 +1802,12 @@ func updateDialogTriggerEditModal(s *State) Action {
 			}
 		case core.DialogTriggerEnterLocation:
 			if pointIn(mp, l.row1) {
-				s.focus = focusNone
-				openDropdownBelow(s, ddDialogTriggerLocation, l.row1)
+				openFieldDropdown(s, ddDialogTriggerLocation, l.row1)
 				return ActionNone
 			}
 		case core.DialogTriggerFoeKilled:
 			if pointIn(mp, l.row1) {
-				s.focus = focusNone
-				openDropdownBelow(s, ddDialogTriggerFoe, l.row1)
+				openFieldDropdown(s, ddDialogTriggerFoe, l.row1)
 				return ActionNone
 			}
 			if pointIn(mp, l.row2) {

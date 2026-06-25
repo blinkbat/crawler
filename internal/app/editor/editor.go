@@ -75,6 +75,9 @@ type Brush struct {
 type entityKind int
 
 const (
+	// entityNone is the iota anchor and the zero value of Brush.Entity — a grid
+	// (non-entity) brush carries it implicitly. Never matched directly; the entity
+	// brushes below are the live cases.
 	entityNone entityKind = iota
 	// entityClear erases the pack/chest/door at the clicked tile (the anchored
 	// player start is exempt). First-class brush mirror of right-click clear.

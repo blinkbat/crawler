@@ -1216,6 +1216,23 @@ func rebuildTorchSites(m *core.AreaDefinition) {
 	torchSiteCache.set(m)
 }
 
+// torchFlicker is the warm light-pool brightness in ~0.72..1.0 from two desynced
+// sines over the per-torch phase — the glow magnitude only (the flame-blob bob in
+// drawWallTorch is a separate animation). Named so the freqs/weights live in one place.
+const (
+	torchFlickerBias    = 0.86
+	torchFlickerWeightA = 0.09
+	torchFlickerWeightB = 0.05
+	torchFlickerHzA     = 9.3
+	torchFlickerHzB     = 17.1
+)
+
+func torchFlicker(t, phase float32) float32 {
+	return torchFlickerBias +
+		torchFlickerWeightA*float32(math.Sin(float64(t*torchFlickerHzA+phase))) +
+		torchFlickerWeightB*float32(math.Sin(float64(t*torchFlickerHzB+phase*1.7)))
+}
+
 // collectTorches returns the maxTorches nearest point lights — braziers/torches AND
 // charged healing crystals — as the camera sees them (the rest are fog-swallowed).
 // Torches flicker warm (per-torch desynced sines); crystals breathe cool cyan in
@@ -1269,20 +1286,14 @@ func collectTorches(m *core.AreaDefinition, crystals []core.Crystal, camera rl.C
 		n = maxTorches
 	}
 	t := float32(rl.GetTime())
-	// Crystals breathe with the gem body (same 0.82..1.0 cyan pulse as crystalColor).
-	breathe := 0.82 + 0.18*pulse(crystalPulseHz)
+	breathe := crystalBreathe() // crystals breathe with the gem body
 	for i := 0; i < n; i++ {
 		c := torchCandidateBuf[i]
 		var mag float32
 		if c.crystal {
 			mag = breathe * c.bright
 		} else {
-			phase := hashPhase(c.hash)
-			// Organic flicker in ~0.72..1.0 from two desynced sines.
-			flick := 0.86 +
-				0.09*float32(math.Sin(float64(t*9.3+phase))) +
-				0.05*float32(math.Sin(float64(t*17.1+phase*1.7)))
-			mag = flick * c.bright
+			mag = torchFlicker(t, hashPhase(c.hash)) * c.bright
 		}
 		torchResultBuf = append(torchResultBuf, torchLight{
 			Pos: c.pos,
@@ -1409,10 +1420,16 @@ func tileYawDeg(x, z int) float32 {
 	return float32(tileHash(x, z)&0x03) * 90
 }
 
+// steppedYaw30 maps a hash to one of 12 facings (30° steps) in [0,360) so a prop
+// reads as a deliberate facing rather than noise. Caller pre-shifts to pick bits.
+func steppedYaw30(h uint32) float32 {
+	return float32((h % 12) * 30)
+}
+
 // propYawDeg returns a per-tile yaw in 30° steps, in [0,360) — stepped so each
 // prop reads as a deliberate facing rather than noise.
 func propYawDeg(x, z int) float32 {
-	return float32(((tileHash(x, z) >> 3) % 12) * 30)
+	return steppedYaw30(tileHash(x, z) >> 3)
 }
 
 // floorVariantHash picks 0 (grass) / 1 (dirt) / 2 (dark grass), region-bucketed
@@ -1433,6 +1450,9 @@ func floorVariantHash(x, z int) int {
 // ~[-0.55, 0.55] world units. Shared by the floor-decoration + pebble scatterers.
 const scatterOffsetDivisor = float32(230)
 
+// scatterOffset turns a hash byte into a signed sub-tile offset via scatterOffsetDivisor.
+func scatterOffset(b byte) float32 { return float32(int8(b)) / scatterOffsetDivisor }
+
 // drawFloorDecoration scatters small passable props (rocks/bushes/mushrooms) on
 // ~16% of plain floor tiles by per-tile hash; rocks weighted heaviest so the
 // floor reads as pebble-strewn.
@@ -1445,12 +1465,10 @@ func drawFloorDecoration(assets Resources, x, z int, cx, cz, groundY float32) {
 	// Weighted kind dispatch: 4/8 pebbles, 1/8 + 1/8 bush, 2/8 mushrooms.
 	kind := int((h >> 8) & 7)
 	// Sub-tile offset so the prop isn't dead-center.
-	offX := float32(int8(h>>16)) / scatterOffsetDivisor
-	offZ := float32(int8(h>>24)) / scatterOffsetDivisor
-	pos := rl.NewVector3(cx+offX, groundY, cz+offZ)
+	pos := rl.NewVector3(cx+scatterOffset(byte(h>>16)), groundY, cz+scatterOffset(byte(h>>24)))
 
 	// Stable yaw from the same hash so clustered props aren't aligned.
-	decoYaw := float32(((h >> 12) % 12) * 30)
+	decoYaw := steppedYaw30(h >> 12)
 	switch kind {
 	case 0, 1, 2, 3: // pebble cluster — see drawPebbleCluster comment
 		drawPebbleCluster(assets, cx, cz, groundY, h)
@@ -1491,8 +1509,8 @@ func drawPebbleCluster(assets Resources, cx, cz, groundY float32, tileHash uint3
 		// Salt with the index so each member looks independent.
 		ih := mix32(tileHash ^ uint32(i+1)*hashSalt)
 
-		ox := float32(int8(ih)) / scatterOffsetDivisor
-		oz := float32(int8(ih>>8)) / scatterOffsetDivisor
+		ox := scatterOffset(byte(ih))
+		oz := scatterOffset(byte(ih >> 8))
 
 		// Height ~1/3 of footprint so pebbles sit flat / walkable.
 		foot := 0.18 + float32((ih>>16)&0x07)*0.012   // 0.18 .. 0.27

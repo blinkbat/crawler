@@ -716,15 +716,16 @@ func (t *TimingState) Hold() {
 	if !t.Active || t.Resolved {
 		return
 	}
-	if !t.isChargeFamily() {
+	if !t.IsChargeFamily() {
 		return
 	}
 	t.Pressed = true
 }
 
-// isChargeFamily reports whether this bar uses the hold/release flow (Charge
-// or Overcharge); they differ only in the resolve grader.
-func (t TimingState) isChargeFamily() bool {
+// IsChargeFamily reports whether this bar uses the hold/release flow (Charge
+// or Overcharge); they differ only in the resolve grader. Exported so battle
+// call sites test charge-class in one place instead of re-spelling the Kind check.
+func (t TimingState) IsChargeFamily() bool {
 	return t.Kind == TimingKindCharge || t.Kind == TimingKindOvercharge
 }
 
@@ -734,7 +735,7 @@ func (t *TimingState) Release() bool {
 	if !t.Active || t.Resolved {
 		return false
 	}
-	if !t.isChargeFamily() || !t.Pressed {
+	if !t.IsChargeFamily() || !t.Pressed {
 		return false
 	}
 	t.Released = true
@@ -877,7 +878,7 @@ func (t TimingState) Progress() float32 {
 	if t.Duration <= 0 {
 		return 0
 	}
-	if t.isChargeFamily() {
+	if t.IsChargeFamily() {
 		return ChargeCursorProgress(t.Elapsed, t.Duration)
 	}
 	return Clamp(t.Elapsed/t.Duration, 0, 1)

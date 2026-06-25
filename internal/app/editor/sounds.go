@@ -793,7 +793,7 @@ func drawSoundsModal(s *State, font rl.Font, theme render.Theme) {
 
 func drawSoundsParamsCol(s *State, font rl.Font, theme render.Theme, l *soundLayout) {
 	drawSoundsColumnFrame(theme, l.paramsCol, s.soundLeftPanel == soundPanelParams)
-	render.DrawSubHeading(font, "Synth params", l.paramsCol.X+12, l.paramsCol.Y+8, theme.BorderActive)
+	render.DrawSubHeading(font, "Synth params", l.paramsCol.X+soundColInsetX, l.paramsCol.Y+8, theme.BorderActive)
 
 	// Clip the slider body to the viewport so scrolled rows don't paint over the
 	// sub-header/footer (palette/metadata scissor pattern).
@@ -803,16 +803,16 @@ func drawSoundsParamsCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 	for si, sec := range soundSections {
 		hy := l.sectionHeaderY[si]
 		if hy+soundGroupHeaderH > vp.Y && hy < vp.Y+vp.Height { // header in band
-			render.DrawRichText(font, sec.Title, rl.NewVector2(l.paramsCol.X+12, hy+4), soundFontHint, 1, theme.TextLabel)
+			render.DrawRichText(font, sec.Title, rl.NewVector2(l.paramsCol.X+soundColInsetX, hy+4), soundFontHint, 1, theme.TextLabel)
 			lineY := hy + soundGroupHeaderH - 3
-			rl.DrawLineEx(rl.NewVector2(l.paramsCol.X+12, lineY), rl.NewVector2(l.paramsCol.X+l.paramsCol.Width-12, lineY), 1, theme.BorderDim)
+			rl.DrawLineEx(rl.NewVector2(l.paramsCol.X+soundColInsetX, lineY), rl.NewVector2(l.paramsCol.X+l.paramsCol.Width-soundColInsetX, lineY), 1, theme.BorderDim)
 		}
 		for k := 0; k < sec.Count; k++ {
 			track := l.sliderTracks[gi]
 			// Skip rows fully outside the viewport (avoids draw work).
 			if track.Y+soundRowH > vp.Y && track.Y-8 < vp.Y+vp.Height {
 				focused := s.soundLeftPanel == soundPanelParams && s.soundCursor == gi
-				drawSoundsSlider(font, theme, l.paramsCol.X+12, track.Y-8, l.paramsCol.Width-24, soundParamSliders[gi], s.soundParams, track, focused)
+				drawSoundsSlider(font, theme, l.paramsCol.X+soundColInsetX, track.Y-8, l.paramsCol.Width-2*soundColInsetX, soundParamSliders[gi], s.soundParams, track, focused)
 			}
 			gi++
 		}
@@ -835,7 +835,7 @@ func drawSoundsParamsCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 	if nameFocused {
 		nameLabelCol = theme.BorderActive
 	}
-	render.DrawRichText(font, "Name", rl.NewVector2(l.paramsCol.X+12, l.nameField.Y+6), soundFontBody, 1, nameLabelCol)
+	render.DrawRichText(font, "Name", rl.NewVector2(l.paramsCol.X+soundColInsetX, l.nameField.Y+6), soundFontBody, 1, nameLabelCol)
 	drawTextField(font, l.nameField, s.soundName, nameFocused)
 	// Action buttons (fixed footer).
 	actionFocused := s.soundLeftPanel == soundPanelParams && s.soundCursor == soundActionCursorIdx()
@@ -852,12 +852,12 @@ func drawSoundsSlider(font rl.Font, theme render.Theme, x, y, w float32, info sl
 
 func drawSoundsListCol(s *State, font rl.Font, theme render.Theme, l *soundLayout, names []string) {
 	drawSoundsColumnFrame(theme, l.listCol, s.soundLeftPanel == soundPanelList)
-	render.DrawSubHeading(font, "Saved sounds", l.listCol.X+12, l.listCol.Y+8, theme.BorderActive)
+	render.DrawSubHeading(font, "Saved sounds", l.listCol.X+soundColInsetX, l.listCol.Y+8, theme.BorderActive)
 	if len(names) == 0 {
 		render.DrawRichText(font, "(no saved sounds yet)",
-			rl.NewVector2(l.listCol.X+12, l.listCol.Y+44), soundFontBody, 1, theme.TextHint)
+			rl.NewVector2(l.listCol.X+soundColInsetX, l.listCol.Y+44), soundFontBody, 1, theme.TextHint)
 		render.DrawRichText(font, "Save one from the left column.",
-			rl.NewVector2(l.listCol.X+12, l.listCol.Y+68), soundFontHint, 1, theme.TextHint)
+			rl.NewVector2(l.listCol.X+soundColInsetX, l.listCol.Y+68), soundFontHint, 1, theme.TextHint)
 		return
 	}
 	for i := l.listTopRow; i < l.listEnd; i++ {
@@ -884,7 +884,7 @@ func drawSoundColumnScrollHints(font rl.Font, theme render.Theme, col rl.Rectang
 
 func drawSoundsAssignCol(s *State, font rl.Font, theme render.Theme, l *soundLayout) {
 	drawSoundsColumnFrame(theme, l.assignCol, s.soundLeftPanel == soundPanelAssign)
-	render.DrawSubHeading(font, "Built-in cue assignments", l.assignCol.X+12, l.assignCol.Y+8, theme.BorderActive)
+	render.DrawSubHeading(font, "Built-in cue assignments", l.assignCol.X+soundColInsetX, l.assignCol.Y+8, theme.BorderActive)
 	for i := l.assignTopRow; i < l.assignEnd; i++ {
 		cue := assignableCueList[i]
 		r := l.assignRows[i]

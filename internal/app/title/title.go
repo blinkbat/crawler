@@ -185,8 +185,9 @@ func Draw(s State, assets render.Resources) {
 	theme := assets.Theme()
 	screenW, screenH := render.ScreenSize()
 	// ClearBackground first — load-bearing depth-buffer wipe on this raylib build
-	// (see AGENTS.md). The color is overdrawn by DrawCandlelitBackdrop.
-	rl.ClearBackground(rl.NewColor(8, 10, 20, 255))
+	// (see AGENTS.md). The color is overdrawn by DrawCandlelitBackdrop, so it uses
+	// the backdrop's own top-stop token to stay in lockstep.
+	rl.ClearBackground(render.BackdropTopColor)
 	render.DrawCandlelitBackdrop(screenW, screenH)
 
 	title := "CRAWLER"

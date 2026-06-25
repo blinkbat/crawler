@@ -83,6 +83,14 @@ func openDropdownBelow(s *State, owner dropdownOwner, anchor rl.Rectangle) {
 
 func closeDropdown(s *State) { s.dropdown = dropdownState{} }
 
+// openFieldDropdown clears any lingering text-field focus, then opens dd below anchor.
+// Field rows always defocus before opening a picker (so Up/Down drive the list, not a
+// stale field) — this keeps that pairing in one place so a call site can't forget it.
+func openFieldDropdown(s *State, owner dropdownOwner, anchor rl.Rectangle) {
+	s.focus = focusNone
+	openDropdownBelow(s, owner, anchor)
+}
+
 // dropdownEntry is one selectable row: label + apply, in one ordered slice so
 // draw and choose can't drift. The rest are optional menu-row decoration (zero
 // for plain pickers): hotkey (accelerator hint), desc (menu explanation),

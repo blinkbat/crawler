@@ -597,6 +597,13 @@ func vfxKindFor(skill core.SkillID) core.VFXKind {
 	return core.VFXNone
 }
 
+// enqueueSkillVFXAtEnemy queues skill's VFX on the current enemy cursor
+// (g.Battle.EnemyIndex). The single seam for the hand-rolled single-target
+// handlers that don't run through applyProcStrike's shared body.
+func enqueueSkillVFXAtEnemy(g *core.GameState, skill core.SkillID) {
+	core.EnqueueEnemyVFX(g, vfxKindFor(skill), g.Battle.EnemyIndex)
+}
+
 // tryProcStatus is the shared quality-scaled status-proc gate. `defeated` blocks
 // a kill-shot from statusing a corpse. minGrade=0 = any quality procs; >0 gates on
 // Great/Excellent. durationFn is the pre-bound duration roller; resistWis shortens it.
@@ -854,7 +861,7 @@ func applyAttack(g *core.GameState, quality int) bool {
 	// selection already bars picking one in melee; this is the defense-in-depth hard
 	// gate (no damage, turn spent), and the swing still plays via AttackBump.
 	if core.EnemyInfoFor(target).Flying && !core.MemberMeleeReachesFlyer(*attacker) {
-		setBattleMessage(g, fmt.Sprintf("%s%s can't reach the airborne %s.", qualityTag(quality), attacker.Name, core.EnemySingularNoun(target)))
+		setBattleMessage(g, fmt.Sprintf("%s%s can't reach the airborne %s.", qualityTag(quality), attacker.Name, core.EnemySingularNoun(&target)))
 		finishActorTurn(g)
 		return true
 	}
@@ -869,7 +876,7 @@ func applyAttack(g *core.GameState, quality int) bool {
 	// Defender dodge: a connecting swing can still be sidestepped (symmetric with
 	// the party-side dodge). Skills are NOT dodgeable.
 	if core.RollDodge(g.Rand(), core.EffectiveEnemyStats(&target)) {
-		setBattleMessage(g, fmt.Sprintf("%s%s lunges but the %s slips aside.", qualityTag(quality), attacker.Name, core.EnemySingularNoun(target)))
+		setBattleMessage(g, fmt.Sprintf("%s%s lunges but the %s slips aside.", qualityTag(quality), attacker.Name, core.EnemySingularNoun(&target)))
 		finishActorTurn(g)
 		return true
 	}
@@ -1002,12 +1009,12 @@ func applySteal(g *core.GameState, quality int) bool {
 			rawBonus = applyCritMultiplier(rawBonus, critBonus, false)
 			bonus, defeated = damageEnemy(g, g.Battle.EnemyIndex, rawBonus, quality, core.SkillTagPhys)
 		}
-		core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillSteal), g.Battle.EnemyIndex)
+		enqueueSkillVFXAtEnemy(g, core.SkillSteal)
 		msg := stealMessage(actor.Name, kind, quality)
 		cat := core.LogInfo // a plain lift is utility; the T3 cut tints it damage/death
 		switch {
 		case defeated:
-			msg = fmt.Sprintf("%s The cut fells the %s for %d.", msg, core.EnemySingularNoun(*enemy), bonus)
+			msg = fmt.Sprintf("%s The cut fells the %s for %d.", msg, core.EnemySingularNoun(enemy), bonus)
 			cat = core.LogDeath
 		case bonus > 0:
 			msg = fmt.Sprintf("%s The cut bleeds for %d.", msg, bonus)
@@ -1034,7 +1041,7 @@ func applyScan(g *core.GameState, quality int) bool {
 	g.Bestiary.MarkScanned(enemy.Kind)
 	core.EnqueueEnemyVFX(g, core.VFXScan, g.Battle.EnemyIndex)
 	setBattleMessage(g, fmt.Sprintf("%s scans the %s — %d/%d HP. Identified.",
-		actor.Name, core.EnemySingularNoun(*enemy), enemy.HP, enemy.MaxHP))
+		actor.Name, core.EnemySingularNoun(enemy), enemy.HP, enemy.MaxHP))
 	finishActorTurn(g)
 	return true
 }
@@ -1052,7 +1059,7 @@ func applyEnemyDebuffSkill(g *core.GameState, skill core.SkillID, stamp func(act
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	effect := core.EffectiveSkillEffect(actor, skill)
 	msg := stamp(actor, enemy, effect)
-	core.EnqueueEnemyVFX(g, vfxKindFor(skill), g.Battle.EnemyIndex)
+	enqueueSkillVFXAtEnemy(g, skill)
 	setBattleMessage(g, msg)
 	finishActorTurn(g)
 	return true
@@ -1065,7 +1072,7 @@ func applyEnemyDebuffSkill(g *core.GameState, skill core.SkillID, stamp func(act
 func simpleEnemyDebuff(g *core.GameState, skill core.SkillID, msgFmt string) bool {
 	return applyEnemyDebuffSkill(g, skill, func(actor *core.PartyMember, enemy *core.Enemy, effect core.SkillEffect) string {
 		core.StampEnemyDebuff(enemy, skill, effect)
-		return fmt.Sprintf(msgFmt, actor.Name, core.EnemySingularNoun(*enemy), effect.BuffTurns)
+		return fmt.Sprintf(msgFmt, actor.Name, core.EnemySingularNoun(enemy), effect.BuffTurns)
 	})
 }
 
@@ -1102,7 +1109,7 @@ func applyFrostbite(g *core.GameState, quality int) bool {
 		return false
 	}
 	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillFrostbite, rawDamage, quality)
-	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillFrostbite), g.Battle.EnemyIndex)
+	enqueueSkillVFXAtEnemy(g, core.SkillFrostbite)
 	// Chill only on a survivor (no debuffing a corpse); guaranteed when alive.
 	chilled := !defeated && core.StampEnemyDebuff(enemy, core.SkillFrostbite, effect)
 	logFoeHit(g, appendCrit(frostbiteMessage(actor.Name, target, damage, quality, defeated, chilled), crit), defeated)
@@ -1126,11 +1133,11 @@ func applyCorrosiveVial(g *core.GameState, quality int) bool {
 	effect := core.EffectiveSkillEffect(actor, core.SkillCorrosiveVial)
 	before := enemy.Armor
 	subFloorZero(&enemy.Armor, effect.ArmorReduction)
-	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillCorrosiveVial), g.Battle.EnemyIndex)
+	enqueueSkillVFXAtEnemy(g, core.SkillCorrosiveVial)
 	if stripped := before - enemy.Armor; stripped > 0 {
-		setBattleMessage(g, fmt.Sprintf("%s's vial eats %d Armor off the %s.", actor.Name, stripped, core.EnemySingularNoun(*enemy)))
+		setBattleMessage(g, fmt.Sprintf("%s's vial eats %d Armor off the %s.", actor.Name, stripped, core.EnemySingularNoun(enemy)))
 	} else {
-		setBattleMessage(g, fmt.Sprintf("%s's vial splashes the %s — no armor left to break.", actor.Name, core.EnemySingularNoun(*enemy)))
+		setBattleMessage(g, fmt.Sprintf("%s's vial splashes the %s — no armor left to break.", actor.Name, core.EnemySingularNoun(enemy)))
 	}
 	finishActorTurn(g)
 	return true
@@ -1150,7 +1157,7 @@ func applyFirebolt(g *core.GameState, quality int) bool {
 		rawDamage += core.OverchargeDamageBonus
 	}
 	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillFirebolt, rawDamage, quality)
-	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillFirebolt), g.Battle.EnemyIndex)
+	enqueueSkillVFXAtEnemy(g, core.SkillFirebolt)
 	burned := tryProcStatus(g.Rand(), &enemy.BurnTurns, defeated, effect.BurnChance, quality, 0, effect.BurnDuration, resistWIS)
 	logFoeHit(g, appendCrit(fireboltMessage(actor.Name, target, damage, quality, defeated, burned, enemy.BurnTurns), crit), defeated)
 	if overloaded {
@@ -1329,7 +1336,7 @@ func applyProcStrike(g *core.GameState, skill core.SkillID, quality int, ps proc
 		rawDamage = ps.preStrike(rawDamage, actor, skill, quality)
 	}
 	damage, defeated, crit := strikeWithCrit(g, actor, skill, rawDamage, quality)
-	core.EnqueueEnemyVFX(g, vfxKindFor(skill), g.Battle.EnemyIndex)
+	enqueueSkillVFXAtEnemy(g, skill)
 	procced := tryProcStatus(g.Rand(), ps.counter(enemy), defeated, ps.chance(effect), quality, ps.minGrade, ps.dur(effect), resistWIS)
 	logFoeHit(g, appendCrit(procSkillMessage(ps.arms, actor.Name, target, damage, quality, defeated, procced), crit), defeated)
 	finishActorTurn(g)
@@ -1448,12 +1455,12 @@ func applySunder(g *core.GameState, quality int) bool {
 		return false
 	}
 	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillSunder, rawDamage, quality)
-	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillSunder), g.Battle.EnemyIndex)
+	enqueueSkillVFXAtEnemy(g, core.SkillSunder)
 	shoved := !defeated && pushEnemyReadiness(g, g.Battle.EnemyIndex, effect.ATBPush)
-	msg := qualityLine(quality, actor.Name, " sunders the %s for %d.", core.EnemySingularNoun(target), damage)
+	msg := qualityLine(quality, actor.Name, " sunders the %s for %d.", core.EnemySingularNoun(&target), damage)
 	switch {
 	case defeated:
-		msg = qualityLine(quality, actor.Name, " sunders the %s for %d — it falls.", core.EnemySingularNoun(target), damage)
+		msg = qualityLine(quality, actor.Name, " sunders the %s for %d — it falls.", core.EnemySingularNoun(&target), damage)
 	case shoved:
 		msg = fmt.Sprintf("%s Its turn is shoved back.", msg)
 	}
@@ -1471,7 +1478,7 @@ func applyTaunt(g *core.GameState, quality int) bool {
 		enemy.TauntedBy = g.Battle.CurrentParty
 		enemy.TauntTurns = core.TauntTurns
 		return fmt.Sprintf("%s taunts the %s — it turns its glare on them.",
-			actor.Name, core.EnemySingularNoun(*enemy))
+			actor.Name, core.EnemySingularNoun(enemy))
 	})
 }
 
@@ -1572,7 +1579,7 @@ func applyIceArmor(g *core.GameState, quality int) bool {
 // this rule lives (Bless / War Banner / Smoke Bomb / Stone Skin / Ice Armor).
 func selfCastTurnBonus(g *core.GameState, targetIdx int) int {
 	if targetIdx == g.Battle.CurrentParty {
-		return 1
+		return core.StatusTurnStep
 	}
 	return 0
 }
@@ -2110,11 +2117,8 @@ func applyPartyDamage(g *core.GameState, member *core.PartyMember, rawAmount int
 	// Aegis shield soaks post-mitigation BEFORE HP; only overflow reaches HP, and
 	// the bookkeeping below reads the post-shield amount.
 	if amount > 0 && member.ShieldHP > 0 {
-		absorbed := amount
-		if absorbed > member.ShieldHP {
-			absorbed = member.ShieldHP
-		}
-		member.ShieldHP -= absorbed
+		absorbed := min(amount, member.ShieldHP)
+		subFloorZero(&member.ShieldHP, absorbed)
 		amount -= absorbed
 	}
 	// Flash + HP-floor + popup + recoil (shared tail with the enemy path). Incoming hits
@@ -2260,7 +2264,7 @@ func clearPartyStatusesOnDeath(member *core.PartyMember) {
 func attackResultMessage(name string, target core.Enemy, damage, quality int, defeated bool) string {
 	tag := qualityTag(quality)
 	if defeated {
-		return fmt.Sprintf("%s%s drops a %s for %d.", tag, name, core.EnemySingularNoun(target), damage)
+		return fmt.Sprintf("%s%s drops a %s for %d.", tag, name, core.EnemySingularNoun(&target), damage)
 	}
 	return fmt.Sprintf("%s%s hits for %d.", tag, name, damage)
 }
@@ -2285,9 +2289,9 @@ func fireboltMessage(name string, target core.Enemy, damage, quality int, defeat
 	tag := qualityTag(quality)
 	switch {
 	case defeated:
-		return fmt.Sprintf("%s%s's Firebolt drops the %s for %d.", tag, name, core.EnemySingularNoun(target), damage)
+		return fmt.Sprintf("%s%s's Firebolt drops the %s for %d.", tag, name, core.EnemySingularNoun(&target), damage)
 	case burned:
-		return fmt.Sprintf("%s%s scorches the %s for %d. Burning!", tag, name, core.EnemySingularNoun(target), damage)
+		return fmt.Sprintf("%s%s scorches the %s for %d. Burning!", tag, name, core.EnemySingularNoun(&target), damage)
 	case burnTurns > 0:
 		return fmt.Sprintf("%s%s hits for %d. Burn is already active.", tag, name, damage)
 	default:
@@ -2310,7 +2314,7 @@ func procSkillMessage(arms procMessageArms, name string, target core.Enemy, dama
 	case proc:
 		f = arms.proc
 	}
-	return fmt.Sprintf(f, qualityTag(quality), name, core.EnemySingularNoun(target), damage)
+	return fmt.Sprintf(f, qualityTag(quality), name, core.EnemySingularNoun(&target), damage)
 }
 
 var (
@@ -2435,7 +2439,7 @@ func offTurnReflect(g *core.GameState, enemySlot, raw int, tag core.SkillTag, vf
 	if !ok {
 		return 0, false
 	}
-	noun := core.EnemySingularNoun(*enemy)
+	noun := core.EnemySingularNoun(enemy)
 	physTally := g.Battle.PhysDamageThisTurn
 	dealt, defeated = damageEnemy(g, enemySlot, raw, core.TimingQualityGood, tag)
 	g.Battle.PhysDamageThisTurn = physTally
@@ -2506,7 +2510,7 @@ func resolveEnemyMiss(g *core.GameState, slot int) {
 		return
 	}
 	stampEnemyBump(enemy)
-	setBattleMessage(g, fmt.Sprintf("The %s's attack misses %s!", core.EnemySingularNoun(*enemy), g.Party[target].Name))
+	setBattleMessage(g, fmt.Sprintf("The %s's attack misses %s!", core.EnemySingularNoun(enemy), g.Party[target].Name))
 }
 
 // resolveEnemyAttacker applies one enemy's attack against a chosen member, scaled
@@ -2525,7 +2529,7 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	// lifesteal). The defend quality is still recorded. Skills aren't dodgeable.
 	if core.RollDodge(g.Rand(), core.EffectiveStats(g.Party[target])) {
 		recordQuality(g, defendQuality, target, true)
-		setBattleMessage(g, fmt.Sprintf("%s sidesteps the %s.", g.Party[target].Name, core.EnemySingularNoun(*enemy)))
+		setBattleMessage(g, fmt.Sprintf("%s sidesteps the %s.", g.Party[target].Name, core.EnemySingularNoun(enemy)))
 		// Riposte on dodge (Warrior Battle Sense).
 		tryRiposte(g, target, slot)
 		return true
@@ -2574,7 +2578,7 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	// attacker (SPD debuff). Lands on contact even if Defended to 0; overwrites (no-stack).
 	if g.Party[target].IceArmorTurns > 0 && enemy.HP > 0 {
 		if core.StampEnemyDebuff(enemy, core.SkillIceArmor, core.NegStatDebuff(core.Stats{SPD: core.IceArmorChillSPD}, core.IceArmorChillTurns)) {
-			setBattleMessage(g, fmt.Sprintf("%s's ice armor chills the %s.", g.Party[target].Name, core.EnemySingularNoun(*enemy)))
+			setBattleMessage(g, fmt.Sprintf("%s's ice armor chills the %s.", g.Party[target].Name, core.EnemySingularNoun(enemy)))
 		}
 	}
 	// Retribution LAST (lifesteal + ice-armor chill resolved first), as it may kill the attacker.
@@ -2598,12 +2602,12 @@ func enemyHitMessage(enemy core.Enemy, targetName string, damage, defendQuality 
 	def := core.EnemyInfoFor(enemy)
 	if defendQuality > core.TimingQualityMiss {
 		if damage <= 0 {
-			return fmt.Sprintf("%s blocks the %s!", targetName, core.EnemySingularNoun(enemy))
+			return fmt.Sprintf("%s blocks the %s!", targetName, core.EnemySingularNoun(&enemy))
 		}
-		return fmt.Sprintf("%s blocks the %s (%d).", targetName, core.EnemySingularNoun(enemy), damage)
+		return fmt.Sprintf("%s blocks the %s (%d).", targetName, core.EnemySingularNoun(&enemy), damage)
 	}
 	if defending {
-		return fmt.Sprintf("%s soaks the %s for %d.", targetName, core.EnemySingularNoun(enemy), damage)
+		return fmt.Sprintf("%s soaks the %s for %d.", targetName, core.EnemySingularNoun(&enemy), damage)
 	}
 	return fmt.Sprintf("%s %s %s for %d.", core.TheEnemy(def), def.AttackVerbSingular, targetName, damage)
 }

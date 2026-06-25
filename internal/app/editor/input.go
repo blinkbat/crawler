@@ -470,13 +470,13 @@ func updateMouse(s *State) {
 	if pointIn(mp, s.rect.grid) {
 		w := rl.GetMouseWheelMove()
 		if w != 0 {
-			zoomBy(s, mp, 1+0.12*w)
+			zoomBy(s, mp, 1+canvasZoomWheelRate*w)
 		}
 	} else if pointIn(mp, s.rect.palette) {
 		// Wheel scrolls the brush list (~1.5 rows/notch).
 		w := rl.GetMouseWheelMove()
 		if w != 0 {
-			ScrollPalette(s, -w*paletteRowStride*1.5)
+			ScrollPalette(s, -w*paletteRowStride*paletteWheelRows)
 		}
 	} else if pointIn(mp, s.rect.metadata) {
 		// Wheel scrolls the MAP panel (~1 row/notch).
@@ -1000,6 +1000,10 @@ func activeLayerCharAt(s *State, x, z int) (byte, bool) {
 const (
 	minZoom = float32(0.5)
 	maxZoom = float32(4)
+	// canvasZoomWheelRate: zoom factor per wheel notch (1 ± rate·notch).
+	canvasZoomWheelRate = float32(0.12)
+	// paletteWheelRows: brush-list rows scrolled per wheel notch.
+	paletteWheelRows = float32(1.5)
 )
 
 func zoomBy(s *State, anchor rl.Vector2, factor float32) {

@@ -109,6 +109,8 @@ func Run() {
 		inAdventure := state.scene == sceneAdventure
 		inBattle := inAdventure && state.game.Battle.Active()
 		audio.UpdateMusic(dt, inAdventure, inBattle)
+		// Release the second footfall of a walk-step cluster once its gap elapses.
+		audio.UpdateFootsteps(dt)
 
 		rl.BeginDrawing()
 		// Re-read state.scene: update may have changed it this frame (the draw should

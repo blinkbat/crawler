@@ -129,14 +129,19 @@ func scaleRG(c rl.Color, f float32) rl.Color {
 	return rl.NewColor(uint8(float32(c.R)*f), uint8(float32(c.G)*f), c.B, c.A)
 }
 
+// crystalBreathe is the 0.82..1.0 body-brightness factor shared by crystalColor
+// and the crystal light pool (world.go) so the gem and its glow pulse in lockstep.
+func crystalBreathe() float32 {
+	return 0.82 + 0.18*pulse(crystalPulseHz)
+}
+
 // crystalColor: pulsing bright cyan while charged, dim slate while dormant.
 func crystalColor(charged bool) rl.Color {
 	if !charged {
 		return crystalDormantBody
 	}
-	// Breathe brightness 0.82-1.0; modulate only R/G (blue/alpha pinned to match editor marker).
-	breathe := 0.82 + 0.18*pulse(crystalPulseHz)
-	return scaleRG(crystalChargedBody, breathe)
+	// Modulate only R/G (blue/alpha pinned to match editor marker).
+	return scaleRG(crystalChargedBody, crystalBreathe())
 }
 
 // crystalCoreColor is the bright near-white tip glint, twinkling on crystalGlintHz.

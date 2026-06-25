@@ -686,10 +686,25 @@ const (
 	modalWideBtnW     = float32(110) // width of the Delete / Close affordance shared by the door + custom-enemy modals
 	buttonLabelPadX   = float32(28)  // horizontal padding added around a measured label to size an auto-width button (buttonWidth + context menu)
 	textFieldH        = float32(28)  // single-line text-field / input row height (shared by rename, Save As, sound name, dialog rows)
+	modalFooterHintDY = float32(26)  // dismissal/help hint baseline up from the card's bottom edge
 )
+
+// drawModalFooterHint paints a one-line dismissal/help hint at the modal card's
+// bottom-left (editorFontHint), at the shared baseline every modal uses.
+func drawModalFooterHint(font rl.Font, card rl.Rectangle, text string, theme render.Theme) {
+	render.DrawRichText(font, text,
+		rl.NewVector2(card.X+modalContentInset, card.Y+card.Height-modalFooterHintDY),
+		editorFontHint, 1, theme.TextHint)
+}
 
 // modalContentWidth is the usable inner width of a modal card.
 func modalContentWidth(card rl.Rectangle) float32 { return card.Width - 2*modalContentInset }
+
+// cardContentBox returns a modal card's content origin x and inner width — the
+// opening line of every dialog *LayoutFor.
+func cardContentBox(card rl.Rectangle) (x, fw float32) {
+	return card.X + modalContentInset, modalContentWidth(card)
+}
 
 // modalFooterButtonY is the bottom button row's Y: modalBottomInset up from the
 // card bottom. Shared by modalButtonRow + the gallery modals.
@@ -913,6 +928,14 @@ func drawScrollArrow(font rl.Font, up bool, pos rl.Vector2, fontSize float32, co
 	render.DrawRichText(font, arrow, pos, fontSize, 1, col)
 }
 
+// drawCenteredRichLabel paints label centered on both axes within r at editorFontBody.
+func drawCenteredRichLabel(font rl.Font, r rl.Rectangle, label string, col rl.Color) {
+	measure := render.MeasureRichText(font, label, editorFontBody, 1)
+	render.DrawRichText(font, label,
+		rl.NewVector2(r.X+(r.Width-measure.X)/2, r.Y+(r.Height-measure.Y)/2),
+		editorFontBody, 1, col)
+}
+
 func drawButton(font rl.Font, r rl.Rectangle, label string, active bool) {
 	bg := bgButton
 	border := editorBorderMid
@@ -938,10 +961,7 @@ func drawButton(font rl.Font, r rl.Rectangle, label string, active bool) {
 	if r.Width >= 44 && r.Height >= 24 {
 		rl.DrawCircleV(rl.NewVector2(r.X+r.Width-8, r.Y+8), 1.5, render.FadeColor(editorBorderActive, 0.55))
 	}
-	measure := render.MeasureRichText(font, label, editorFontBody, 1)
-	render.DrawRichText(font, label,
-		rl.NewVector2(r.X+(r.Width-measure.X)/2, r.Y+(r.Height-measure.Y)/2),
-		editorFontBody, 1, text)
+	drawCenteredRichLabel(font, r, label, text)
 }
 
 // drawButtonDisabled paints a context-inactive toolbar button: same footprint
@@ -949,10 +969,7 @@ func drawButton(font rl.Font, r rl.Rectangle, label string, active bool) {
 func drawButtonDisabled(font rl.Font, r rl.Rectangle, label string) {
 	rl.DrawRectangleRec(r, render.FadeColor(bgButton, 0.45))
 	rl.DrawRectangleLinesEx(r, 1, render.FadeColor(editorBorderMid, 0.5))
-	measure := render.MeasureRichText(font, label, editorFontBody, 1)
-	render.DrawRichText(font, label,
-		rl.NewVector2(r.X+(r.Width-measure.X)/2, r.Y+(r.Height-measure.Y)/2),
-		editorFontBody, 1, render.FadeColor(textBright, 0.38))
+	drawCenteredRichLabel(font, r, label, render.FadeColor(textBright, 0.38))
 }
 
 // drawStepperButtons paints the shared "−"/"+" adjuster pair for a numeric
@@ -2951,7 +2968,7 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 
 	if len(s.modalPaths) == 0 {
 		render.DrawRichText(font, "(no .map files in maps/)", rl.NewVector2(r.X+modalContentInset, r.Y+50), editorFontLabel, 1, theme.TextMuted)
-		render.DrawRichText(font, "Esc / click outside to close", rl.NewVector2(r.X+modalContentInset, r.Y+r.Height-26), editorFontHint, 1, theme.TextHint)
+		drawModalFooterHint(font, r, "Esc / click outside to close", theme)
 		return
 	}
 
@@ -3058,8 +3075,7 @@ func drawSaveAsModal(s *State, font rl.Font, theme render.Theme) {
 		render.DrawRichText(font, "(Punctuation and spaces are stripped)",
 			rl.NewVector2(r.X+modalContentInset, r.Y+112), editorFontTiny, 1, theme.BorderDanger)
 	}
-	render.DrawRichText(font, "Enter save   Esc cancel",
-		rl.NewVector2(r.X+modalContentInset, r.Y+r.Height-26), editorFontHint, 1, theme.TextHint)
+	drawModalFooterHint(font, r, "Enter save   Esc cancel", theme)
 }
 
 // drawPackEditModal renders the inline pack editor: header, scrollable member
@@ -3187,8 +3203,7 @@ func drawValidateModal(s *State, font rl.Font, theme render.Theme) {
 			y += 22
 		}
 	}
-	render.DrawRichText(font, "Esc / Enter / click   close",
-		rl.NewVector2(r.X+modalContentInset, r.Y+r.Height-26), editorFontHint, 1, theme.TextHint)
+	drawModalFooterHint(font, r, "Esc / Enter / click   close", theme)
 }
 
 // entityKindRow tags an entity-list row by what it points at.
@@ -3319,8 +3334,7 @@ func drawEntityListModal(s *State, font rl.Font, theme render.Theme) {
 		}
 		render.DrawRichText(font, rows[i].label, rl.NewVector2(rr.X+22, rr.Y+(rr.Height-16)/2), editorFontBody, 1, col)
 	}
-	render.DrawRichText(font, fmt.Sprintf("%d objects   ·   Up/Down + Enter or click a row to jump + edit   ·   Esc close", len(rows)),
-		rl.NewVector2(card.X+modalContentInset, card.Y+card.Height-26), editorFontHint, 1, theme.TextHint)
+	drawModalFooterHint(font, card, fmt.Sprintf("%d objects   ·   Up/Down + Enter or click a row to jump + edit   ·   Esc close", len(rows)), theme)
 }
 
 // drawEscMenuModal paints the editor's pause-style menu (Display / Continue /

@@ -189,11 +189,37 @@ func drawDebugMenuOverlay(g *core.GameState, assets Resources) {
 // Retro-menu slider chrome geometry: the intensity bar at each filter row's
 // right edge + the adjust arrows on the cursored row. All primitive-drawn, no glyphs.
 const (
-	retroBarW      = int32(74)
-	retroBarH      = int32(10)
-	retroBarTextDY = int32(13) // bar's vertical center below the row's text top
-	retroArrowGap  = float32(13)
+	retroBarW        = int32(74)
+	retroBarH        = int32(10)
+	retroBarTextDY   = int32(13) // bar's vertical center below the row's text top
+	retroArrowGap    = float32(13)
+	retroBarRightPad = int32(14) // gap from the bar's right edge to the row inner edge
 )
+
+// drawMenuSliderRows draws n intensity-gauge rows on a menu card (bar anchored at the
+// row's right edge via panelW), with ◂▸ adjust arrows on the cursored row. value(i)
+// is the 0..1 fill for row i. Shared by the Retro Filters and Sound submenus.
+func drawMenuSliderRows(panelX, panelY, panelW int32, n, cursor int, value func(i int) float32) {
+	rowX := panelX + pauseMenuRowInsetX
+	barX := rowX + menuRowInnerW(panelW) - retroBarW - retroBarRightPad
+	flick := candleFlicker()
+	for i := 0; i < n; i++ {
+		rowTextY := menuRowTop(panelY, i)
+		barY := rowTextY + retroBarTextDY - retroBarH/2
+		v := value(i)
+		fillW := int32(0)
+		if v > 0 {
+			fillW = int32(float32(retroBarW-2) * v)
+		}
+		drawIntensityGauge(barX, barY, retroBarW, retroBarH, fillW, fadeColor(giltBright, 0.55+0.45*v))
+		if cursor == i {
+			cy := float32(barY + retroBarH/2)
+			col := fadeColor(giltBright, 0.65+0.35*flick)
+			drawArrowMarker(rl.NewVector2(float32(barX)-retroArrowGap, cy), -7, 0, 6, col)
+			drawArrowMarker(rl.NewVector2(float32(barX+retroBarW)+retroArrowGap, cy), 7, 0, 6, col)
+		}
+	}
+}
 
 // drawRetroMenuOverlay paints the Retro Filters submenu. Rows are positional
 // (cursor slot == filter kind). On the shared card it draws each slider row's
@@ -203,28 +229,8 @@ func drawRetroMenuOverlay(g *core.GameState, assets Resources) {
 		func(i int) string { return retroMenuRowLabel(g, i) },
 		func(i int) bool { return g.RetroMenuIndex == i })
 
-	rowX := panelX + pauseMenuRowInsetX
-	barX := rowX + menuRowInnerW(retroMenuPanelW) - retroBarW - 14
-	flick := candleFlicker()
-	for i := 0; i < int(core.RetroFilterCount); i++ {
-		rowTextY := menuRowTop(panelY, i)
-		barY := rowTextY + retroBarTextDY - retroBarH/2
-		v := g.RetroFilters[i]
-		// Track + gilt fill + outline — the shared retro-slider gauge chrome (same
-		// glass-tube language as the HP gauges, at chip scale).
-		fillW := int32(0)
-		if v > 0 {
-			fillW = int32(float64(retroBarW-2) * v)
-		}
-		drawIntensityGauge(barX, barY, retroBarW, retroBarH, fillW, fadeColor(giltBright, 0.55+0.45*float32(v)))
-		if g.RetroMenuIndex == i {
-			// Drawn ◂ ▸ affordance — triangles, not font runes.
-			cy := float32(barY + retroBarH/2)
-			col := fadeColor(giltBright, 0.65+0.35*flick)
-			drawArrowMarker(rl.NewVector2(float32(barX)-retroArrowGap, cy), -7, 0, 6, col)
-			drawArrowMarker(rl.NewVector2(float32(barX+retroBarW)+retroArrowGap, cy), 7, 0, 6, col)
-		}
-	}
+	drawMenuSliderRows(panelX, panelY, retroMenuPanelW, int(core.RetroFilterCount), g.RetroMenuIndex,
+		func(i int) float32 { return float32(g.RetroFilters[i]) })
 }
 
 // soundMenuRowLabel formats one Sound submenu row: the two sliders show a percent,
@@ -261,25 +267,7 @@ func drawSoundMenuOverlay(g *core.GameState, assets Resources) {
 		func(i int) string { return soundMenuRowLabel(i) },
 		func(i int) bool { return g.SoundMenuIndex == i })
 
-	rowX := panelX + pauseMenuRowInsetX
-	barX := rowX + menuRowInnerW(pauseMenuPanelW) - retroBarW - 14
-	flick := candleFlicker()
-	for i := 0; i < core.SoundMenuSliderCount; i++ {
-		rowTextY := menuRowTop(panelY, i)
-		barY := rowTextY + retroBarTextDY - retroBarH/2
-		v := soundMenuRowValue(i)
-		fillW := int32(0)
-		if v > 0 {
-			fillW = int32(float32(retroBarW-2) * v)
-		}
-		drawIntensityGauge(barX, barY, retroBarW, retroBarH, fillW, fadeColor(giltBright, 0.55+0.45*v))
-		if g.SoundMenuIndex == i {
-			cy := float32(barY + retroBarH/2)
-			col := fadeColor(giltBright, 0.65+0.35*flick)
-			drawArrowMarker(rl.NewVector2(float32(barX)-retroArrowGap, cy), -7, 0, 6, col)
-			drawArrowMarker(rl.NewVector2(float32(barX+retroBarW)+retroArrowGap, cy), 7, 0, 6, col)
-		}
-	}
+	drawMenuSliderRows(panelX, panelY, pauseMenuPanelW, core.SoundMenuSliderCount, g.SoundMenuIndex, soundMenuRowValue)
 }
 
 // Pause menu layout: centered panel, rows at a fixed stride below a header band;
