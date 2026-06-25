@@ -345,6 +345,16 @@ const (
 	memberCardBarFracW = float32(0.54)
 )
 
+// Character-tab formation-card horizontal spacing. Wider than the shared split so the
+// card breathes: a roomier edge inset (left of the bars / right of the values), a clear
+// gap between the HP/MP bars and the stat grid, and a gutter between the two stat columns.
+const (
+	formationCardInsetX  = float32(28)   // left/right content inset from the card edge
+	formationBarsEndFrac = float32(0.42) // HP/MP bars right edge (frac of card width)
+	formationGridSplit   = float32(0.50) // stat grid left edge (frac) — gap to the bars
+	formationStatColGap  = float32(16)   // gutter between the two stat columns
+)
+
 // Character-tab formation-card steps: tighter than the header so the stat grid clears the pill.
 var formationCardMetrics = cardIdentityMetrics{
 	nameStep: 34,
@@ -426,11 +436,10 @@ func drawFormationCard(font rl.Font, g *core.GameState, i int, quad rl.Rectangle
 		drawPanelOutline(int32(quad.X)-2, int32(quad.Y)-2, int32(quad.Width)+4, int32(quad.Height)+4, borderTarget)
 	}
 
-	pad := memberCardGutter
-	leftX := quad.X + pad
-	leftW := quad.Width*0.44 - pad
-	rightX := quad.X + quad.Width*memberCardBarSplit
-	rightW := quad.Width*memberCardBarFracW - pad
+	leftX := quad.X + formationCardInsetX
+	leftW := quad.Width*formationBarsEndFrac - formationCardInsetX
+	rightX := quad.X + quad.Width*formationGridSplit
+	rightW := quad.X + quad.Width - formationCardInsetX - rightX
 
 	// --- Left: identity + vitals (shared block; formation packs tighter than the header) ---
 	nameCol := textPrimary
@@ -446,11 +455,12 @@ func drawFormationCard(font rl.Font, g *core.GameState, i int, quad rl.Rectangle
 	}
 
 	// --- Right: stat grid (2 cols × ceil(StatCount/2) rows) + armor/XP ---
-	statColW := rightW / 2
+	statColW := (rightW - formationStatColGap) / 2
+	colPitch := statColW + formationStatColGap // column-1 starts a gutter past column-0
 	rowH := float32(28)
 	sy := quad.Y + 16
 	for s := core.Stat(0); s < core.StatCount; s++ {
-		cellX := rightX + float32(int(s)%2)*statColW
+		cellX := rightX + float32(int(s)%2)*colPitch
 		cellY := sy + float32(int(s)/2)*rowH
 		drawStatIcon(s, cellX+9, cellY+13, 9, woodAccentIconBright)
 		drawTextWithShadow(font, core.StatLabel(s), cellX+24, cellY, FontBody, textMuted)
@@ -459,7 +469,7 @@ func drawFormationCard(font rl.Font, g *core.GameState, i int, quad rl.Rectangle
 	ay := sy + float32((core.StatCount+1)/2)*rowH + 6
 	drawTextWithShadow(font, "ARM", rightX, ay, FontSmall, textMuted)
 	drawTextRightAligned(font, smallIntLabel(m.Armor), rightX+statColW-statValueInsetX, ay, FontSmall, textPrimary)
-	drawTextWithShadow(font, "XP", rightX+statColW, ay, FontSmall, textMuted)
+	drawTextWithShadow(font, "XP", rightX+colPitch, ay, FontSmall, textMuted)
 	drawTextRightAligned(font, formatRatioSpaced(m.XP, core.XPForLevel(m.Level)), rightX+rightW, ay, FontSmall, textPrimary)
 
 	// Allocate CTA — cursored member with something to spend.

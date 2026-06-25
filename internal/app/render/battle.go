@@ -575,7 +575,8 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 			drawTextWithShadow(assets.hudFont, status, float32(contentX), float32(contentY), FontSmall, classCol)
 			contentY += int32(FontBody) // one body line below the status before the menu
 		}
-		drawActionMenuOptions(g, assets, contentX, contentY, rightX, member)
+		// Extra breathing room below the name header before the first action row.
+		drawActionMenuOptions(g, assets, contentX, contentY+actionMenuListTopGap, rightX, member)
 	}
 
 	// Confirm/Back hint footer over a gilt rule; skipped when the panel is shrunk short.
@@ -604,12 +605,16 @@ func drawActionMenuOptions(g *core.GameState, assets Resources, x, y, rightX int
 	// Attack greys out when a melee attacker is stuck in the back row (front still up) —
 	// same gate the menu enforces, so the row reads as unusable before it's picked.
 	attackBlocked := core.BackRowMeleeBlocked(core.BasicAttackClass(core.EquippedWeapon(*member)), g.Party, g.Battle.CurrentParty)
-	// Labels pushed right for the left icon column; rows pitch by uiRowPitch and stretch
-	// to rightX. Driven by the init-asserted actionRowLabels table.
-	labelX := x + 26
+	// Labels pushed right to clear the left icon medallion (more gap than the medallion's
+	// own radius so the text isn't crowded). Rows pitch by uiRowPitch and stretch past the
+	// content inset to rowRightX so the selection plate fills the otherwise-empty trailing
+	// gap, leaving only actionRowPlateInsetX of edge pad (mirrors the plate's left bleed).
+	// Driven by the init-asserted actionRowLabels table.
+	labelX := x + 36
+	rowRightX := rightX + (hudContentInsetX - actionRowPlateInsetX)
 	for row := core.ActionRow(0); int(row) < core.ActionRowCount; row++ {
 		disabled := row == core.ActionRowAttack && attackBlocked
-		drawActionMenuRow(assets.hudFont, row, x, labelX, y+int32(row)*uiRowPitch, rightX, actionRowLabels[row], "", cursor == row, disabled)
+		drawActionMenuRow(assets.hudFont, row, x, labelX, y+int32(row)*uiRowPitch, rowRightX, actionRowLabels[row], "", cursor == row, disabled)
 	}
 }
 
@@ -827,6 +832,10 @@ func drawItemMenuList(g *core.GameState, assets Resources, x, y, rightX int32) {
 // actionRowPlateInsetX is how far the selection plate bleeds left past the text origin,
 // so the highlight reaches the content edge regardless of where the label starts.
 const actionRowPlateInsetX = int32(8)
+
+// actionMenuListTopGap is extra vertical air between the member-name header and the
+// first action row, so the list doesn't crowd the name above it.
+const actionMenuListTopGap = int32(10)
 
 // drawActionRow paints one key-plate row (selected gets the gilt plate, else dark glass).
 // The plate spans x-actionRowPlateInsetX to rightX so the highlight reaches the content edge.

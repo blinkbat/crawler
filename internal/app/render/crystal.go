@@ -29,40 +29,65 @@ var crystalGeo = crystalGeometry{
 // crystalFacets is the cut-gem side count for the bipyramid cones + wire.
 const crystalFacets = 8
 
-// DrawCrystals paints each healing crystal as a floating, bobbing six-sided
-// bipyramid: charged ones pulse bright cyan, spent ones sit dim and still.
-// Drawn unlit (default shader) — must be called inside the 3D pass (BeginMode3D),
-// after DrawWorld's EndShaderMode (same as DrawChests/DrawDoors).
+// crystalSpinDegPerSec is the gem's gentle idle rotation about its vertical axis.
+const crystalSpinDegPerSec = 24.0
+
+// crystalLightColor is the charged crystal's point-light tint: the gem's cyan
+// (crystalCyanBase) lifted to a torch-comparable HDR intensity so a live crystal
+// actually pools cool light on the nearby stone. Fed into the torch light path
+// (collectTorches) — a live crystal is just another point light, Grimrock-style.
+// The fake halo aura this replaces was removed (it read as a second gem, not a glow).
+var crystalLightColor = rl.NewVector3(
+	float32(crystalCyanBase.R)/255*crystalLightGain,
+	float32(crystalCyanBase.G)/255*crystalLightGain,
+	float32(crystalCyanBase.B)/255*crystalLightGain,
+)
+
+const crystalLightGain = 1.6
+
+// crystalSpinAngle is the gem's Y rotation (degrees): a continuous slow idle spin,
+// plus a one-shot fast burst (CrystalSpinBurstTurns turns, ease-out) that plays down
+// as the touch-armed SpinBurst countdown drains. The burst total is a whole-turn
+// multiple so it rejoins the idle spin seamlessly when it ends.
+func crystalSpinAngle(t float32, c core.Crystal) float32 {
+	angle := t * crystalSpinDegPerSec
+	if c.SpinBurst > 0 {
+		p := 1 - c.SpinBurst/core.CrystalSpinBurstDuration // 0→1 over the burst
+		ease := 1 - (1-p)*(1-p)*(1-p)                      // ease-out cubic — fast then settle
+		angle += 360 * core.CrystalSpinBurstTurns * ease
+	}
+	return angle
+}
+
+// DrawCrystals paints each healing crystal as a floating, bobbing, slowly-spinning
+// six-sided bipyramid: charged ones pulse bright cyan (and cast a real cyan point
+// light via collectTorches), spent ones sit dim. Drawn unlit (default shader) — must
+// be called inside the 3D pass (BeginMode3D), after DrawWorld's EndShaderMode.
 func DrawCrystals(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if len(g.Crystals) == 0 {
 		return
 	}
 	vc := newViewCull(camera)
-	t := rl.GetTime()
+	t := float32(rl.GetTime())
 	for _, c := range g.Crystals {
 		base := tileWorldPos(c.TileX, c.TileZ, g.Area.StandGroundY(c.TileX, c.TileZ))
 		if vc.cull(base) {
 			continue
 		}
 		// Float above floor with a slow vertical bob.
-		bob := float32(math.Sin(t*2.0)) * 0.05
+		bob := float32(math.Sin(float64(t)*2.0)) * 0.05
 		midY := base.Y + crystalGeo.FloatY + bob
-		mid := rl.NewVector3(base.X, midY, base.Z)
-		top := rl.NewVector3(base.X, midY+crystalGeo.HalfHeight, base.Z)
-		bot := rl.NewVector3(base.X, midY-crystalGeo.HalfHeight, base.Z)
-
 		col := crystalColor(c.Charged)
 		r := crystalGeo.WaistRadius
-		// Charged gems wear a faint oversized halo (drawn first so the body sits on
-		// top and only the aura's fringe shows) — a cool glow around the cut stone.
-		if c.Charged {
-			glow := crystalChargedGlow
-			gr := r * 1.4
-			gTop := rl.NewVector3(base.X, midY+crystalGeo.HalfHeight*1.18, base.Z)
-			gBot := rl.NewVector3(base.X, midY-crystalGeo.HalfHeight*1.18, base.Z)
-			rl.DrawCylinderEx(mid, gTop, gr, 0.0, crystalFacets, glow)
-			rl.DrawCylinderEx(gBot, mid, 0.0, gr, crystalFacets, glow)
-		}
+		hh := crystalGeo.HalfHeight
+		// Build the gem around a local origin and spin it about Y via the rlgl matrix
+		// stack (idle spin + touch burst). Light comes from collectTorches, not here.
+		mid := rl.NewVector3(0, 0, 0)
+		top := rl.NewVector3(0, hh, 0)
+		bot := rl.NewVector3(0, -hh, 0)
+		rl.PushMatrix()
+		rl.Translatef(base.X, midY, base.Z)
+		rl.Rotatef(crystalSpinAngle(t, c), 0, 1, 0)
 		// Two stacked cones tip-to-tip form the gem.
 		rl.DrawCylinderEx(mid, top, r, 0.0, crystalFacets, col)
 		rl.DrawCylinderEx(bot, mid, 0.0, r, crystalFacets, col)
@@ -71,9 +96,10 @@ func DrawCrystals(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		rl.DrawCylinderWiresEx(bot, mid, 0.0, r, crystalFacets, crystalEdge(c.Charged))
 		// Bright glint spike off the top tip — a moving shine that sells "shiny".
 		if c.Charged {
-			glintTip := rl.NewVector3(base.X, midY+crystalGeo.HalfHeight+0.14, base.Z)
+			glintTip := rl.NewVector3(0, hh+0.14, 0)
 			rl.DrawCylinderEx(top, glintTip, 0.07, 0.0, crystalFacets, crystalCoreColor())
 		}
+		rl.PopMatrix()
 	}
 }
 

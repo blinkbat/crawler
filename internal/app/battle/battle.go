@@ -1451,6 +1451,10 @@ func tickHitTimers(bump, flash, knockback *float32, dt float32) {
 	*knockback = core.ApproachZero(*knockback, dt)
 }
 
+// enemySlideSlots backs UpdateEnemySlides' per-frame slot resolve (reused buffer,
+// single-threaded update path).
+var enemySlideSlots []core.EnemySlot
+
 // updateBattleEffects decays the per-actor hit-reaction timers each frame.
 // `members` is the caller-hoisted active-pack roster.
 func updateBattleEffects(g *core.GameState, dt float32, members []core.Enemy) {
@@ -1464,6 +1468,11 @@ func updateBattleEffects(g *core.GameState, dt float32, members []core.Enemy) {
 		members[i].DeathFade = core.ApproachZero(members[i].DeathFade, dt)
 		members[i].DamagePopupTimer = core.ApproachZero(members[i].DamagePopupTimer, dt)
 	}
+	// Arm/decay the foe formation glide AFTER the DeathFade decay above, so a corpse
+	// that finishes fading this tick drops from the rank and the survivors slide to
+	// close the gap (rather than snapping). Slots resolved once, shared with the draw.
+	enemySlideSlots = core.ResolveEnemySlots(members, enemySlideSlots)
+	core.UpdateEnemySlides(members, enemySlideSlots, dt)
 	g.Battle.SequencePulseTimer = core.ApproachZero(g.Battle.SequencePulseTimer, dt)
 	if g.Battle.SequencePulseTimer <= 0 {
 		g.Battle.SequencePulseIndex = -1

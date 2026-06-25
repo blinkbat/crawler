@@ -64,7 +64,9 @@ func drawMinimap(m *core.AreaDefinition, g *core.GameState, assets Resources) {
 	panelW := minimapPanelW
 	panelH := minimapPanelH
 
-	drawPanelCard(pad, pad, panelW, panelH)
+	// drawCard with noAccent (not drawPanelCard): the minimap skips the left accent
+	// rail so there's no bright vertical edge-line down the panel's left side.
+	drawCard(pad, pad, panelW, panelH, surfacePrimary, borderSoft, noAccent)
 	areaName := g.Area.Name
 	if areaName != "" {
 		// Area name centered above the grid as the panel's natural label.

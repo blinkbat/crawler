@@ -316,9 +316,9 @@ var (
 	// crystalChargedBody: charged gem body — R/G ride crystalCyanBase (lockstep),
 	// blue pinned full. crystalColor pulses only R/G at render time.
 	crystalChargedBody = rl.NewColor(crystalCyanBase.R, crystalCyanBase.G, 255, 235)
-	// crystalChargedGlow: faint cyan aura drawn larger than the gem for a halo;
 	// crystalChargedCore: bright near-white inner/tip glint that reads as "shiny".
-	crystalChargedGlow = rl.NewColor(120, 230, 255, 70)
+	// (The old larger-than-gem "halo" aura was dropped for a real point light — see
+	// crystalLightColor / collectTorches.)
 	crystalChargedCore = rl.NewColor(225, 252, 255, 240)
 	// markerCrystal reads as the charged cyan, clear of the chest/door/pack/start
 	// swatches.

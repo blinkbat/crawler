@@ -39,6 +39,7 @@ const (
 	SoundLevelUp                 // a member crossed a level on the spoils screen
 	SoundItemGet                 // a loot row revealed on the spoils screen
 	SoundXPTick                  // subtle blip as the spoils XP bars count up
+	SoundCrystal                 // touched a charged healing crystal — bright cyan shimmer
 	soundCount
 )
 
@@ -90,6 +91,10 @@ var soundCues = [soundCount]soundCue{
 	// Count-up blip — short, quiet, high; reads as a tick not a tone.
 	SoundXPTick: {Display: "XP Tick", Canonical: "xp_tick",
 		PCM: func() []int16 { return wavsynth.SynthClick(0.014, 2600, 0.4, 0.1, 0.08) }},
+	// Crystal touch — a high, bright, ringing chord that shimmers like struck glass;
+	// an octave above Victory's chord so it reads as crystalline, not a win fanfare.
+	SoundCrystal: {Display: "Crystal", Canonical: "crystal",
+		PCM: func() []int16 { return wavsynth.SynthChord(0.6, []float64{1047, 1319, 1568, 2093}, 0.16) }},
 }
 
 // A missing soundCues row is the zero value (nil PCM), not a compile

@@ -124,7 +124,7 @@ var enemyDefinitions = []EnemyDefinition{
 		Item:               ItemCheese,
 		MaxHP:              10,
 		AttackDamage:       3,
-		Stats:              Stats{STR: 2, DEX: 3, INT: 0, WIS: 1, VIT: 2, SPD: 6},
+		Stats:              Stats{STR: 2, DEX: 3, INT: 0, WIS: 1, VIT: 2, SPD: 4},
 		Tier:               1,
 		XPValue:            5,
 		GoldMin:            1,
@@ -145,7 +145,7 @@ var enemyDefinitions = []EnemyDefinition{
 		Item:               ItemBatJerky,
 		MaxHP:              7,
 		AttackDamage:       2,
-		Stats:              Stats{STR: 1, DEX: 5, INT: 0, WIS: 1, VIT: 1, SPD: 9},
+		Stats:              Stats{STR: 1, DEX: 5, INT: 0, WIS: 1, VIT: 1, SPD: 7},
 		Tier:               2,
 		XPValue:            8,
 		GoldMin:            2,
@@ -290,7 +290,7 @@ var enemyDefinitions = []EnemyDefinition{
 		Item:               ItemNone,
 		MaxHP:              11,
 		AttackDamage:       3,
-		Stats:              Stats{STR: 2, DEX: 4, INT: 0, WIS: 2, VIT: 3, SPD: 7},
+		Stats:              Stats{STR: 2, DEX: 4, INT: 0, WIS: 2, VIT: 3, SPD: 5},
 		Tier:               3,
 		XPValue:            13,
 		AttackVerbSingular: "bites",
@@ -314,7 +314,7 @@ var enemyDefinitions = []EnemyDefinition{
 		Item:               ItemBatJerky,
 		MaxHP:              13,
 		AttackDamage:       4,
-		Stats:              Stats{STR: 3, DEX: 5, INT: 0, WIS: 1, VIT: 3, SPD: 8},
+		Stats:              Stats{STR: 3, DEX: 5, INT: 0, WIS: 1, VIT: 3, SPD: 6},
 		Tier:               4,
 		XPValue:            18,
 		AttackVerbSingular: "drains",
@@ -340,7 +340,7 @@ var enemyDefinitions = []EnemyDefinition{
 		// Fragile but fast; the Confuse cast is the real threat, not the bite.
 		MaxHP:              6,
 		AttackDamage:       1,
-		Stats:              Stats{STR: 0, DEX: 6, INT: 4, WIS: 6, VIT: 1, SPD: 9},
+		Stats:              Stats{STR: 0, DEX: 6, INT: 4, WIS: 6, VIT: 1, SPD: 7},
 		MDef:               4,
 		Tier:               3,
 		XPValue:            16,
@@ -658,6 +658,11 @@ func clearEnemyAnimTimers(e *Enemy) {
 	e.AttackBump = 0
 	e.HitAnim = HitAnim{}
 	e.DeathFade = 0
+	// Formation-slide transients: drop any in-flight glide AND the cached placement, so
+	// a re-engaged pack (Flee → fight again) re-seats its slots fresh without sliding in.
+	e.SlotSlide = 0
+	e.SlideFromRow, e.SlideFromSlot, e.SlideFromCount = RowFront, 0, 0
+	e.placedRow, e.placedSlot, e.placedCount, e.placedValid = RowFront, 0, 0, false
 }
 
 // ClearEnemyCombatTransients clears an enemy's timed combat statuses (every *Turns

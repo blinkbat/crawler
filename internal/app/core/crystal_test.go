@@ -39,6 +39,26 @@ func TestDropCrystalsOnPacks(t *testing.T) {
 	}
 }
 
+// TestTickCrystalSpins_DecaysToZero: the touch-armed fast spin drains by dt each
+// frame and floors at 0 (no negative countdown that would replay the burst).
+func TestTickCrystalSpins_DecaysToZero(t *testing.T) {
+	g := &GameState{Crystals: []Crystal{
+		{SpinBurst: CrystalSpinBurstDuration},
+		{SpinBurst: 0}, // idle crystal stays at 0
+	}}
+	TickCrystalSpins(g, 0.1)
+	if g.Crystals[0].SpinBurst != CrystalSpinBurstDuration-0.1 {
+		t.Fatalf("burst did not decay by dt: got %v, want %v", g.Crystals[0].SpinBurst, CrystalSpinBurstDuration-0.1)
+	}
+	if g.Crystals[1].SpinBurst != 0 {
+		t.Errorf("idle crystal spin went non-zero: %v", g.Crystals[1].SpinBurst)
+	}
+	TickCrystalSpins(g, CrystalSpinBurstDuration) // overshoot
+	if g.Crystals[0].SpinBurst != 0 {
+		t.Errorf("burst floored below 0: %v", g.Crystals[0].SpinBurst)
+	}
+}
+
 // TestTickCrystalRecharge_ReArmsAtCeiling: re-arms at CrystalRechargeSteps, never over-charges.
 func TestTickCrystalRecharge_ReArmsAtCeiling(t *testing.T) {
 	g := &GameState{Crystals: []Crystal{

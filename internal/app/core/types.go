@@ -219,6 +219,10 @@ type Crystal struct {
 	TileZ   int
 	Charge  int
 	Charged bool
+	// SpinBurst is the touch-armed fast-spin countdown (from CrystalSpinBurstDuration),
+	// decayed each frame by TickCrystalSpins. Render-only transient; 0 = idle spin only.
+	// Not persisted (CrystalSave omits it) — a transient animation, not save state.
+	SpinBurst float32
 }
 
 // AreaDefinition is the runtime form of a map (from AreaFromMapFile). Path is the
@@ -924,6 +928,23 @@ type Enemy struct {
 	// and (for PartyMember) JSON-flatten to the same save keys.
 	HitAnim
 	DeathFade float32
+
+	// SlotSlide animates a formation reshuffle (foe dies → front re-packs, or a back
+	// foe is shunted up): a countdown (from SlotSlideDuration) during which the sprite
+	// eases from its SlideFrom{Row,Slot,Count} placement to its current live placement.
+	// Render-only transient; 0 = resting in the live slot. Mirrors PartyMember.SwapSlide.
+	SlotSlide      float32
+	SlideFromRow   Row
+	SlideFromSlot  int
+	SlideFromCount int
+	// placed{Row,Slot,Count} cache the last-resolved formation placement so the tick
+	// (UpdateEnemySlides) can detect a reshuffle and arm SlotSlide from the prior slot;
+	// placedValid guards the battle-start seat (first placement snaps, doesn't slide).
+	placedRow   Row
+	placedSlot  int
+	placedCount int
+	placedValid bool
+
 	BurnTurns int
 	// SleepTurns ticks at turn-start (like BurnTurns). No party skill inflicts it
 	// on enemies yet; field exists for a future Lullaby.

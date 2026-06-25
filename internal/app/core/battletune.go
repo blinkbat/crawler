@@ -48,13 +48,13 @@ type BattleTuning struct {
 // the values dialed in via Debug ▸ Combat Tuning ▸ Dump.
 func DefaultBattleTuning() BattleTuning {
 	return BattleTuning{
-		CamPitch: -0.35, CamLift: -0.2, CamFOV: 58,
-		CamShiftX: 0, CamShiftZ: -0.55,
+		CamPitch: -0.37, CamLift: -0.2, CamFOV: 58,
+		CamShiftX: 0, CamShiftZ: -0.45,
 		FoeDistance: 1.95, FoeFloorY: 0.04,
-		FoeFrontGapX: 0.7, FoeBackGapX: 0.75,
+		FoeFrontGapX: 0.7, FoeBackGapX: 0.7,
 		FoeFrontMaxW: 3.0, FoeBackMaxW: 4.8,
-		FoeFrontDepth: 0.28, FoeBackDepth: 0.98, FoeZigzag: 0.12,
-		FoeFrontScale: 0.85, FoeBackScale: 0.85, FoeBackDarken: 0.35,
+		FoeFrontDepth: 0.18, FoeBackDepth: 0.86, FoeZigzag: 0.12,
+		FoeFrontScale: 0.8, FoeBackScale: 0.75, FoeBackDarken: 0.35,
 		SpriteShade: 0.35, SpriteWarmCool: 0.12, SpriteOutline: 0.9,
 		PartyFrontFwd: 1.1, PartyBackFwd: 0.85,
 		PartyFrontGapX: 0.4, PartyBackGapX: 0.72,

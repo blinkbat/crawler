@@ -19,6 +19,9 @@ func Update(g *core.GameState) {
 	// Weather tint eases every frame, before the early-returns below, so the wash
 	// keeps catching up while a panel/battle is up (pure visual catch-up).
 	core.TickWeather(g, dt)
+	// Crystal touch-spin eases out here too, so the burst doesn't freeze if a modal
+	// (e.g. the autosave-driven panel) opens mid-spin.
+	core.TickCrystalSpins(g, dt)
 	// Screen Wipe FX preview countdown — ticks even with the debug submenu open so the
 	// previewed effect plays over the field.
 	if g.BattleWipePreview > 0 {
@@ -451,15 +454,17 @@ func tryUseAdjacentCrystal(g *core.GameState) bool {
 // best-effort (refused on an unsaved editor-playtest map, Area.Path == "").
 func fireHealingCrystal(g *core.GameState, idx int) {
 	core.RestorePartyFully(g)
+	// Arm the one-shot fast spin + play the dedicated sparkly cue on the touch (before
+	// the gem goes dormant) — the crystal visibly expends its charge.
+	g.Crystals[idx].SpinBurst = core.CrystalSpinBurstDuration
 	g.Crystals[idx].Charged = false
 	g.Crystals[idx].Charge = 0
+	audio.Play(audio.SoundCrystal)
 	if err := core.SaveGame(g); err != nil {
 		g.LogMessageCat("The crystal restores the party. (Autosave failed: "+err.Error()+")", core.LogHeal)
-		audio.Play(audio.SoundInputGreat)
 		return
 	}
 	g.LogMessageCat("The crystal restores the party and saves your progress.", core.LogHeal)
-	audio.Play(audio.SoundInputGreat)
 }
 
 // applyLook adds yaw/pitch deltas and clamps to the look bounds; the mouse and

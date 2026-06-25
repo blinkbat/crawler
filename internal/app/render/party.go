@@ -228,9 +228,6 @@ func drawPartyCard(font rl.Font, member *core.PartyMember, x, y float32, active,
 		centerX := x + partyCardW/2
 		drawArrowMarker(rl.NewVector2(centerX, y+2), 0, -12, 10, borderTarget)
 	}
-	if active && !down {
-		drawArrowMarker(rl.NewVector2(x+partyCardW-14, y+12), 0, 10, 7, borderActive)
-	}
 
 	// LEFT column: class sigil + name on top, status icon (+ turns) below.
 	leftX := x + 14

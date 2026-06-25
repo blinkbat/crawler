@@ -501,7 +501,7 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	assets.lighting.applyUniforms(camera, profile)
 	// Torch point lights: collect nearest braziers, flicker, upload. Must run
 	// after applyUniforms (same shader) and before the tile loop draws.
-	torches := collectTorches(m, camera)
+	torches := collectTorches(m, g.Crystals, camera)
 	assets.lighting.uploadTorches(torches)
 
 	camPos := camera.Position
@@ -1150,10 +1150,12 @@ const torchFlameHeight = float32(1.05)
 var torchBaseColor = rl.NewVector3(2.3, 1.35, 0.7)
 
 type torchCandidate struct {
-	pos    rl.Vector3
-	dist   float32
-	hash   uint32
-	bright float32 // brightness multiplier — braziers > wall torches
+	pos     rl.Vector3
+	dist    float32
+	hash    uint32
+	bright  float32    // brightness multiplier — braziers > wall torches
+	color   rl.Vector3 // base tint before flicker/breathe (warm flame vs crystal cyan)
+	crystal bool       // a charged crystal: cyan, breathes with the gem (no flicker)
 }
 
 // torchCandidateBuf / torchResultBuf are reused so the per-frame scan + build
@@ -1214,10 +1216,12 @@ func rebuildTorchSites(m *core.AreaDefinition) {
 	torchSiteCache.set(m)
 }
 
-// collectTorches returns the maxTorches braziers/torches nearest the camera as
-// flickering point lights (the rest are fog-swallowed). Flicker is per-torch
-// desynced sines so neighbours don't pulse in lockstep. Empty slice if none.
-func collectTorches(m *core.AreaDefinition, camera rl.Camera3D) []torchLight {
+// collectTorches returns the maxTorches nearest point lights — braziers/torches AND
+// charged healing crystals — as the camera sees them (the rest are fog-swallowed).
+// Torches flicker warm (per-torch desynced sines); crystals breathe cool cyan in
+// lockstep with the gem body. Both share one distance-ranked pool, so a near crystal
+// can out-prioritise a far torch (Grimrock-style: a live crystal is just a light).
+func collectTorches(m *core.AreaDefinition, crystals []core.Crystal, camera rl.Camera3D) []torchLight {
 	if !torchSiteCache.matches(m) {
 		rebuildTorchSites(m)
 	}
@@ -1230,6 +1234,24 @@ func collectTorches(m *core.AreaDefinition, camera rl.Camera3D) []torchLight {
 			dist:   dx*dx + dz*dz,
 			hash:   s.hash,
 			bright: s.bright,
+			color:  torchBaseColor,
+		})
+	}
+	// Charged crystals are dynamic (state lives in g, not the area cache), so append
+	// them fresh each frame. Light origin rides the gem's float height.
+	for _, c := range crystals {
+		if !c.Charged {
+			continue
+		}
+		base := tileWorldPos(c.TileX, c.TileZ, m.StandGroundY(c.TileX, c.TileZ))
+		dx := base.X - camera.Position.X
+		dz := base.Z - camera.Position.Z
+		torchCandidateBuf = append(torchCandidateBuf, torchCandidate{
+			pos:     rl.NewVector3(base.X, base.Y+crystalGeo.FloatY, base.Z),
+			dist:    dx*dx + dz*dz,
+			bright:  1,
+			color:   crystalLightColor,
+			crystal: true,
 		})
 	}
 	torchResultBuf = torchResultBuf[:0]
@@ -1247,20 +1269,27 @@ func collectTorches(m *core.AreaDefinition, camera rl.Camera3D) []torchLight {
 		n = maxTorches
 	}
 	t := float32(rl.GetTime())
+	// Crystals breathe with the gem body (same 0.82..1.0 cyan pulse as crystalColor).
+	breathe := 0.82 + 0.18*pulse(crystalPulseHz)
 	for i := 0; i < n; i++ {
 		c := torchCandidateBuf[i]
-		phase := hashPhase(c.hash)
-		// Organic flicker in ~0.72..1.0 from two desynced sines.
-		flick := 0.86 +
-			0.09*float32(math.Sin(float64(t*9.3+phase))) +
-			0.05*float32(math.Sin(float64(t*17.1+phase*1.7)))
-		mag := flick * c.bright
+		var mag float32
+		if c.crystal {
+			mag = breathe * c.bright
+		} else {
+			phase := hashPhase(c.hash)
+			// Organic flicker in ~0.72..1.0 from two desynced sines.
+			flick := 0.86 +
+				0.09*float32(math.Sin(float64(t*9.3+phase))) +
+				0.05*float32(math.Sin(float64(t*17.1+phase*1.7)))
+			mag = flick * c.bright
+		}
 		torchResultBuf = append(torchResultBuf, torchLight{
 			Pos: c.pos,
 			Color: rl.NewVector3(
-				torchBaseColor.X*mag,
-				torchBaseColor.Y*mag,
-				torchBaseColor.Z*mag,
+				c.color.X*mag,
+				c.color.Y*mag,
+				c.color.Z*mag,
 			),
 		})
 	}
@@ -1595,7 +1624,7 @@ func drawBattlePack(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	// front foe it's actually behind.
 	for _, wantRow := range [...]core.Row{core.RowBack, core.RowFront} {
 		for i := range members {
-			if placements[i].row != wantRow {
+			if placements[i].Row != wantRow {
 				continue
 			}
 			drawBattleFoe(camera, g, assets, &members[i], placements[i], i)
@@ -1605,7 +1634,7 @@ func drawBattlePack(camera rl.Camera3D, g *core.GameState, assets Resources) {
 
 // drawBattleFoe renders one pack member at its resolved placement (extracted so the
 // row-ordered loop above can call it per rank).
-func drawBattleFoe(camera rl.Camera3D, g *core.GameState, assets Resources, enemy *core.Enemy, p enemyPlacement, i int) {
+func drawBattleFoe(camera rl.Camera3D, g *core.GameState, assets Resources, enemy *core.Enemy, p core.EnemySlot, i int) {
 	{
 		visual, ok := enemyVisualFor(assets, enemy.Kind)
 		if !ok {
@@ -1617,12 +1646,12 @@ func drawBattleFoe(camera rl.Camera3D, g *core.GameState, assets Resources, enem
 		// Per-rank size multiplier (Debug ▸ Combat Tuning) — applied before the
 		// foot-anchor so a scaled foe still rests on the floor.
 		rowScale := battleTune.FoeFrontScale
-		if p.row == core.RowBack {
+		if p.Row == core.RowBack {
 			rowScale = battleTune.FoeBackScale
 		}
 		visual.size.X *= rowScale
 		visual.size.Y *= rowScale
-		position := enemyFormationPos(camera, g, p.row, p.slot, p.count, enemy)
+		position := enemyFormationPos(camera, g, p.Row, p.Slot, p.Count, enemy)
 		// Foot-anchor: seat the billboard's BOTTOM on the battle floor regardless of
 		// its height, so short foes (rats, bats) stand on the ground instead of
 		// floating at a shared center. yOffset (added in resolveBillboardPlacement) is
@@ -1661,7 +1690,7 @@ func drawBattleFoe(camera rl.Camera3D, g *core.GameState, assets Resources, enem
 		// Back-rank atmospheric recede (Debug ▸ Combat Tuning "Foe back darken"):
 		// darken + cool the tint so the back row reads as set behind the front. Folded
 		// into the tint (multiplicative) so the sprite stays fully opaque.
-		if p.row == core.RowBack && battleTune.FoeBackDarken > 0 {
+		if p.Row == core.RowBack && battleTune.FoeBackDarken > 0 {
 			tint = tintMul(tint, recedeMul(battleTune.FoeBackDarken))
 		}
 		// Fake directional light (vertical value ramp + warm/cool split + dark rim)
@@ -2128,56 +2157,23 @@ func enemyRowSlot(members []core.Enemy, index int) (row core.Row, slot, count in
 	return row, slot, count
 }
 
-// enemyPlacement is one member's resolved (row, slot, count) — the same triple
-// enemyRowSlot returns.
-type enemyPlacement struct {
-	row   core.Row
-	slot  int
-	count int
-}
-
 // enemyPlacementsBuf backs enemyRowPlacements (reused, single-threaded path).
-var enemyPlacementsBuf []enemyPlacement
+var enemyPlacementsBuf []core.EnemySlot
 
-// enemyRowPlacements resolves EVERY member's placement in one O(n) pass — the
-// batch form of enemyRowSlot, replacing a per-member O(n²) call. The returned
-// slice aliases a reused buffer (valid until the next call).
-func enemyRowPlacements(members []core.Enemy) []enemyPlacement {
-	n := len(members)
-	if cap(enemyPlacementsBuf) < n {
-		enemyPlacementsBuf = make([]enemyPlacement, n)
-	}
-	out := enemyPlacementsBuf[:n]
-	rowIdx := func(r core.Row) int {
-		if r == core.RowBack {
-			return 1
-		}
-		return 0
-	}
-	var counts [2]int
-	for j := range members {
-		if members[j].Alive || members[j].DeathFade > 0 {
-			counts[rowIdx(members[j].Row)]++
-		}
-	}
-	var running [2]int
-	for j := range members {
-		ri := rowIdx(members[j].Row)
-		cnt := counts[ri]
-		if cnt == 0 {
-			cnt = 1 // not visible; place solo rather than /0 (matches enemyRowSlot)
-		}
-		slot := 0
-		if members[j].Alive || members[j].DeathFade > 0 {
-			slot = running[ri]
-			running[ri]++
-		}
-		out[j] = enemyPlacement{row: members[j].Row, slot: slot, count: cnt}
-	}
-	return out
+// enemyRowPlacements resolves EVERY member's placement in one O(n) pass — the batch
+// form of enemyRowSlot. Delegates to core.ResolveEnemySlots so the drawn slot is the
+// SAME one the battle tick armed the formation slide against. The returned slice
+// aliases a reused buffer (valid until the next call).
+func enemyRowPlacements(members []core.Enemy) []core.EnemySlot {
+	enemyPlacementsBuf = core.ResolveEnemySlots(members, enemyPlacementsBuf)
+	return enemyPlacementsBuf
 }
 
-func enemyFormationPos(camera rl.Camera3D, g *core.GameState, row core.Row, slot, count int, enemy *core.Enemy) rl.Vector3 {
+// enemyFormationBase resolves a foe's resting world position for a (row, slot, count)
+// placement — the formation geometry WITHOUT the per-action bump/knock offsets, so it
+// can be the lerp endpoint for the slot-slide glide. count<=0 returns the transition
+// fallback (the pack's tile center).
+func enemyFormationBase(camera rl.Camera3D, g *core.GameState, row core.Row, slot, count int) rl.Vector3 {
 	if count <= 0 {
 		// Defensive: re-check the ActivePack bound so a malformed state can't panic.
 		// ActivePack < 0 is the "no pack" sentinel — guard it too, else g.Packs[-1].
@@ -2195,7 +2191,6 @@ func enemyFormationPos(camera rl.Camera3D, g *core.GameState, row core.Row, slot
 	// Distance forward of the camera (Debug ▸ Combat Tuning: Foe distance). Lateral 0:
 	// per-slot X offset + zigzag/depth layer on below; center is the rank's midline.
 	centerX, centerZ := formationSlotXZ(camera, forward, right, battleTune.FoeDistance, 0)
-	center := rl.NewVector3(centerX, battleFormationCenterY, centerZ)
 	// Per-row X spacing (tunable): front packs tight, back fans wide so back foes
 	// spill past the front gaps and read between them. maxWidth caps the total spread
 	// so a full row can't run off the stage.
@@ -2230,14 +2225,35 @@ func enemyFormationPos(camera rl.Camera3D, g *core.GameState, row core.Row, slot
 	} else {
 		rowDepth -= battleTune.FoeZigzag
 	}
+	return rl.NewVector3(
+		centerX+right.X*offset+forward.X*rowDepth,
+		battleFormationCenterY,
+		centerZ+right.Z*offset+forward.Z*rowDepth,
+	)
+}
+
+func enemyFormationPos(camera rl.Camera3D, g *core.GameState, row core.Row, slot, count int, enemy *core.Enemy) rl.Vector3 {
+	base := enemyFormationBase(camera, g, row, slot, count)
+	// Formation glide: ease from the pre-reshuffle slot to the live slot over the
+	// SlotSlide countdown so a death/shunt reads as the survivors stepping across to
+	// close the gap, not teleporting. Mirrors the party SwapSlide. Only the formation
+	// base slides; the per-action bump/knock below stay instant.
+	if enemy.SlotSlide > 0 && count > 0 && enemy.SlideFromCount > 0 {
+		from := enemyFormationBase(camera, g, enemy.SlideFromRow, enemy.SlideFromSlot, enemy.SlideFromCount)
+		t := core.Smoothstep(core.Clamp(1-enemy.SlotSlide/core.SlotSlideDuration, 0, 1))
+		base.X = core.Lerp(from.X, base.X, t)
+		base.Z = core.Lerp(from.Z, base.Z, t)
+	}
+	forward := horizontalForward(camera)
 	bump := core.BumpOffset(enemy.AttackBump, 0.2)
 	// Knockback pushes away from the camera; AttackBump lunges toward the party
 	// (opposite signs).
 	knock := core.KnockbackOffset(enemy.HitKnockback, core.HitKnockbackDist)
+	axial := knock - bump
 	return rl.NewVector3(
-		center.X+right.X*offset+forward.X*(rowDepth-bump+knock),
-		center.Y,
-		center.Z+right.Z*offset+forward.Z*(rowDepth-bump+knock),
+		base.X+forward.X*axial,
+		base.Y,
+		base.Z+forward.Z*axial,
 	)
 }
 

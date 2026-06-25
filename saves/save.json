@@ -5,8 +5,8 @@
   "playerTileZ": 24,
   "playerFacing": 0,
   "playerLevel": 10,
-  "stepCount": 286,
-  "gold": 23,
+  "stepCount": 108,
+  "gold": 3,
   "party": [
     {
       "Class": 0,
@@ -31,21 +31,21 @@
         0,
         0
       ],
-      "Row": 0,
+      "Row": 1,
       "Col": 0,
       "HomeRow": 0,
       "HomeCol": 0,
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 1,
+      "DamagePopup": 4,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "SwapSlide": 0,
       "SwapFromRow": 0,
       "SwapFromCol": 0,
       "Defending": false,
-      "PoisonTurns": 0,
+      "PoisonTurns": 2,
       "SleepTurns": 0,
       "StunTurns": 0,
       "Ingested": false,
@@ -58,7 +58,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 1,
-      "XP": 80,
+      "XP": 15,
       "PendingLevelUps": 0,
       "SkillPoints": 1,
       "SkillTiers": null,
@@ -89,17 +89,17 @@
         0
       ],
       "Row": 0,
-      "Col": 1,
+      "Col": 0,
       "HomeRow": 1,
       "HomeCol": 0,
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 1,
+      "DamagePopup": 2,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "SwapSlide": 0,
-      "SwapFromRow": 1,
+      "SwapFromRow": 0,
       "SwapFromCol": 0,
       "Defending": false,
       "PoisonTurns": 0,
@@ -115,7 +115,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 1,
-      "XP": 80,
+      "XP": 15,
       "PendingLevelUps": 0,
       "SkillPoints": 1,
       "SkillTiers": null,
@@ -145,21 +145,21 @@
         0,
         0
       ],
-      "Row": 1,
+      "Row": 0,
       "Col": 1,
       "HomeRow": 0,
       "HomeCol": 1,
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 1,
+      "DamagePopup": 3,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "SwapSlide": 0,
       "SwapFromRow": 0,
       "SwapFromCol": 0,
       "Defending": false,
-      "PoisonTurns": 2,
+      "PoisonTurns": 0,
       "SleepTurns": 0,
       "StunTurns": 0,
       "Ingested": false,
@@ -196,25 +196,25 @@
       "MaxMP": 10,
       "Armor": 0,
       "Equipped": [
-        11,
+        0,
         0,
         0,
         0,
         0
       ],
       "Row": 1,
-      "Col": 0,
+      "Col": 1,
       "HomeRow": 1,
       "HomeCol": 1,
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 1,
+      "DamagePopup": 0,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "SwapSlide": 0,
       "SwapFromRow": 0,
-      "SwapFromCol": 1,
+      "SwapFromCol": 0,
       "Defending": false,
       "PoisonTurns": 0,
       "SleepTurns": 0,
@@ -229,7 +229,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 1,
-      "XP": 80,
+      "XP": 15,
       "PendingLevelUps": 0,
       "SkillPoints": 1,
       "SkillTiers": null,
@@ -240,7 +240,7 @@
   "inventory": [
     {
       "Kind": 14,
-      "Count": 2
+      "Count": 3
     },
     {
       "Kind": 15,
@@ -248,6 +248,10 @@
     },
     {
       "Kind": 2,
+      "Count": 1
+    },
+    {
+      "Kind": 11,
       "Count": 1
     }
   ],
@@ -261,13 +265,7 @@
   ],
   "bestiary": {
     "0": {
-      "kills": 8
-    },
-    "1": {
-      "kills": 2
-    },
-    "2": {
-      "kills": 2
+      "kills": 3
     }
   },
   "crystals": [

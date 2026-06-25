@@ -71,6 +71,81 @@ func ShuntEnemyFormation(members []Enemy) {
 	}
 }
 
+// EnemySlot is one pack member's resolved formation placement: its rank, its index
+// within that rank's VISIBLE (alive or death-fading) members, and that rank's visible
+// count. The same triple the renderer lays foes out from — resolved here so the battle
+// tick (which arms the slide) and the renderer agree on every foe's slot.
+type EnemySlot struct {
+	Row   Row
+	Slot  int
+	Count int
+}
+
+// enemyRankIndex maps a Row to its [front,back] table index.
+func enemyRankIndex(r Row) int {
+	if r == RowBack {
+		return 1
+	}
+	return 0
+}
+
+// enemyVisible reports whether a foe occupies a slot: alive, or still death-fading
+// (the corpse holds its place until the fade completes, then the front re-packs).
+func enemyVisible(e *Enemy) bool { return e.Alive || e.DeathFade > 0 }
+
+// ResolveEnemySlots fills out (cap-grown) with every member's (Row, Slot, Count) in one
+// O(n) pass: visible members pack left-to-right within their rank. A dead-faded member
+// gets Slot 0 and is excluded from the counts (it isn't drawn). Returns out resliced to
+// len(members); pass a reused buffer to stay alloc-free per frame.
+func ResolveEnemySlots(members []Enemy, out []EnemySlot) []EnemySlot {
+	n := len(members)
+	if cap(out) < n {
+		out = make([]EnemySlot, n)
+	}
+	out = out[:n]
+	var counts [2]int
+	for i := range members {
+		if enemyVisible(&members[i]) {
+			counts[enemyRankIndex(members[i].Row)]++
+		}
+	}
+	var running [2]int
+	for i := range members {
+		ri := enemyRankIndex(members[i].Row)
+		cnt := counts[ri]
+		if cnt == 0 {
+			cnt = 1 // not visible; place solo rather than /0
+		}
+		slot := 0
+		if enemyVisible(&members[i]) {
+			slot = running[ri]
+			running[ri]++
+		}
+		out[i] = EnemySlot{Row: members[i].Row, Slot: slot, Count: cnt}
+	}
+	return out
+}
+
+// UpdateEnemySlides arms + decays the per-foe formation glide each frame. For every
+// member it compares the freshly-resolved placement to the one cached last tick; a
+// change (a reshuffle from a death or a shunt — including the row re-centering when a
+// rank's Count drops) arms SlotSlide from the OLD placement, so the renderer eases the
+// sprite across instead of snapping. slots must come from ResolveEnemySlots(members, …)
+// THIS tick. The first call per foe only seats the cache (placedValid false → no
+// slide), so battle start doesn't glide foes in from a stale origin.
+func UpdateEnemySlides(members []Enemy, slots []EnemySlot, dt float32) {
+	for i := range members {
+		e := &members[i]
+		cur := slots[i]
+		if e.placedValid && (cur.Row != e.placedRow || cur.Slot != e.placedSlot || cur.Count != e.placedCount) {
+			e.SlideFromRow, e.SlideFromSlot, e.SlideFromCount = e.placedRow, e.placedSlot, e.placedCount
+			e.SlotSlide = SlotSlideDuration
+		}
+		e.placedRow, e.placedSlot, e.placedCount, e.placedValid = cur.Row, cur.Slot, cur.Count, true
+		e.SlotSlide = ApproachZero(e.SlotSlide, dt)
+	}
+}
+
 // SwapFormationSlots exchanges two members' slot (HomeRow/HomeCol + live Row).
 // A trade keeps a clean 2-front/2-back grid. The ONLY rearrange path; no-op on
 // out-of-range or self.

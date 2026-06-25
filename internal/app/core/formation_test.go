@@ -267,6 +267,58 @@ func TestShuntEnemyFormation(t *testing.T) {
 	}
 }
 
+func TestResolveEnemySlots(t *testing.T) {
+	members := []Enemy{
+		{Alive: true, Row: RowFront},
+		{Alive: true, Row: RowFront},
+		{Alive: false, DeathFade: 0.2, Row: RowFront}, // fading corpse still holds a slot
+		{Alive: true, Row: RowBack},
+		{Alive: false, Row: RowFront}, // fully dead → excluded, slot 0
+	}
+	got := ResolveEnemySlots(members, nil)
+	want := []EnemySlot{
+		{RowFront, 0, 3}, {RowFront, 1, 3}, {RowFront, 2, 3}, // 3 visible front (incl. corpse)
+		{RowBack, 0, 1},
+		{RowFront, 0, 3}, // dead: slot 0, rank's visible count
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("slot[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestUpdateEnemySlides(t *testing.T) {
+	dt := float32(0.05)
+	members := []Enemy{
+		{Alive: true, Row: RowFront},
+		{Alive: true, Row: RowFront},
+		{Alive: true, Row: RowBack},
+	}
+	// First tick only seats the cache — battle start must not glide foes in.
+	slots := ResolveEnemySlots(members, nil)
+	UpdateEnemySlides(members, slots, dt)
+	for i := range members {
+		if members[i].SlotSlide != 0 {
+			t.Fatalf("member %d armed a slide on the initial seat (SlotSlide=%v)", i, members[i].SlotSlide)
+		}
+	}
+	// A front foe dies and drops out: the front re-packs (count 2→1), so the survivor's
+	// slot changes and arms a glide; the untouched back foe must NOT arm.
+	members[0].Alive = false
+	slots = ResolveEnemySlots(members, slots)
+	UpdateEnemySlides(members, slots, dt)
+	if members[1].SlotSlide <= 0 {
+		t.Error("front survivor should arm a slide when the rank re-packs")
+	}
+	if got := (EnemySlot{members[1].SlideFromRow, members[1].SlideFromSlot, members[1].SlideFromCount}); got != (EnemySlot{RowFront, 1, 2}) {
+		t.Errorf("survivor SlideFrom = %+v, want its pre-death slot {Front,1,2}", got)
+	}
+	if members[2].SlotSlide != 0 {
+		t.Errorf("untouched back foe armed a slide (SlotSlide=%v)", members[2].SlotSlide)
+	}
+}
+
 func TestPeekNextMeleeEnemyTarget(t *testing.T) {
 	g := &GameState{Party: []PartyMember{
 		{HP: 10, Row: RowFront},

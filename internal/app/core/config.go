@@ -27,6 +27,10 @@ const (
 	// between their old and new slots so the trade reads as movement, not a teleport.
 	// Deliberately longer than a bump so the cross is legible.
 	SwapSlideDuration = float32(0.32)
+	// SlotSlideDuration is the foe-side analogue: when a pack reshuffles (a foe dies
+	// and the front re-packs, or a back foe is shunted up) the survivors glide from
+	// their old formation slot to the new one instead of snapping across.
+	SlotSlideDuration = float32(0.3)
 	// TurnRepeatDelay paces HELD turn AUTO-REPEAT only (additive rest between
 	// turns, not during the turn animation); a single tap/press is unaffected.
 	TurnRepeatDelay = float32(0.25)
@@ -424,6 +428,12 @@ const (
 	// CrystalRechargeSteps: landed steps a dormant healing crystal needs to re-arm
 	// (Charge climbs 1/step). Long enough that the heal+autosave is a deliberate resource.
 	CrystalRechargeSteps = 60
+
+	// CrystalSpinBurst{Duration,Turns}: the one-shot fast spin a crystal does when
+	// touched. SpinBurst counts down over Duration while the gem whirls Turns full
+	// rotations (ease-out), landing on a whole-turn multiple so it rejoins the idle spin.
+	CrystalSpinBurstDuration = float32(0.7)
+	CrystalSpinBurstTurns    = float32(2)
 
 	// OutdoorCeilingThreshold: ceiling-coverage fraction above which an area counts
 	// as roofed interior (no sky). Shared by the dungeon lighting override and the

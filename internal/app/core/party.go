@@ -577,6 +577,18 @@ func TickCrystalRecharge(g *GameState) {
 	}
 }
 
+// TickCrystalSpins decays every crystal's touch-armed fast-spin countdown. Per-FRAME
+// (unlike TickCrystalRecharge's per-step), so the spin eases out smoothly regardless
+// of movement; a pure visual transient.
+func TickCrystalSpins(g *GameState, dt float32) {
+	if g == nil {
+		return
+	}
+	for i := range g.Crystals {
+		g.Crystals[i].SpinBurst = ApproachZero(g.Crystals[i].SpinBurst, dt)
+	}
+}
+
 // clearMemberAnimTimers zeros a member's transient animation timers (lunge /
 // damage-flash / knockback), not gameplay state (statuses go through
 // ClearPartyTransientStatuses).

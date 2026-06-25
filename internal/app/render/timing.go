@@ -302,12 +302,16 @@ func timingBarLayout() (x, y, barW, barH float32) {
 	return
 }
 
-// timingHeadingGlyphGap separates the heading word from its button glyph ("DEFEND! [B]").
+// timingHeadingGlyphGap separates the button glyph from the heading word ("[B] DEFEND!").
 const timingHeadingGlyphGap = float32(10)
 
+// timingHeadingGlyphScale shrinks the button glyph relative to the heading text so the
+// badge reads as a small chip leading the word rather than matching its cap height.
+const timingHeadingGlyphScale = float32(0.7)
+
 // drawTimingHeading paints the centered prompt above the bar, shifting to the quality tint
-// during the flash hold. When glyph != noPromptGlyph it appends the button to press
-// (e.g. "STRIKE! [A]") so a non-obvious minigame's input reads at a glance.
+// during the flash hold. When glyph != noPromptGlyph it prepends the button to press
+// (e.g. "[A] STRIKE!") so a non-obvious minigame's input reads at a glance.
 func drawTimingHeading(font rl.Font, text string, glyph InputGlyph, x, barW, y float32, baseCol rl.Color, flashing bool, flashCol rl.Color) {
 	size := FontHeading
 	col := baseCol
@@ -316,17 +320,21 @@ func drawTimingHeading(font rl.Font, text string, glyph InputGlyph, x, barW, y f
 		size = FontTitle // flash punch, next size up on the locked scale
 	}
 	measure := measureTimingHeading(font, text, size)
-	gap, glyphW := float32(0), float32(0)
+	gap, glyphW, glyphSize := float32(0), float32(0), float32(0)
 	if glyph != noPromptGlyph {
-		glyphW = glyphWidth(glyph, size)
+		glyphSize = size * timingHeadingGlyphScale
+		glyphW = glyphWidth(glyph, glyphSize)
 		gap = timingHeadingGlyphGap
 	}
+	// Glyph leads the word, centered as one group above the bar.
 	hx := x + (barW-measure.X-gap-glyphW)/2
 	hy := y - measure.Y - 6
-	drawEngravedTextSpaced(font, text, hx, hy, size, 1.5, col)
 	if glyph != noPromptGlyph {
-		drawInputGlyph(font, glyph, hx+measure.X+gap, hy, size, 1)
+		// Center the smaller glyph on the heading's vertical midline (drawInputGlyph
+		// centers on yPassed + size/2, so offset by the half-size difference).
+		drawInputGlyph(font, glyph, hx, hy+(size-glyphSize)/2, glyphSize, 1)
 	}
+	drawEngravedTextSpaced(font, text, hx+glyphW+gap, hy, size, 1.5, col)
 }
 
 // timingHeadingMeasureCache memoizes drawTimingHeading's measure (keyed on the size flip).
