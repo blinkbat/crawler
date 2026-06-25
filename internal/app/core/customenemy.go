@@ -162,14 +162,10 @@ func customEnemyBounds(ce CustomEnemyDef) enemyStatBounds {
 	}
 }
 
-// CustomEnemyDefFromMap converts one on-disk custom enemy row into the core definition.
-func CustomEnemyDefFromMap(ce mapfile.MapCustomEnemy) (CustomEnemyDef, error) {
-	base, ok := EnemyKindFromName(ce.BaseKind)
-	if !ok {
-		return CustomEnemyDef{}, fmt.Errorf("custom enemy %q references unknown base kind %q", ce.Name, ce.BaseKind)
-	}
-	// Refuse bad rows at load (shared with the writer so the two can't drift).
-	bounds := enemyStatBounds{
+// mapCustomEnemyBounds builds the same stat-bounds payload from an on-disk row,
+// so the load-side field list can't drift from customEnemyBounds.
+func mapCustomEnemyBounds(ce mapfile.MapCustomEnemy) enemyStatBounds {
+	return enemyStatBounds{
 		Name:            ce.Name,
 		SkillCastChance: ce.SkillCastChance,
 		Armor:           ce.Armor,
@@ -179,7 +175,16 @@ func CustomEnemyDefFromMap(ce mapfile.MapCustomEnemy) (CustomEnemyDef, error) {
 		SpellPower:      ce.SpellPower,
 		Tier:            ce.Tier,
 	}
-	if err := validateCustomEnemy(ce.HP, ce.MP, bounds); err != nil {
+}
+
+// CustomEnemyDefFromMap converts one on-disk custom enemy row into the core definition.
+func CustomEnemyDefFromMap(ce mapfile.MapCustomEnemy) (CustomEnemyDef, error) {
+	base, ok := EnemyKindFromName(ce.BaseKind)
+	if !ok {
+		return CustomEnemyDef{}, fmt.Errorf("custom enemy %q references unknown base kind %q", ce.Name, ce.BaseKind)
+	}
+	// Refuse bad rows at load (shared with the writer so the two can't drift).
+	if err := validateCustomEnemy(ce.HP, ce.MP, mapCustomEnemyBounds(ce)); err != nil {
 		return CustomEnemyDef{}, err
 	}
 	skills := make([]SkillID, 0, len(ce.Skills))
@@ -317,9 +322,15 @@ func CustomPackMember(def CustomEnemyDef) PackMemberRef {
 	return PackMemberRef{Kind: def.BaseKind, CustomName: def.Name}
 }
 
+// PackMemberIndexInRange is the one home for the `idx >= 0 && idx < len(sp.Members)`
+// rule — the pack-member cousin of PartyIndexInRange.
+func PackMemberIndexInRange(sp PackSpawn, idx int) bool {
+	return idx >= 0 && idx < len(sp.Members)
+}
+
 // PackMemberCustomName returns a slot's custom enemy name, or "" for a built-in member.
 func PackMemberCustomName(sp PackSpawn, idx int) string {
-	if idx < 0 || idx >= len(sp.Members) {
+	if !PackMemberIndexInRange(sp, idx) {
 		return ""
 	}
 	return sp.Members[idx].CustomName
@@ -337,7 +348,7 @@ func AppendCustomPackMember(sp *PackSpawn, def CustomEnemyDef) {
 
 // RemovePackMember removes one member slot.
 func RemovePackMember(sp *PackSpawn, idx int) {
-	if idx < 0 || idx >= len(sp.Members) {
+	if !PackMemberIndexInRange(*sp, idx) {
 		return
 	}
 	sp.Members = append(sp.Members[:idx], sp.Members[idx+1:]...)
@@ -345,7 +356,7 @@ func RemovePackMember(sp *PackSpawn, idx int) {
 
 // SwapPackMembers swaps two member slots.
 func SwapPackMembers(sp *PackSpawn, i, j int) {
-	if i < 0 || i >= len(sp.Members) || j < 0 || j >= len(sp.Members) {
+	if !PackMemberIndexInRange(*sp, i) || !PackMemberIndexInRange(*sp, j) {
 		return
 	}
 	sp.Members[i], sp.Members[j] = sp.Members[j], sp.Members[i]
@@ -365,7 +376,7 @@ func PackMemberDefinition(a AreaDefinition, sp PackSpawn, idx int) EnemyDefiniti
 	if def, ok := packMemberCustom(a, sp, idx); ok {
 		return def.Definition()
 	}
-	if idx < 0 || idx >= len(sp.Members) {
+	if !PackMemberIndexInRange(sp, idx) {
 		return EnemyInfo(EnemyRat)
 	}
 	return EnemyInfo(sp.Members[idx].Kind)
@@ -381,7 +392,7 @@ func PackMemberVisualKind(a AreaDefinition, sp PackSpawn, idx int) EnemyKind {
 	if def, ok := packMemberCustom(a, sp, idx); ok {
 		return def.BaseKind
 	}
-	if idx < 0 || idx >= len(sp.Members) {
+	if !PackMemberIndexInRange(sp, idx) {
 		return EnemyRat
 	}
 	return sp.Members[idx].Kind

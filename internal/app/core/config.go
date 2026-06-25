@@ -367,8 +367,10 @@ const (
 
 	// Status duration bounds — each status rolls uniform in [Min, Max] inclusive.
 	// Co-located so a balance pass touches one block.
-	PoisonMinTurns = 3
-	PoisonMaxTurns = 5
+	// Poison is the long-chip DoT: only 1/turn (vs Bleed/Burn at 2) but it lingers,
+	// so its identity is sustained attrition rather than burst.
+	PoisonMinTurns = 5
+	PoisonMaxTurns = 8
 	SleepMinTurns  = 2
 	SleepMaxTurns  = 5
 	StunMinTurns   = 1
@@ -401,7 +403,7 @@ const (
 	WispConfuseCastChance    = 0.50 // Wisp: roll-to-Confuse vs flicker-bite per turn.
 	WispConfuseRetargetRoll  = 0.50 // Wisp: per-action chance a Confused member retargets randomly.
 	StoneGolemSlamCastChance = 0.40 // Stone Golem: roll-to-Stoneslam vs single-target smash per turn.
-	NecromancerCastChance    = 0.55 // Necromancer: combined roll into Raise / Firebolt vs incant-melee.
+	NecromancerCastChance    = 0.55 // Necromancer: cast-chance gate vs incant-melee; on a cast, uniform pick among usable skills.
 	NecromancerRaiseLimit    = 2    // Necromancer: hard cap on RaiseBones casts per battle.
 
 	// Guaranteed-apply gates: read 1.0 today but go through a named seam so a

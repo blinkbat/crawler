@@ -410,10 +410,7 @@ func MoveDialogCursor(g *GameState, delta int) {
 		g.Dialog.ChoiceCursor = 0
 		return
 	}
-	step := 1
-	if delta < 0 {
-		step = -1
-	}
+	step := Sign(delta)
 	cur := Clamp(g.Dialog.ChoiceCursor, 0, n-1)
 	for i := 0; i < n; i++ {
 		cur = WrapIndex(cur+step, n)

@@ -461,7 +461,8 @@ const (
 	// elevDigitSpan is the base-36 digit/letter pivot ('0'..'9' = 0..9, then 'A'..).
 	elevDigitSpan = 10
 	// ElevationWallRingLevel is the default enclosing-wall level: one step above
-	// the baseline so it reads as a 1-high cliff. Shared by blankArea + sealWallBorder.
+	// the baseline so it reads as a 1-high cliff. Read by the editor's perimeter
+	// wall-ring paint (editor.blankArea, editor.sealWallBorder).
 	ElevationWallRingLevel = ElevationBaseline + 1
 )
 
@@ -978,7 +979,7 @@ func (a *AreaDefinition) FloorAt(x, z int) bool {
 
 // InBounds reports whether (x, z) is inside the area's dimensions.
 func (a *AreaDefinition) InBounds(x, z int) bool {
-	return z >= 0 && z < a.Height && x >= 0 && x < a.Width
+	return mapfile.InBoundsWH(x, z, a.Width, a.Height)
 }
 
 // MultiTileOffset is one footprint cell as a (dx, dz) offset from the anchor.

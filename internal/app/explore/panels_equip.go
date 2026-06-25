@@ -42,7 +42,7 @@ var equipPickerRowsBuf []core.EquipPickerRow
 func updateEquipPicker(g *core.GameState) {
 	member := g.PanelsRowCursor
 	slot := core.EquipSlotIndex(g.EquipSlotCursor)
-	if member < 0 || member >= len(g.Party) {
+	if !core.PartyIndexInRange(g.Party, member) {
 		closeEquipPicker(g)
 		return
 	}

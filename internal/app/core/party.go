@@ -276,7 +276,8 @@ var skillDefinitions = []skillDefinition{
 	// status only. A future player caster sets Cost + flips PlayerCastable.
 	{Skill: SkillSleep, Name: "Sleep", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{SleepMinTurns: SleepMinTurns, SleepMaxTurns: SleepMaxTurns}, EnemyCastable: true},
 	// Ingest (enemy-only): AppliesIngest carries "removed from combat until the caster dies."
-	{Skill: SkillIngest, Name: "Ingest", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{AppliesIngest: true}, EnemyCastable: true},
+	// Melee, not magic: the mantrap's swallow is a physical lunge — front-row reach-gated and accuracy-rolled (can whiff) like a basic swing, not an any-row auto-hit cast.
+	{Skill: SkillIngest, Name: "Ingest", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigamePress, Effect: SkillEffect{AppliesIngest: true}, EnemyCastable: true},
 	// Web (Cave Spider, enemy-only): applies Webbed (halves SPD, blocks Ingest); duration in BindMin/Max.
 	{Skill: SkillWeb, Name: "Web", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{BindChance: WebBindChance, BindMinTurns: SpiderWebbedMinTurns, BindMaxTurns: SpiderWebbedMaxTurns}, EnemyCastable: true},
 	// Confuse (Will-o'-Wisp, enemy-only): applies Confused (per-action retarget); WIS resists on apply.

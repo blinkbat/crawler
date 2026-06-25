@@ -701,9 +701,15 @@ var doorStyleDefs = [DoorStyleCount]doorStyleDef{
 	DoorStyleField:    {mapfile.DoorStyleFieldName, "Field"},
 }
 
+// validDoorStyle reports whether s indexes a real doorStyleDefs row — the one home
+// for the shared bounds check both DoorStyleName and DoorStyleLabel layer onto.
+func validDoorStyle(s DoorStyle) bool {
+	return s >= 0 && int(s) < len(doorStyleDefs)
+}
+
 // DoorStyleName maps a DoorStyle to its on-disk string; out-of-range falls back to building.
 func DoorStyleName(s DoorStyle) string {
-	if s < 0 || int(s) >= len(doorStyleDefs) {
+	if !validDoorStyle(s) {
 		return mapfile.DoorStyleBuildingName
 	}
 	return doorStyleDefs[s].name
@@ -711,7 +717,7 @@ func DoorStyleName(s DoorStyle) string {
 
 // DoorStyleLabel returns the editor button label; out-of-range falls back to building.
 func DoorStyleLabel(s DoorStyle) string {
-	if s < 0 || int(s) >= len(doorStyleDefs) {
+	if !validDoorStyle(s) {
 		return doorStyleDefs[DoorStyleBuilding].label
 	}
 	return doorStyleDefs[s].label

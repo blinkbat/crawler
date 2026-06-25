@@ -120,10 +120,7 @@ func drawSeqArrowSlot(g *core.GameState, cx, cy, arrowSize float32, dir int, i i
 	// Per-slot pulse: the just-landed correct slot scales up briefly (SequencePulseTimer).
 	slotSize := arrowSize
 	if g.Battle.SequencePulseIndex == i && g.Battle.SequencePulseTimer > 0 {
-		phase := g.Battle.SequencePulseTimer / core.SequencePulseDuration
-		if phase > 1 {
-			phase = 1
-		}
+		phase := clampBarPct(g.Battle.SequencePulseTimer / core.SequencePulseDuration)
 		slotSize = arrowSize * (1 + 0.55*phase*phase)
 	}
 
@@ -153,13 +150,8 @@ func drawSequenceCursorUnderline(cx, cy, arrowSize float32) {
 // drawDwindlingTimerStrip paints the center-anchored timer line that shrinks toward center
 // as remaining (1→0) drains, reddening near zero. Sequence + recall bars; pass 1-Progress().
 func drawDwindlingTimerStrip(drawX, y, barW, barH, remaining float32) {
-	if remaining < 0 {
-		remaining = 0
-	}
-	if remaining > 1 {
-		// Upper clamp: a negative Progress() (intro) would overrun the bar without it.
-		remaining = 1
-	}
+	// Upper clamp guards against a negative Progress() (intro) overrunning the bar.
+	remaining = clampBarPct(remaining)
 	stripH := float32(3)
 	stripY := y + barH + 10
 	stripCol := colorWithAlpha(seqOkColor, 230)

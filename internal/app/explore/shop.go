@@ -17,10 +17,8 @@ import (
 // openShop raises the overlay on the Buy tab. Drops the pause menu defensively
 // so a future menu-adjacent caller can't leave both up.
 func openShop(g *core.GameState) {
-	g.MenuOpen = false
-	g.ShopOpen = true
+	openSubmenu(&g.MenuOpen, &g.ShopOpen, &g.ShopCursor)
 	g.ShopTab = core.ShopTabBuy
-	g.ShopCursor = 0
 }
 
 // updateShop drives the overlay's input. Tab paging resets the cursor (the tabs

@@ -17,8 +17,7 @@ func openPanels(g *core.GameState) {
 	// Re-center the Map tab each open (pan is a transient inspect offset).
 	recenterPanelMap(g)
 	// Neutral look so a half-rotated free-look doesn't bleed into the overlay.
-	g.Player.LookYaw = 0
-	g.Player.LookPitch = 0
+	resetLook(&g.Player)
 	resetPanelSubmodals(g)
 }
 

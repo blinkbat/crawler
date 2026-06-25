@@ -73,7 +73,7 @@ func (o EnemyVisualOverride) ColorCap() (int, bool) {
 	if o.MaxColors < 2 {
 		return 0, false
 	}
-	return int(o.MaxColors + 0.5), true
+	return RoundToInt(o.MaxColors), true
 }
 
 // EnemyVisualsFileName is the override-file basename in the sprites asset dir

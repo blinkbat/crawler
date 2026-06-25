@@ -140,8 +140,7 @@ func drawLocationEditModal(s *State, font rl.Font, theme render.Theme) {
 func drawLocStepper(font rl.Font, st locStepper, label string, value int) {
 	drawLabel(font, label, labelAbove(st.row))
 	drawTextField(font, rl.NewRectangle(st.row.X, st.row.Y, st.minus.X-st.row.X-6, st.row.Height), strconv.Itoa(value), false)
-	drawButton(font, st.minus, "−", false)
-	drawButton(font, st.plus, "+", false)
+	drawStepperButtons(font, st.minus, st.plus)
 }
 
 func updateLocationEditModal(s *State) Action {

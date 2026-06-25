@@ -316,7 +316,7 @@ func ChargeCursorProgress(elapsed, duration float32) float32 {
 				return cur.Visual
 			}
 			frac := (t - prev.Elapsed) / span
-			return prev.Visual + frac*(cur.Visual-prev.Visual)
+			return Lerp(prev.Visual, cur.Visual, frac)
 		}
 	}
 	return 1
@@ -340,7 +340,7 @@ func ChargeElapsedForVisual(visual, duration float32) float32 {
 				return cur.Elapsed * duration
 			}
 			frac := (visual - prev.Visual) / span
-			return (prev.Elapsed + frac*(cur.Elapsed-prev.Elapsed)) * duration
+			return Lerp(prev.Elapsed, cur.Elapsed, frac) * duration
 		}
 	}
 	return duration

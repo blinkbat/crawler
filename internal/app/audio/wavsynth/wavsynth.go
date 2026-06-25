@@ -160,6 +160,31 @@ func clamp01(v float64) float64 {
 	return clampF64(v, 0, 1)
 }
 
+// wrap2Pi folds an unbounded phase into [0, 2π).
+func wrap2Pi(phase float64) float64 {
+	p := math.Mod(phase, 2*math.Pi)
+	if p < 0 {
+		p += 2 * math.Pi
+	}
+	return p
+}
+
+// samplesFor is duration×SampleRate, floored to at least 1 (a non-positive
+// duration must still produce one sample, not zero).
+func samplesFor(duration float64) int {
+	samples := int(duration * SampleRate)
+	if samples <= 0 {
+		samples = 1
+	}
+	return samples
+}
+
+// neutralShape is the ShapeParams identity for the positional wrappers: no
+// decay, full sustain, symmetric pulse, open filter. Callers override fields.
+func neutralShape() ShapeParams {
+	return ShapeParams{Decay: 0, Sustain: 1, PulseWidth: 0.5, Cutoff: 1}
+}
+
 // adsrEnv computes the ADSR level at elapsed time secs. Decay 0 + Sustain 1
 // reduces to SynthSweep's attack/sustain/release shape (byte-identical).
 func adsrEnv(secs, duration, attack, decay, sustain, release, releaseStart float64) float64 {
@@ -195,10 +220,7 @@ func SynthShapeParams(p ShapeParams) []int16 {
 	if p.Duration > maxDuration {
 		p.Duration = maxDuration
 	}
-	samples := int(p.Duration * SampleRate)
-	if samples <= 0 {
-		samples = 1
-	}
+	samples := samplesFor(p.Duration)
 	noiseMix := clamp01(p.NoiseMix)
 	sustain := clamp01(p.Sustain)
 	tremDepth := clamp01(p.TremoloDepth)
@@ -243,27 +265,15 @@ func SynthShapeParams(p ShapeParams) []int16 {
 		var tone float64
 		switch p.Wave {
 		case WaveSquare:
-			pp := math.Mod(phase, 2*math.Pi)
-			if pp < 0 {
-				pp += 2 * math.Pi
-			}
-			if pp/(2*math.Pi) < pulse {
+			if wrap2Pi(phase)/(2*math.Pi) < pulse {
 				tone = 1.0
 			} else {
 				tone = -1.0
 			}
 		case WaveTriangle:
-			pq := math.Mod(phase, 2*math.Pi)
-			if pq < 0 {
-				pq += 2 * math.Pi
-			}
-			tone = 1.0 - 2.0*math.Abs(pq-math.Pi)/math.Pi
+			tone = 1.0 - 2.0*math.Abs(wrap2Pi(phase)-math.Pi)/math.Pi
 		case WaveSaw:
-			pq := math.Mod(phase, 2*math.Pi)
-			if pq < 0 {
-				pq += 2 * math.Pi
-			}
-			tone = (pq - math.Pi) / math.Pi
+			tone = (wrap2Pi(phase) - math.Pi) / math.Pi
 		default:
 			tone = math.Sin(phase)
 		}
@@ -314,13 +324,11 @@ func SynthShapeParams(p ShapeParams) []int16 {
 // knobs with neutral values. Golden tests pin this byte-for-byte.
 func SynthShape(duration, startHz, endHz, volume, attack, release float64,
 	wave WaveShape, noiseMix, vibHz, vibDepth float64) []int16 {
-	return SynthShapeParams(ShapeParams{
-		Duration: duration, StartHz: startHz, EndHz: endHz, Volume: volume,
-		Attack: attack, Decay: 0, Sustain: 1, Release: release,
-		Wave: wave, PulseWidth: 0.5, NoiseMix: noiseMix,
-		VibHz: vibHz, VibDepth: vibDepth,
-		TremoloHz: 0, TremoloDepth: 0, Cutoff: 1, Drive: 0, Crush: 0,
-	})
+	p := neutralShape()
+	p.Duration, p.StartHz, p.EndHz, p.Volume = duration, startHz, endHz, volume
+	p.Attack, p.Release = attack, release
+	p.Wave, p.NoiseMix, p.VibHz, p.VibDepth = wave, noiseMix, vibHz, vibDepth
+	return SynthShapeParams(p)
 }
 
 // SynthSweep is the sine, no-noise, no-vibrato wrapper.
@@ -360,21 +368,14 @@ func SynthChord(duration float64, freqs []float64, volume float64) []int16 {
 // SynthWhistleTrill is the SMRPG-style "Great" cue — a sine sweeping up with a
 // fast shallow vibrato, soft attack, singing release.
 func SynthWhistleTrill(duration, startHz, endHz, volume float64) []int16 {
-	return SynthShapeParams(ShapeParams{
-		Duration:   duration,
-		StartHz:    startHz,
-		EndHz:      endHz,
-		Volume:     volume,
-		Attack:     0.006,           // soft onset, no click
-		Decay:      0,               //
-		Sustain:    1,               //
-		Release:    duration * 0.45, // long "singing" tail
-		Wave:       WaveSine,
-		PulseWidth: 0.5,
-		VibHz:      42,    // fast warble = the trill
-		VibDepth:   0.035, // shallow shimmer, not a siren
-		Cutoff:     1,
-	})
+	p := neutralShape()
+	p.Duration, p.StartHz, p.EndHz, p.Volume = duration, startHz, endHz, volume
+	p.Attack = 0.006            // soft onset, no click
+	p.Release = duration * 0.45 // long "singing" tail
+	p.Wave = WaveSine
+	p.VibHz = 42       // fast warble = the trill
+	p.VibDepth = 0.035 // shallow shimmer, not a siren
+	return SynthShapeParams(p)
 }
 
 // SynthClick is a short percussive transient — a pitched sine dropping in
@@ -388,10 +389,7 @@ func SynthWhistleTrill(duration, startHz, endHz, volume float64) []int16 {
 //
 // Fixed seed → identical waveform every run. Sum two clicks for variation.
 func SynthClick(duration, pitchHz, pitchDrop, noise, volume float64) []int16 {
-	samples := int(duration * SampleRate)
-	if samples <= 0 {
-		samples = 1
-	}
+	samples := samplesFor(duration)
 	pcm := make([]int16, samples)
 	// Fixed seed: deterministic so the modal preview matches battle playback.
 	rng := rand.New(rand.NewSource(1))
@@ -434,10 +432,7 @@ func SynthClick(duration, pitchHz, pitchDrop, noise, volume float64) []int16 {
 // SynthChime plays two notes back-to-back (firstHz then secondHz), each
 // noteDuration seconds. The heal cue's "ding-ding".
 func SynthChime(noteDuration, firstHz, secondHz, volume float64) []int16 {
-	samplesPerNote := int(noteDuration * SampleRate)
-	if samplesPerNote <= 0 {
-		samplesPerNote = 1
-	}
+	samplesPerNote := samplesFor(noteDuration)
 	total := samplesPerNote * 2
 	pcm := make([]int16, total)
 	for note := 0; note < 2; note++ {
@@ -466,21 +461,21 @@ const (
 )
 
 // BuildWAV writes a canonical 16-bit mono PCM WAV into a byte slice (RIFF → fmt
-// → data) for raylib's LoadWaveFromMemory.
-func BuildWAV(pcm []int16, rate int) []byte {
+// → data) for raylib's LoadWaveFromMemory. Always at SampleRate.
+func BuildWAV(pcm []int16) []byte {
 	dataSize := len(pcm) * wavBytesPerSample
 	var buf bytes.Buffer
 	buf.WriteString("RIFF")
 	_ = binary.Write(&buf, binary.LittleEndian, uint32(36+dataSize))
 	buf.WriteString("WAVE")
 	buf.WriteString("fmt ")
-	_ = binary.Write(&buf, binary.LittleEndian, uint32(16))                 // fmt size
-	_ = binary.Write(&buf, binary.LittleEndian, uint16(1))                  // PCM
-	_ = binary.Write(&buf, binary.LittleEndian, uint16(wavChannels))        // channels
-	_ = binary.Write(&buf, binary.LittleEndian, uint32(rate))               // sample rate
-	_ = binary.Write(&buf, binary.LittleEndian, uint32(rate*wavBlockAlign)) // byte rate
-	_ = binary.Write(&buf, binary.LittleEndian, uint16(wavBlockAlign))      // block align
-	_ = binary.Write(&buf, binary.LittleEndian, uint16(wavBitsPerSample))   // bits/sample
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(16))                       // fmt size
+	_ = binary.Write(&buf, binary.LittleEndian, uint16(1))                        // PCM
+	_ = binary.Write(&buf, binary.LittleEndian, uint16(wavChannels))              // channels
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(SampleRate))               // sample rate
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(SampleRate*wavBlockAlign)) // byte rate
+	_ = binary.Write(&buf, binary.LittleEndian, uint16(wavBlockAlign))            // block align
+	_ = binary.Write(&buf, binary.LittleEndian, uint16(wavBitsPerSample))         // bits/sample
 	buf.WriteString("data")
 	_ = binary.Write(&buf, binary.LittleEndian, uint32(dataSize))
 	_ = binary.Write(&buf, binary.LittleEndian, pcm)

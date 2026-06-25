@@ -45,9 +45,9 @@ func noteSlider(label string, get func(*soundParamSet) float64, set func(*soundP
 	return sliderField[soundParamSet]{
 		Label: label, Min: 0, Max: float64(audio.NoteCount - 1), Step: 1, Format: "%.0f",
 		Get: func(p *soundParamSet) float64 { return float64(audio.NearestNoteIndex(get(p))) },
-		Set: func(p *soundParamSet, v float64) { set(p, audio.NoteHz(int(v+0.5))) },
+		Set: func(p *soundParamSet, v float64) { set(p, audio.NoteHz(core.RoundToInt(v))) },
 		Display: func(v float64) string {
-			i := int(v + 0.5)
+			i := core.RoundToInt(v)
 			return fmt.Sprintf("%s (%.0f)", audio.NoteName(i), audio.NoteHz(i))
 		},
 	}
@@ -62,17 +62,11 @@ var soundParamSliders = []sliderField[soundParamSet]{
 		Label: "Wave", Min: 0, Max: float64(audio.WaveShapeCount - 1), Step: 1, Format: "%.0f",
 		Get: func(p *soundParamSet) float64 { return float64(p.Wave) },
 		Set: func(p *soundParamSet, v float64) {
-			i := int(v + 0.5)
-			if i < 0 {
-				i = 0
-			}
-			if i > audio.WaveShapeCount-1 {
-				i = audio.WaveShapeCount - 1
-			}
+			i := core.Clamp(core.RoundToInt(v), 0, audio.WaveShapeCount-1)
 			p.Wave = audio.WaveShape(i)
 		},
 		Display: func(v float64) string {
-			return audio.WaveShapeName(audio.WaveShape(int(v + 0.5)))
+			return audio.WaveShapeName(audio.WaveShape(core.RoundToInt(v)))
 		},
 	},
 	noteSlider("Start Note", func(p *soundParamSet) float64 { return p.StartHz }, func(p *soundParamSet, v float64) { p.StartHz = v }),
@@ -828,10 +822,10 @@ func drawSoundsParamsCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 	// Scroll affordances when the body overflows.
 	if l.paramMaxScroll > 0 {
 		if s.soundParamScroll > 0 {
-			render.DrawRichText(font, "▲", rl.NewVector2(l.paramsCol.X+l.paramsCol.Width-22, vp.Y+2), soundFontHint, 1, theme.TextHint)
+			drawScrollArrow(font, true, rl.NewVector2(l.paramsCol.X+l.paramsCol.Width-22, vp.Y+2), soundFontHint, theme.TextHint)
 		}
 		if s.soundParamScroll < l.paramMaxScroll {
-			render.DrawRichText(font, "▼", rl.NewVector2(l.paramsCol.X+l.paramsCol.Width-22, vp.Y+vp.Height-18), soundFontHint, 1, theme.TextHint)
+			drawScrollArrow(font, false, rl.NewVector2(l.paramsCol.X+l.paramsCol.Width-22, vp.Y+vp.Height-18), soundFontHint, theme.TextHint)
 		}
 	}
 

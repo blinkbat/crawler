@@ -643,6 +643,12 @@ func ensureAliveTargetOrCancel(g *core.GameState, refundSkill core.SkillID) bool
 	if core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
 		return true
 	}
+	return cancelGoneTarget(g, refundSkill)
+}
+
+// cancelGoneTarget is the shared "target gone" tail for the ensureAlive*OrCancel
+// guards: refund the committed MP, post "No target.", end the turn, return false.
+func cancelGoneTarget(g *core.GameState, refundSkill core.SkillID) bool {
 	refundSkillMP(g, refundSkill)
 	setBattleStatus(g, msgNoTarget)
 	finishActorTurn(g)
@@ -656,10 +662,7 @@ func ensureAlivePartyTargetOrCancel(g *core.GameState, refundSkill core.SkillID)
 	if core.PartyMemberAvailable(g.Party, g.Battle.PartyTarget) {
 		return true
 	}
-	refundSkillMP(g, refundSkill)
-	setBattleStatus(g, msgNoTarget)
-	finishActorTurn(g)
-	return false
+	return cancelGoneTarget(g, refundSkill)
 }
 
 // beginSingleTargetSkill is the shared head of every single-enemy-target damaging
@@ -1734,6 +1737,12 @@ func targetActsLater(g *core.GameState, enemySlot int) bool {
 	return !actorAppearsBefore(g.Battle.Queue, g.Battle.QueueCursor, core.ActorRef{IsParty: false, Index: enemySlot})
 }
 
+// scaleByRank returns base scaled by rank and a per-rank fraction (rank 0 = 0).
+// The shared rank-multiplier math behind Shadow Step / Bloodthirst / Retribution.
+func scaleByRank(base, rank int, perRank float64) int {
+	return int(float64(base) * float64(rank) * perRank)
+}
+
 // applyShadowStep folds the Thief's Shadow Step into an outgoing single-target hit:
 // +ShadowStepBonusPerRank/rank when striking before the target acts (rank 0 = no-op).
 // Applied pre-crit so the bonus rides the crit multiplier.
@@ -1742,7 +1751,7 @@ func applyShadowStep(g *core.GameState, actor *core.PartyMember, raw int) int {
 	if rank <= 0 || raw <= 0 || !targetActsLater(g, g.Battle.EnemyIndex) {
 		return raw
 	}
-	return raw + int(float64(raw)*float64(rank)*core.ShadowStepBonusPerRank)
+	return raw + scaleByRank(raw, rank, core.ShadowStepBonusPerRank)
 }
 
 // appendCrit suffixes " Critical!" when crit landed. Used by every damaging attack
@@ -2386,7 +2395,7 @@ func bloodthirstHeal(g *core.GameState, partyIndex, physDamage int) {
 	if rank <= 0 || physDamage <= 0 || member.HP <= 0 || member.Ingested {
 		return
 	}
-	heal := int(float64(physDamage) * float64(rank) * core.BloodthirstHealPerRank)
+	heal := scaleByRank(physDamage, rank, core.BloodthirstHealPerRank)
 	if heal <= 0 {
 		return
 	}
@@ -2470,7 +2479,7 @@ func tryRetribution(g *core.GameState, enemySlot, defender, dealt int) {
 	if rank <= 0 {
 		return
 	}
-	reflect := int(float64(dealt) * float64(rank) * core.RetributionReflectPerRank)
+	reflect := scaleByRank(dealt, rank, core.RetributionReflectPerRank)
 	if reflect < 1 {
 		return
 	}

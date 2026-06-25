@@ -114,10 +114,16 @@ func DrawEngravedText(font rl.Font, text string, x, y, size float32, col color.R
 // so the gilt highlight floats inside the row band. Shared by level-up + journal.
 const selectionPlateShrinkY = int32(6)
 
+// Selection-plate bleed: how far SelectionRowRect grows a row past its text origin.
+const (
+	selectionPlateInsetX = int32(6)
+	selectionPlateInsetY = int32(4)
+)
+
 // SelectionRowRect insets a row's (x, y, w) by the canonical DrawSelectedRow
-// padding (−6 x, −4 y, +12 w); height passes through unchanged.
+// padding; height passes through unchanged.
 func SelectionRowRect(x, y, w, h int32) rl.Rectangle {
-	return rl.NewRectangle(float32(x-6), float32(y-4), float32(w+12), float32(h))
+	return rl.NewRectangle(float32(x-selectionPlateInsetX), float32(y-selectionPlateInsetY), float32(w+2*selectionPlateInsetX), float32(h))
 }
 
 // drawModalListRow paints the gilt selection plate when focused, then runs fn to

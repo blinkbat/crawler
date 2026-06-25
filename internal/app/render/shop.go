@@ -89,10 +89,10 @@ var shopRowsCache struct {
 // inventoryFingerprint folds the bag's (kind, count) pairs into a uint64
 // (FNV-1a) so shopRows can detect a Sell-affecting change without rebuilding.
 func inventoryFingerprint(inv []core.ItemStack) uint64 {
-	h := uint64(1469598103934665603)
+	h := core.FNVOffset64
 	for _, s := range inv {
-		h = (h ^ uint64(s.Kind)) * 1099511628211
-		h = (h ^ uint64(uint32(s.Count))) * 1099511628211
+		h = (h ^ uint64(s.Kind)) * core.FNVPrime64
+		h = (h ^ uint64(uint32(s.Count))) * core.FNVPrime64
 	}
 	return h
 }

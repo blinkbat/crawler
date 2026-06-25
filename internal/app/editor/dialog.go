@@ -356,7 +356,7 @@ func condSummary(c core.DialogChoiceCondition) string {
 	case core.DialogCondFoeKilled:
 		return fmt.Sprintf("Killed %s ×%d", core.FoeKindName(c.FoeKind), core.RequiredFoeKills(c.FoeKills))
 	case core.DialogCondTileVisited:
-		return fmt.Sprintf("Visited tile (%d, %d)", c.TileX, c.TileZ)
+		return fmt.Sprintf("Visited tile %s", core.TileCoord(c.TileX, c.TileZ))
 	}
 	return string(c.Kind)
 }

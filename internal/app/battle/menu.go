@@ -404,7 +404,7 @@ func nextLivingSwapTarget(g *core.GameState, from, dir int) (int, bool) {
 // member after the actor, or -1 if the actor is the last one standing.
 func defaultSwapPartner(g *core.GameState) int {
 	actor := g.Battle.CurrentParty
-	if actor < 0 || actor >= len(g.Party) {
+	if !core.PartyIndexInRange(g.Party, actor) {
 		return -1
 	}
 	if idx, ok := nextLivingSwapTarget(g, actor, +1); ok {

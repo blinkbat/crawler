@@ -506,13 +506,19 @@ func slotIconForKind(t core.EquipmentSlotType) func(cx, cy, r float32, col rl.Co
 	}
 }
 
+// equipSlotHit is one clickable equip-slot row: its rect plus the (member, slot) it
+// routes to. One struct so the three can't desync on rebuild.
+type equipSlotHit struct {
+	Rect   rl.Rectangle
+	Member int
+	Idx    core.EquipSlotIndex
+}
+
 // equipPanelLayout caches the Equipment tab's hit rects so the input layer can route a click without
-// re-running layout. SlotRects is flattened [member][slot] (SlotMember/SlotIdx parallel it). PickerRects
-// parallels core.EquipPickerRows; PickerBounds is the card (click-outside dismiss), gated by PickerValid.
+// re-running layout. Slots is flattened [member][slot]. PickerRects parallels core.EquipPickerRows;
+// PickerBounds is the card (click-outside dismiss), gated by PickerValid.
 type equipPanelLayout struct {
-	SlotRects    []rl.Rectangle
-	SlotMember   []int
-	SlotIdx      []core.EquipSlotIndex
+	Slots        []equipSlotHit
 	PickerRects  []rl.Rectangle
 	PickerBounds rl.Rectangle
 	PickerValid  bool
@@ -529,9 +535,7 @@ func ResetEquipPanelLayout() { lastEquipLayout = equipPanelLayout{} }
 // rebuild re-slices the same memory. ResetEquipPanelLayout still fully zeroes, releasing buffers between visits.
 func resetEquipLayoutKeepBufs() {
 	lastEquipLayout = equipPanelLayout{
-		SlotRects:   lastEquipLayout.SlotRects[:0],
-		SlotMember:  lastEquipLayout.SlotMember[:0],
-		SlotIdx:     lastEquipLayout.SlotIdx[:0],
+		Slots:       lastEquipLayout.Slots[:0],
 		PickerRects: lastEquipLayout.PickerRects[:0],
 	}
 }
@@ -545,9 +549,9 @@ var (
 
 // EquipPanelSlotHit returns (member, slot, true) if pt is inside a slot rect, else (-1, 0, false).
 func EquipPanelSlotHit(pt rl.Vector2) (int, core.EquipSlotIndex, bool) {
-	for i, r := range lastEquipLayout.SlotRects {
-		if rl.CheckCollisionPointRec(pt, r) {
-			return lastEquipLayout.SlotMember[i], lastEquipLayout.SlotIdx[i], true
+	for _, s := range lastEquipLayout.Slots {
+		if rl.CheckCollisionPointRec(pt, s.Rect) {
+			return s.Member, s.Idx, true
 		}
 	}
 	return -1, 0, false
@@ -587,9 +591,7 @@ func drawPanelsEquipment(g *core.GameState, assets Resources, body rl.Rectangle)
 		for s := core.EquipSlotIndex(0); s < core.EquipSlotCount; s++ {
 			rowY := contentY + float32(int(s))*slotRowH
 			slotRect := rl.NewRectangle(float32(innerX), rowY, float32(innerW), slotRowH-8)
-			lastEquipLayout.SlotRects = append(lastEquipLayout.SlotRects, slotRect)
-			lastEquipLayout.SlotMember = append(lastEquipLayout.SlotMember, i)
-			lastEquipLayout.SlotIdx = append(lastEquipLayout.SlotIdx, s)
+			lastEquipLayout.Slots = append(lastEquipLayout.Slots, equipSlotHit{Rect: slotRect, Member: i, Idx: s})
 
 			// Focused slot (cursored member + slot, picker closed): shared focusable-row treatment.
 			focused := memberHL && int(s) == g.EquipSlotCursor && !g.EquipPickerOpen

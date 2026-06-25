@@ -43,12 +43,7 @@ func updateSkillTreeModal(g *core.GameState) {
 	}
 	g.SkillTreeCol = input.CursorLeftRightWrap(g.SkillTreeCol, len(trees))
 	nodes := trees[g.SkillTreeCol].Nodes
-	// Clamp the row into the (shorter) column; guard empty so the max can't go negative.
-	if len(nodes) > 0 {
-		g.SkillTreeRow = core.Clamp(g.SkillTreeRow, 0, len(nodes)-1)
-	} else {
-		g.SkillTreeRow = 0
-	}
+	// CursorUpDown clamps the row into [0, len-1] (and no-ops when empty).
 	g.SkillTreeRow = input.CursorUpDown(g.SkillTreeRow, len(nodes))
 	if input.ConfirmPressed() {
 		buySkillNode(g)

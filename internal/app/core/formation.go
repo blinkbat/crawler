@@ -98,6 +98,9 @@ func init() {
 	if RowCount != 2 || ColCount != 2 {
 		panic("core: formation flips assume RowCount==ColCount==2 — generalize FlipRow/FlipCol/Ambush* before extending the grid")
 	}
+	if PartyMemberCount != int(RowCount)*int(ColCount) {
+		panic("core: PartyMemberCount must equal RowCount*ColCount — formationSlotsValid's [2][2] grid assumes one member per slot")
+	}
 }
 
 // FlipRow / FlipCol return the other rank / column of the 2×2 — the single source

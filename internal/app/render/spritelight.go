@@ -176,13 +176,10 @@ func shadeRGB(c rl.Color, f float32) rl.Color {
 }
 
 // lerpToWhite blends from white toward target by t (t=0 → white/no-op, t=1 → target),
-// yielding a subtle multiplicative hue shift.
+// yielding a subtle multiplicative hue shift. Routes the per-channel math through
+// core.MixColor (the one home for color lerps); alpha is pinned opaque.
 func lerpToWhite(target rl.Color, t float32) rl.Color {
-	t = core.Clamp(t, 0, 1)
-	return rl.NewColor(lerpU8(255, target.R, t), lerpU8(255, target.G, t), lerpU8(255, target.B, t), 255)
-}
-
-// lerpU8 linearly interpolates two bytes by t in [0,1].
-func lerpU8(a, b uint8, t float32) uint8 {
-	return uint8(float32(a) + (float32(b)-float32(a))*core.Clamp(t, 0, 1))
+	out := core.MixColor(rl.White, target, float64(core.Clamp(t, 0, 1)))
+	out.A = 255
+	return out
 }

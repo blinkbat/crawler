@@ -2,7 +2,8 @@ package core
 
 import (
 	"slices"
-	"strings"
+
+	"crawler/internal/app/core/mapfile"
 )
 
 // Voxel occupancy — cube model superseding the single-height Elevation
@@ -89,15 +90,20 @@ var maxElevationTopCache struct {
 
 // elevationLayerHash folds the Elevation rows into an FNV-1a digest, allocation-free,
 // with row separators so ragged splits can't collide.
+// FNV-1a 64-bit basis/prime, shared by every alloc-free layer-hash fold
+// (here, render's layersHash, and shop's inventory fingerprint).
+const (
+	FNVOffset64 = uint64(1469598103934665603)
+	FNVPrime64  = uint64(1099511628211)
+)
+
 func (a *AreaDefinition) elevationLayerHash() uint64 {
-	const offset = uint64(1469598103934665603)
-	const prime = uint64(1099511628211)
-	h := offset
+	h := FNVOffset64
 	for _, row := range a.Elevation {
 		for i := 0; i < len(row); i++ {
-			h = (h ^ uint64(row[i])) * prime
+			h = (h ^ uint64(row[i])) * FNVPrime64
 		}
-		h = (h ^ 0xff) * prime // row separator
+		h = (h ^ 0xff) * FNVPrime64 // row separator
 	}
 	return h
 }
@@ -342,12 +348,7 @@ func EnsureSolids(a *AreaDefinition) {
 }
 
 func blankSolidPlane(w, h int) []string {
-	rows := make([]string, h)
-	air := strings.Repeat(string(SolidAir), w)
-	for i := range rows {
-		rows[i] = air
-	}
-	return rows
+	return mapfile.BlankLayer(w, h, SolidAir)
 }
 
 // growSolidsTo pads the stack to at least n planes with all-air planes.

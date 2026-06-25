@@ -1,5 +1,10 @@
 package core
 
+import (
+	"reflect"
+	"strings"
+)
+
 type TurnEntry struct {
 	Label string
 	Class PartyClass
@@ -190,10 +195,29 @@ func ReleaseAllIngested(party []PartyMember) {
 	}
 }
 
-// curableStatusCounterCount: the shared turn-counter statuses (Sleep/Stun/Webbed/
-// Confused). The init assert pins transientStatusCounters to this length so a new
-// counter added to one clear-list but forgotten in the other trips at startup.
-const curableStatusCounterCount = 4
+// partyTurnsClass buckets every `*Turns int` field on PartyMember so a newly-added
+// counter can't silently bypass the cure/clear plumbing.
+type partyTurnsClass int
+
+const (
+	turnsCurableTransient partyTurnsClass = iota // cleared by CureDebuffs AND ClearPartyTransientStatuses; also drives transientStatusCounters
+	turnsLingeringCurable                        // cured by CureDebuffs but survives a fight (Poison only)
+	turnsBenign                                  // beneficial/neutral, never cured (Regen, Ice Armor)
+)
+
+// partyTurnsCounterClass classifies each PartyMember timed-status counter. The init
+// reflection assert below trips at startup on an unclassified `*Turns` field (mirrors
+// Enemy's clearedEnemyTurnsCounters guard) and pins transientStatusCounters to the
+// turnsCurableTransient set so the two can't drift.
+var partyTurnsCounterClass = map[string]partyTurnsClass{
+	"SleepTurns":    turnsCurableTransient,
+	"StunTurns":     turnsCurableTransient,
+	"WebbedTurns":   turnsCurableTransient,
+	"ConfusedTurns": turnsCurableTransient,
+	"PoisonTurns":   turnsLingeringCurable,
+	"RegenTurns":    turnsBenign,
+	"IceArmorTurns": turnsBenign,
+}
 
 // transientStatusCounters returns pointers to the shared curable counters
 // (Sleep/Stun/Webbed/Confused). Both CureDebuffs and ClearPartyTransientStatuses
@@ -203,9 +227,26 @@ func transientStatusCounters(m *PartyMember) []*int {
 }
 
 func init() {
-	// Pin the shared list's length so a new counter lands here (covering both callers).
-	if got := len(transientStatusCounters(&PartyMember{})); got != curableStatusCounterCount {
-		panic("core: transientStatusCounters length must equal curableStatusCounterCount — add the new status counter here so CureDebuffs and ClearPartyTransientStatuses stay in sync")
+	// Every PartyMember `*Turns int` field must be classified, forcing a deliberate
+	// cure/clear decision on any new counter instead of a silent lingering bug.
+	curable := 0
+	t := reflect.TypeOf(PartyMember{})
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if f.Type.Kind() != reflect.Int || !strings.HasSuffix(f.Name, "Turns") {
+			continue
+		}
+		class, ok := partyTurnsCounterClass[f.Name]
+		if !ok {
+			panic("core: PartyMember." + f.Name + " is an unclassified timed-status counter — add it to partyTurnsCounterClass (and transientStatusCounters if curable) so CureDebuffs/ClearPartyTransientStatuses can't skip it")
+		}
+		if class == turnsCurableTransient {
+			curable++
+		}
+	}
+	// Pin the pointer list to the map's curable-transient count so the two stay in sync.
+	if got := len(transientStatusCounters(&PartyMember{})); got != curable {
+		panic("core: transientStatusCounters must list exactly the turnsCurableTransient entries in partyTurnsCounterClass")
 	}
 }
 

@@ -645,7 +645,7 @@ func drawLayerMenuButton(s *State, font rl.Font, theme render.Theme) {
 	rl.DrawRectangleRec(r, bg)
 	rl.DrawRectangleLinesEx(r, 2, editorBorderActive)
 	label := "Layer: " + layerName(s.layer) + dropdownArrowSuffix
-	render.DrawTextWithShadow(font, label, r.X+10, r.Y+(r.Height-16)/2, editorFontBody, theme.TextPrimary)
+	render.DrawTextWithShadow(font, label, r.X+10, r.Y+(r.Height-bodyLineH)/2, editorFontBody, theme.TextPrimary)
 }
 
 // approxTextWidth estimates a label's pixel width without a font handle (~0.5px
@@ -894,20 +894,23 @@ func drawEntityListWindow(font rl.Font, theme render.Theme, lay entityModalLayou
 		render.DrawRichText(font, emptyText, rl.NewVector2(lay.card.X+modalContentInset, lay.listTop), editorFontLabel, 1, theme.TextHint)
 		return
 	}
-	y := lay.listTop
-	// Shared "▲/▼ N more" clip indicators (no-op when nothing is hidden).
-	drawScrollMoreHint(font, theme, lay.card.X+entityListTextInset, y-16, lay.topRow, true)
+	rows := make([]rl.Rectangle, 0, lay.end-lay.topRow)
 	for i := lay.topRow; i < lay.end; i++ {
-		text := rowText(i)
-		col := theme.TextMuted
-		if i == cursor {
-			col = theme.BorderActive
-			text = "> " + text
-		}
-		render.DrawTextWithShadow(font, text, lay.card.X+entityListTextInset, y, editorFontBody, col)
-		y += lay.rowH
+		rows = append(rows, rl.NewRectangle(lay.card.X, lay.listTop+float32(i-lay.topRow)*lay.rowH, 0, 0))
 	}
-	drawScrollMoreHint(font, theme, lay.card.X+entityListTextInset, y, count-lay.end, false)
+	// math.MaxInt32 truncLen makes drawScrollList's per-row trim a no-op (this list doesn't truncate).
+	drawScrollList(font, theme, rows, lay.topRow, count, cursor, math.MaxInt32,
+		lay.card.X+entityListTextInset, lay.listTop+float32(lay.end-lay.topRow)*lay.rowH, rowText)
+}
+
+// drawScrollArrow paints a bare ▲/▼ scroll affordance (no count) at pos; caller
+// owns the corner-offset math. For the "N more" counted form use drawScrollMoreHint.
+func drawScrollArrow(font rl.Font, up bool, pos rl.Vector2, fontSize float32, col rl.Color) {
+	arrow := "▼"
+	if up {
+		arrow = "▲"
+	}
+	render.DrawRichText(font, arrow, pos, fontSize, 1, col)
 }
 
 func drawButton(font rl.Font, r rl.Rectangle, label string, active bool) {
@@ -1289,7 +1292,7 @@ func drawLevelsPanel(s *State, font rl.Font, theme render.Theme) {
 	rl.DrawRectangleRec(s.rect.levels, bgWindow)
 	mp := frameMouse
 	hdr := levelHeaderRect(s)
-	render.DrawTextWithShadow(font, "Levels", hdr.X+10, hdr.Y+(hdr.Height-16)/2, editorFontBody, theme.TextPrimary)
+	render.DrawTextWithShadow(font, "Levels", hdr.X+10, hdr.Y+(hdr.Height-bodyLineH)/2, editorFontBody, theme.TextPrimary)
 	minus, plus := levelStepperRects(s)
 	drawLevelStepper(font, minus, "-", pointIn(mp, minus))
 	drawLevelStepper(font, plus, "+", pointIn(mp, plus))
@@ -1319,7 +1322,7 @@ func drawLevelsPanel(s *State, font rl.Font, theme render.Theme) {
 		if lvl != core.ElevationBaseline {
 			label = "Level " + signedLevelLabel(lvl)
 		}
-		render.DrawTextWithShadow(font, label, inner.X+10, inner.Y+(inner.Height-16)/2, editorFontBody, text)
+		render.DrawTextWithShadow(font, label, inner.X+10, inner.Y+(inner.Height-bodyLineH)/2, editorFontBody, text)
 		eye := levelEyeRect(s, i)
 		// The active level is always shown, so its eye is locked-open.
 		drawLevelEye(eye, !hidden, pointIn(mp, eye) && !active, active)
@@ -1895,7 +1898,7 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 		badgeValue := rl.NewRectangle(mr.reachArea.X, mr.reachArea.Y+reachBadgeTopGap, mr.reachArea.Width, reachBadgeOKRowH)
 		rl.DrawRectangleRec(badgeValue, rl.NewColor(14, 22, 18, 255))
 		rl.DrawRectangleLinesEx(badgeValue, 1, editorReachOK)
-		render.DrawRichText(font, "OK", rl.NewVector2(badgeValue.X+8, badgeValue.Y+(badgeValue.Height-16)/2), editorFontBody, 1, editorReachOKText)
+		render.DrawRichText(font, "OK", rl.NewVector2(badgeValue.X+8, badgeValue.Y+(badgeValue.Height-bodyLineH)/2), editorFontBody, 1, editorReachOKText)
 	} else {
 		// One row per warning, red panel + outline.
 		rows := warnings
@@ -1939,13 +1942,13 @@ func drawTextField(font rl.Font, r rl.Rectangle, text string, focused bool) {
 			display += " "
 		}
 	}
-	render.DrawRichText(font, display, rl.NewVector2(r.X+8, r.Y+(r.Height-16)/2), editorFontBody, 1, textEntry)
+	render.DrawRichText(font, display, rl.NewVector2(r.X+8, r.Y+(r.Height-bodyLineH)/2), editorFontBody, 1, textEntry)
 }
 
 func drawReadonlyValue(font rl.Font, r rl.Rectangle, text string) {
 	rl.DrawRectangleRec(r, bgFieldInset)
 	rl.DrawRectangleLinesEx(r, 1, editorBorderInactive)
-	render.DrawRichText(font, text, rl.NewVector2(r.X+8, r.Y+(r.Height-16)/2), editorFontBody, 1, textReadonly)
+	render.DrawRichText(font, text, rl.NewVector2(r.X+8, r.Y+(r.Height-bodyLineH)/2), editorFontBody, 1, textReadonly)
 }
 
 // --- Grid ------------------------------------------------------------------

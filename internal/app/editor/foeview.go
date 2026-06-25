@@ -18,6 +18,9 @@ import (
 // overlaid on code-default visuals at load. Preview mirrors drawBattlePack's
 // geometry (render.DrawFoePreview).
 
+// tintByte snaps a [0,255] slider float to a color byte (shared by the four Tint rows).
+func tintByte(v float64) uint8 { return core.ClampByte(core.RoundToInt(v)) }
+
 // foeFields is EVERY field of core.EnemyVisualOverride (tool-completeness).
 // Ordered to split cleanly into the two-column layout. Each row's Get/Set bridge
 // the typed override fields (uint8 for tint) to the slider's float64.
@@ -41,10 +44,10 @@ var foeFields = []sliderField[core.EnemyVisualOverride]{
 	{Label: "Ptcl Sz", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.ParticleScale) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.ParticleScale = float32(v) }, Min: 0.2, Max: 3.0, Step: 0.05, Format: "%.2f"},
 	{Label: "Num X", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.PopupXOffset) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.PopupXOffset = float32(v) }, Min: -1.5, Max: 1.5, Step: 0.02, Format: "%.2f"},
 	{Label: "Num Y", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.PopupYOffset) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.PopupYOffset = float32(v) }, Min: -1.5, Max: 2.0, Step: 0.02, Format: "%.2f"},
-	{Label: "Tint R", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.TintR) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.TintR = core.ClampByte(int(v + 0.5)) }, Min: 0, Max: 255, Step: 1, Format: "%.0f"},
-	{Label: "Tint G", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.TintG) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.TintG = core.ClampByte(int(v + 0.5)) }, Min: 0, Max: 255, Step: 1, Format: "%.0f"},
-	{Label: "Tint B", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.TintB) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.TintB = core.ClampByte(int(v + 0.5)) }, Min: 0, Max: 255, Step: 1, Format: "%.0f"},
-	{Label: "Tint A", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.TintA) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.TintA = core.ClampByte(int(v + 0.5)) }, Min: 0, Max: 255, Step: 1, Format: "%.0f"},
+	{Label: "Tint R", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.TintR) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.TintR = tintByte(v) }, Min: 0, Max: 255, Step: 1, Format: "%.0f"},
+	{Label: "Tint G", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.TintG) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.TintG = tintByte(v) }, Min: 0, Max: 255, Step: 1, Format: "%.0f"},
+	{Label: "Tint B", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.TintB) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.TintB = tintByte(v) }, Min: 0, Max: 255, Step: 1, Format: "%.0f"},
+	{Label: "Tint A", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.TintA) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.TintA = tintByte(v) }, Min: 0, Max: 255, Step: 1, Format: "%.0f"},
 }
 
 // sliderDragState is the in-flight slider-drag cursor for the editor's slider

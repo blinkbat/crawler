@@ -255,7 +255,7 @@ func drawIsoReadout(s *State, font rl.Font, grid rl.Rectangle) {
 	rl.DrawTextEx(font, hint, rl.NewVector2(grid.X+8, grid.Y+8), editorFontHint, 1, rl.NewColor(210, 214, 222, 200))
 	if s.isoHoverX >= 0 {
 		lvl := s.area.ElevationLevelAt(s.isoHoverX, s.isoHoverZ) - core.ElevationBaseline
-		txt := fmt.Sprintf("(%d, %d)  level %+d", s.isoHoverX, s.isoHoverZ, lvl)
+		txt := fmt.Sprintf("%s  level %+d", core.TileCoord(s.isoHoverX, s.isoHoverZ), lvl)
 		rl.DrawTextEx(font, txt, rl.NewVector2(grid.X+8, grid.Y+8+editorFontHint+4), editorFontHint, 1, rl.NewColor(255, 224, 130, 235))
 	}
 }

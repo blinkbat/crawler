@@ -549,10 +549,10 @@ func drawDropdown(s *State, font rl.Font, theme render.Theme) {
 
 	// ▲/▼ "more" affordances when scrolled.
 	if lay.topRow > 0 {
-		render.DrawRichText(font, "▲", rl.NewVector2(lay.panel.X+lay.panel.Width-16, lay.panel.Y+2), editorFontHint, 1, theme.TextHint)
+		drawScrollArrow(font, true, rl.NewVector2(lay.panel.X+lay.panel.Width-16, lay.panel.Y+2), editorFontHint, theme.TextHint)
 	}
 	if lay.topRow+len(lay.rows) < len(entries) {
-		render.DrawRichText(font, "▼", rl.NewVector2(lay.panel.X+lay.panel.Width-16, lay.panel.Y+lay.panel.Height-16), editorFontHint, 1, theme.TextHint)
+		drawScrollArrow(font, false, rl.NewVector2(lay.panel.X+lay.panel.Width-16, lay.panel.Y+lay.panel.Height-16), editorFontHint, theme.TextHint)
 	}
 
 	// Show the cursored menu row's one-line explanation beneath the panel.

@@ -1058,9 +1058,9 @@ type Battle struct {
 	// defend bar and routes to resolveEnemySpell. Cleared on turn end.
 	EnemyPendingSkill SkillID
 
-	// EnemyAttackMisses is set when a plain-melee enemy turn rolled a clean miss;
-	// suppresses the defend bar and routes to the miss narration. Basic attacks
-	// only. Cleared on turn end.
+	// EnemyAttackMisses is set when a melee enemy turn rolled a clean miss — a basic
+	// swing or a single-target melee skill (Ingest). Suppresses the defend bar and
+	// wins the resolve switch over EnemyPendingSkill (the skill never lands). Cleared on turn end.
 	EnemyAttackMisses bool
 
 	// FleeReturnX/Z are the tile the player retreats to on a successful Flee — the

@@ -59,8 +59,8 @@ func Start(g *core.GameState, packIndex, fleeReturnX, fleeReturnZ int, engageSid
 	g.Battle.EngageSide = engageSide
 	// ActionLog is a continuous in/out-of-combat buffer, so a fight no longer resets it.
 	// resetBattleTransients clears every per-fight transient so a Start after an
-	// unclean exit can't leak stale combat state. EnemyIndex / EnemyAttackCursor /
-	// PartyTarget were set above and are intentionally left untouched.
+	// unclean exit can't leak stale combat state. EnemyIndex / PartyTarget were set
+	// above and are intentionally left untouched.
 	resetBattleTransients(&g.Battle)
 	resetBattleAction(g)
 	setBattleMessage(g, core.BattleEncounterMessage(g))
@@ -919,8 +919,16 @@ func beginEnemyAttack(g *core.GameState, slot int) bool {
 	g.Battle.EnemyPendingSkill = skill
 	g.Battle.EnemyAttackMisses = false
 	if skill != core.SkillNone {
+		// A single-target melee skill (the mantrap's Ingest bite) rolls accuracy like
+		// a basic swing — a physical lunge can whiff. On a miss, EnemyAttackMisses wins
+		// the resolve switch over the pending skill, so the skill never lands. Magic/
+		// ranged casts and AoE melee (Stoneslam, countered by Defend) still auto-connect.
+		if enemy != nil && enemyActionIsMelee(enemy, skill) && !core.SkillEffectFor(skill).AppliesAOEParty &&
+			!core.RollEnemyHit(g.Rand(), core.EffectiveEnemyStats(enemy)) {
+			g.Battle.EnemyAttackMisses = true
+		}
 		// Pre-resolve Timing so the defend bar never arms — the intro elapses and
-		// resolveAndFinish routes through resolveEnemySpell.
+		// resolveAndFinish routes through resolveEnemySpell (or the miss narration).
 		g.Battle.Timing = core.TimingState{Resolved: true}
 		return true
 	}
@@ -1028,6 +1036,11 @@ func updateEnemyTiming(g *core.GameState, dt float32) {
 func resolveAndFinishEnemyAttack(g *core.GameState) {
 	switch {
 	case g.Battle.EnemyAttackMisses:
+		// A miss is always a melee action (basic swing or a melee skill like Ingest).
+		// Clear the pending skill first so the miss-target peek uses the melee front-
+		// gate, not the any-row cast peek — else the whiff can name a back-row member
+		// the lunge could never have reached (and drift EnemyAttackCursor onto it).
+		g.Battle.EnemyPendingSkill = core.SkillNone
 		resolveEnemyMiss(g, g.Battle.EnemyAttacker)
 	case g.Battle.EnemyPendingSkill != core.SkillNone:
 		resolveEnemySpell(g, g.Battle.EnemyAttacker, g.Battle.EnemyPendingSkill)

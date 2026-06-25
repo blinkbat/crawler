@@ -698,25 +698,21 @@ var elevGridKey struct {
 	hash          uint64
 }
 
-// fnvOffsetBasis is the FNV-1a 64-bit offset basis the layer hash seeds from.
-const fnvOffsetBasis = uint64(1469598103934665603)
-
 // foldLayer folds one layer's bytes into FNV-1a digest h with row + layer
 // separators so ragged splits can't collide. Allocation-free.
 func foldLayer(h uint64, layer []string) uint64 {
-	const prime = 1099511628211
 	for _, row := range layer {
 		for i := 0; i < len(row); i++ {
-			h = (h ^ uint64(row[i])) * prime
+			h = (h ^ uint64(row[i])) * core.FNVPrime64
 		}
-		h = (h ^ 0xff) * prime // row separator
+		h = (h ^ 0xff) * core.FNVPrime64 // row separator
 	}
-	return (h ^ 0xfe) * prime // layer separator
+	return (h ^ 0xfe) * core.FNVPrime64 // layer separator
 }
 
 // layersHash folds the given layers into one FNV-1a digest. Allocation-free.
 func layersHash(layers ...[]string) uint64 {
-	h := fnvOffsetBasis
+	h := core.FNVOffset64
 	for _, layer := range layers {
 		h = foldLayer(h, layer)
 	}
@@ -728,7 +724,7 @@ func layersHash(layers ...[]string) uint64 {
 func elevGrid(m *core.AreaDefinition, w, h int) []tileElev {
 	// Hash Floor/Elevation/Walls plus every Solids plane (so a voxel edit
 	// invalidates the cache), folded in sequence so the check allocates nothing.
-	hash := foldLayer(foldLayer(foldLayer(fnvOffsetBasis, m.Floor), m.Elevation), m.Walls)
+	hash := foldLayer(foldLayer(foldLayer(core.FNVOffset64, m.Floor), m.Elevation), m.Walls)
 	for _, plane := range m.Solids {
 		hash = foldLayer(hash, plane)
 	}

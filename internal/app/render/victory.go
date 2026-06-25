@@ -187,12 +187,7 @@ func drawSpoilsLoot(b *core.Battle, font rl.Font, x, y, w, fill float32) float32
 		}
 		// Per-row slide+fade: row i opens at danceBeat + i·stagger.
 		rowStart := core.VictoryDanceBeat + float32(i)*core.VictoryLootStagger
-		p := (b.VictoryElapsed - rowStart) / core.VictoryLootFadeDuration
-		if p < 0 {
-			p = 0
-		} else if p > 1 {
-			p = 1
-		}
+		p := clampBarPct((b.VictoryElapsed - rowStart) / core.VictoryLootFadeDuration)
 		ease := core.Smoothstep(p)
 		label := core.ItemInfo(stack.Kind).Name
 		if stack.Count > 1 {

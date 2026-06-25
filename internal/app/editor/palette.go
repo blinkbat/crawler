@@ -20,6 +20,10 @@ const (
 	editorFontTick   = float32(12) // grid axis tick labels
 )
 
+// bodyLineH is the body-font line height used to vertically center editorFontBody
+// text in a row (r.Y + (r.Height-bodyLineH)/2).
+const bodyLineH = float32(16)
+
 // Editor UI chrome palette: the editor's own buttons, panels, borders, and
 // overlays (map-content colors live in layerBrushes, editor.go).
 var (

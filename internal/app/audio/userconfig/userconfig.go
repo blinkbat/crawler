@@ -86,7 +86,7 @@ func WriteWAV(name string, pcm []int16) (string, error) {
 	if err := os.MkdirAll(dir, core.AssetDirMode); err != nil {
 		return clean, err
 	}
-	wav := wavsynth.BuildWAV(pcm, wavsynth.SampleRate)
+	wav := wavsynth.BuildWAV(pcm)
 	path := filepath.Join(dir, clean+WavExt)
 	if err := os.WriteFile(path, wav, core.AssetFileMode); err != nil {
 		return clean, err
@@ -105,7 +105,7 @@ func WriteSound(name string, p wavsynth.ShapeParams) (string, error) {
 	if err := os.MkdirAll(dir, core.AssetDirMode); err != nil {
 		return clean, err
 	}
-	wav := wavsynth.BuildWAV(wavsynth.SynthShapeParams(p), wavsynth.SampleRate)
+	wav := wavsynth.BuildWAV(wavsynth.SynthShapeParams(p))
 	if err := os.WriteFile(filepath.Join(dir, clean+WavExt), wav, core.AssetFileMode); err != nil {
 		return clean, err
 	}

@@ -27,7 +27,7 @@ func TestSynthChord_DegenerateDuration(t *testing.T) {
 // succeed even on a malformed wave.
 func TestBuildWAV_HeaderLayout(t *testing.T) {
 	samples := []int16{0, 100, -100, 32767, -32768, 0}
-	out := BuildWAV(samples, 22050)
+	out := BuildWAV(samples)
 
 	// 44 header bytes + 2 per sample.
 	wantLen := 44 + len(samples)*2
@@ -92,7 +92,7 @@ func TestBuildWAV_HeaderLayout(t *testing.T) {
 }
 
 func TestBuildWAV_EmptySamples(t *testing.T) {
-	out := BuildWAV(nil, 22050)
+	out := BuildWAV(nil)
 	if len(out) != 44 {
 		t.Fatalf("empty samples should yield 44-byte header, got %d", len(out))
 	}

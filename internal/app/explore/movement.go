@@ -91,8 +91,7 @@ func Update(g *core.GameState) {
 	pause := input.PausePressed()
 	if pause && pauseAllowed(g) {
 		g.MenuOpen = true
-		g.Player.LookYaw = 0
-		g.Player.LookPitch = 0
+		resetLook(&g.Player)
 		return
 	}
 	if g.Battle.Active() {
@@ -216,11 +215,24 @@ func updateLeafMenu(open *bool, index *int, count int, onConfirm func(item int))
 	}
 }
 
+// openSubmenu is the shared open-a-submenu preamble: close the parent, open the
+// child, reset the child cursor.
+func openSubmenu(parentOpen, childOpen *bool, childIndex *int) {
+	*parentOpen = false
+	*childOpen = true
+	*childIndex = 0
+}
+
+// resetLook neutralizes free-look so a half-rotated camera doesn't bleed into an
+// overlay/menu.
+func resetLook(p *core.Player) {
+	p.LookYaw = 0
+	p.LookPitch = 0
+}
+
 // openOptionsMenu swaps the pause menu for the Options submenu.
 func openOptionsMenu(g *core.GameState) {
-	g.MenuOpen = false
-	g.OptionsMenuOpen = true
-	g.OptionsMenuIndex = 0
+	openSubmenu(&g.MenuOpen, &g.OptionsMenuOpen, &g.OptionsMenuIndex)
 }
 
 // updateOptionsMenu drives the Options submenu. Back closes straight to explore
@@ -247,9 +259,7 @@ func updateOptionsMenu(g *core.GameState) {
 // openDebugMenu swaps the pause menu for the Debug submenu. The master "Debug
 // Mode" toggle lives inside the submenu, not gating access to it.
 func openDebugMenu(g *core.GameState) {
-	g.MenuOpen = false
-	g.DebugMenuOpen = true
-	g.DebugMenuIndex = 0
+	openSubmenu(&g.MenuOpen, &g.DebugMenuOpen, &g.DebugMenuIndex)
 }
 
 // updateDebugMenu drives the debug submenu. Back closes straight to explore.
@@ -304,9 +314,7 @@ func updateDebugMenu(g *core.GameState) {
 
 // openRetroMenu swaps the Debug submenu for the Retro Filters sub-submenu.
 func openRetroMenu(g *core.GameState) {
-	g.DebugMenuOpen = false
-	g.RetroMenuOpen = true
-	g.RetroMenuIndex = 0
+	openSubmenu(&g.DebugMenuOpen, &g.RetroMenuOpen, &g.RetroMenuIndex)
 }
 
 // updateSliderLeafMenu drives a leaf submenu whose first sliderCount rows are
@@ -352,9 +360,7 @@ func updateRetroMenu(g *core.GameState) {
 
 // openWipeMenu swaps the Debug submenu for the Screen Wipe FX sub-submenu.
 func openWipeMenu(g *core.GameState) {
-	g.DebugMenuOpen = false
-	g.WipeMenuOpen = true
-	g.WipeMenuIndex = 0
+	openSubmenu(&g.DebugMenuOpen, &g.WipeMenuOpen, &g.WipeMenuIndex)
 }
 
 // updateWipeMenu drives the Screen Wipe FX submenu: each row is a wipe kind (Confirm
@@ -374,9 +380,7 @@ func updateWipeMenu(g *core.GameState) {
 // camera/foe/party placement sliders — best driven from inside a battle so the scene
 // updates behind the panel).
 func openCombatTuneMenu(g *core.GameState) {
-	g.DebugMenuOpen = false
-	g.CombatTuneOpen = true
-	g.CombatTuneIndex = 0
+	openSubmenu(&g.DebugMenuOpen, &g.CombatTuneOpen, &g.CombatTuneIndex)
 }
 
 // updateCombatTuneMenu drives the Combat Tuning submenu: the first slider rows take

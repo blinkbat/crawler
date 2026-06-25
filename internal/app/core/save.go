@@ -270,6 +270,11 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	} else {
 		g.Player.Level = spawnLevel(&area, x, z)
 	}
+	// Re-seed region presence at the LOADED tile — NewGameState seeded it at the
+	// area start, but we just repositioned. Without this, the saved tile's region
+	// reads as "outside", and the first step inside spuriously re-fires its
+	// enter-location dialog. Mirrors the door-reposition paths in run.go.
+	SeedLocationPresence(&g)
 	RevealRadius(&g, x, z, SightRadius)
 	return g, nil
 }

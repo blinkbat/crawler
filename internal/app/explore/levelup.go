@@ -61,15 +61,19 @@ func isStatRow(cursor int) bool {
 func openLevelUpFor(g *core.GameState, member int) {
 	g.LevelUpOpen = true
 	g.LevelUpMember = member
-	g.LevelUpRowCursor = 0
-	g.LevelUpPending = [core.StatCount]int{}
+	clearLevelUpStaging(g)
 }
 
 // closeLevelUp dismisses the modal and clears its staged state.
 func closeLevelUp(g *core.GameState) {
 	g.LevelUpOpen = false
-	g.LevelUpRowCursor = 0
+	clearLevelUpStaging(g)
+}
+
+// clearLevelUpStaging zeroes the staged stat allocations and resets the row cursor.
+func clearLevelUpStaging(g *core.GameState) {
 	g.LevelUpPending = [core.StatCount]int{}
+	g.LevelUpRowCursor = 0
 }
 
 // advanceLevelUpMember moves to the next member with unspent points, or closes

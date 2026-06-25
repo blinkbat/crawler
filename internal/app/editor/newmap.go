@@ -99,7 +99,7 @@ func drawNewMapModal(s *State, font rl.Font, theme render.Theme) {
 	drawModalHeaderAt(font, theme, l.card, "NEW MAP", theme.BorderStrong)
 
 	// Dimensions section.
-	drawLabel(font, "Width", rl.NewRectangle(l.card.X+20, l.widthValue.Y+(l.widthValue.Height-18)/2, 60, 18))
+	drawLabel(font, "Width", rl.NewRectangle(l.card.X+20, l.widthValue.Y+(l.widthValue.Height-metaLabelH)/2, 60, metaLabelH))
 	wText := fmt.Sprintf("%d", s.modalNewWidth)
 	if s.focus == focusNewWidth {
 		wText = s.numericBuf
@@ -107,7 +107,7 @@ func drawNewMapModal(s *State, font rl.Font, theme render.Theme) {
 	drawTextField(font, l.widthValue, wText, s.focus == focusNewWidth)
 	drawStepperButtons(font, l.widthMinus, l.widthPlus)
 
-	drawLabel(font, "Height", rl.NewRectangle(l.card.X+20, l.heightValue.Y+(l.heightValue.Height-18)/2, 60, 18))
+	drawLabel(font, "Height", rl.NewRectangle(l.card.X+20, l.heightValue.Y+(l.heightValue.Height-metaLabelH)/2, 60, metaLabelH))
 	hText := fmt.Sprintf("%d", s.modalNewHeight)
 	if s.focus == focusNewHeight {
 		hText = s.numericBuf

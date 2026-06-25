@@ -317,7 +317,7 @@ func pcmToSound(pcm []int16) rl.Sound {
 	if !rl.IsAudioDeviceReady() {
 		return rl.Sound{}
 	}
-	return bytesToSound(wavsynth.BuildWAV(pcm, wavsynth.SampleRate))
+	return bytesToSound(wavsynth.BuildWAV(pcm))
 }
 
 // bytesToSound decodes a pre-encoded WAV byte slice to an rl.Sound via

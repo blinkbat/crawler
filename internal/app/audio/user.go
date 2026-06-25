@@ -185,7 +185,7 @@ func PreviewPCM(pcm []int16) {
 	if !ready || len(pcm) == 0 {
 		return
 	}
-	wav := wavsynth.BuildWAV(pcm, wavsynth.SampleRate)
+	wav := wavsynth.BuildWAV(pcm)
 	playThroughRing(wav)
 }
 

@@ -356,6 +356,13 @@ func ClampByte(v int) uint8 {
 	return uint8(v)
 }
 
+// RoundToInt rounds a non-negative float to the nearest int (round-half-up).
+// One home for the scattered `int(f + 0.5)` slider/threshold snaps; not valid
+// for negatives (callers here only feed it clamped, non-negative values).
+func RoundToInt[T ~float32 | ~float64](f T) int {
+	return int(f + 0.5)
+}
+
 func MixColor(a, b color.RGBA, t float64) color.RGBA {
 	t = Clamp(t, 0, 1)
 	return color.RGBA{
