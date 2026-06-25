@@ -77,10 +77,7 @@ func DrawSkillTreeModal(g *core.GameState, assets Resources) {
 	classCol := classAccent(m.Class)
 	drawClassGlyph(card.X+skillTreeHeaderGlyphX, card.Y+skillTreeHeaderGlyphY, 12, m.Class, classCol)
 	spText := skillPointsLabel(m.SkillPoints)
-	spCol := textMuted
-	if m.SkillPoints > 0 {
-		spCol = inkAccent
-	}
+	spCol := accentIfPositive(m.SkillPoints, inkAccent)
 	drawTextRightAligned(font, spText, card.X+card.Width-skillTreeCardInset, card.Y+skillTreeHeaderSPY, FontBody, spCol)
 
 	// Tree-column body above the detail strip; columns centered as a block.
@@ -251,12 +248,13 @@ func drawSkillTreeDetail(font rl.Font, g *core.GameState, m *core.PartyMember, t
 	y := card.Y + card.Height - footerH - detailH - 4
 	drawGlassPane(int32(x), int32(y), int32(w), int32(detailH), glassDeep)
 
-	drawTextWithShadow(font, node.Name, x+12, y+8, FontBody, textPrimary)
+	md := cardDetailRowMetrics
+	drawTextWithShadow(font, node.Name, x+md.insetX, y+md.titleY, FontBody, textPrimary)
 	rank := core.TreeNodeRank(m, node.ID)
 	state := "Rank " + formatRatioSpaced(rank, node.MaxRank)
-	drawTextRightAligned(font, state, x+w-12, y+10, FontSmall, inkAccent)
+	drawTextRightAligned(font, state, x+w-md.insetX, y+md.valueY, FontSmall, inkAccent)
 
-	drawTextWithShadow(font, node.Desc, x+12, y+34, FontSmall, textDim)
+	drawTextWithShadow(font, node.Desc, x+md.insetX, y+md.subY, FontSmall, textDim)
 
 	var foot string
 	footCol := textMuted
@@ -275,5 +273,5 @@ func drawSkillTreeDetail(font rl.Font, g *core.GameState, m *core.PartyMember, t
 		foot = "Confirm to invest (" + skillPointsLabel(node.Cost) + ")"
 		footCol = giltBright
 	}
-	drawTextWithShadow(font, foot, x+12, y+detailH-22, FontSmall, footCol)
+	drawTextWithShadow(font, foot, x+md.insetX, y+detailH-22, FontSmall, footCol)
 }

@@ -352,13 +352,7 @@ func LiveStacksInto(inv, buf []ItemStack) []ItemStack {
 // LiveStackCount is the no-alloc count of positive-count entries, for callers
 // that need only the row count.
 func LiveStackCount(inv []ItemStack) int {
-	n := 0
-	for _, s := range inv {
-		if s.Count > 0 {
-			n++
-		}
-	}
-	return n
+	return countWhere(inv, func(s ItemStack) bool { return s.Count > 0 })
 }
 
 // isConsumable reports whether a kind is a battle-usable consumable (no equip

@@ -44,10 +44,12 @@ func init() {
 	}
 }
 
-// BattleWipeName is the menu label for a wipe kind.
+// BattleWipeName is the menu label for a wipe kind. Fails loud on an out-of-range
+// kind (matching ShopTabLabel) — the init above guarantees in-range labels exist, so
+// a "?" reaching the menu would only mask a bad kind.
 func BattleWipeName(k BattleWipeKind) string {
 	if k < 0 || int(k) >= len(battleWipeNames) {
-		return "?"
+		panic("core: BattleWipeName called with out-of-range BattleWipeKind")
 	}
 	return battleWipeNames[k]
 }

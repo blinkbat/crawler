@@ -18,8 +18,9 @@ const stickEdgeThreshold = float32(0.55)
 const lookStickDeadzone = float32(0.15)
 
 // mapStickDeadzone is the Map tab's analog centered band for BOTH pan (left stick)
-// and zoom (right stick) — same idea as lookStickDeadzone so resting drift doesn't
-// creep the view.
+// and zoom (right stick). Like lookStickDeadzone but a hair wider — map pan/zoom
+// reads continuous-position drift more readily than free-look, so it wants more
+// rejection. Tuned per-surface; intentionally not shared with lookStickDeadzone.
 const mapStickDeadzone = float32(0.18)
 
 // stickEdgeKey identifies one of the four stick directions for the edge memory.

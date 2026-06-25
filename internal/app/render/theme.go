@@ -527,6 +527,9 @@ const (
 	// overlayFooterReserve is the bottom band reserved for the hint footer
 	// (DrawHintBar / drawModalFooterGlyphs). Body = card minus this band minus the heading band.
 	overlayFooterReserve = int32(38)
+	// panelsBodyBottomReserve is the extra gap below the panels tab body (above the
+	// footer band) so the body never butts the card's bottom edge.
+	panelsBodyBottomReserve = int32(26)
 )
 
 // modalHeadingInsetY is the Y offset from a modal card's top edge to its heading
@@ -752,9 +755,11 @@ func init() {
 }
 
 // drawStatIcon dispatches to the per-stat sigil drawer (level-up + Stats tab rows).
+// Fails loud on an out-of-range Stat to match the package's other icon dispatchers
+// (slotIconForKind, partyClassPresentationFor) — the init above guarantees coverage.
 func drawStatIcon(s core.Stat, cx, cy, r float32, col color.RGBA) {
 	if int(s) < 0 || int(s) >= len(statIconDrawers) {
-		return
+		panic("render: drawStatIcon called with out-of-range Stat " + strconv.Itoa(int(s)))
 	}
 	statIconDrawers[s](cx, cy, r, col)
 }
@@ -1852,6 +1857,15 @@ func rowTextColor(focused, disabled bool, disabledCol color.RGBA) color.RGBA {
 		return disabledCol
 	case focused:
 		return textPrimary
+	}
+	return textMuted
+}
+
+// accentIfPositive tints a balance readout: accent when there's something to spend
+// or invest, textMuted at zero. Shared by the SkillPoints + tree-ratio headers.
+func accentIfPositive(n int, accent color.RGBA) color.RGBA {
+	if n > 0 {
+		return accent
 	}
 	return textMuted
 }

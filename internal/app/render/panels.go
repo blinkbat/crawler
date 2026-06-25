@@ -169,7 +169,7 @@ func drawPanelsBody(g *core.GameState, assets Resources) {
 
 	bodyY := infoY + panelsInfoStripH + 6
 	bodyRect := rl.NewRectangle(float32(cardX+hudContentInsetX), float32(bodyY),
-		float32(cardW-2*hudContentInsetX), float32(cardY+cardH-26-bodyY-overlayFooterReserve))
+		float32(cardW-2*hudContentInsetX), float32(cardY+cardH-panelsBodyBottomReserve-bodyY-overlayFooterReserve))
 
 	tab := panelTabs[core.PanelTabStats]
 	if int(g.PanelsTab) >= 0 && int(g.PanelsTab) < len(panelTabs) {
@@ -336,6 +336,13 @@ var memberCardHeaderMetrics = cardIdentityMetrics{
 	mpStep:   float32(uiRowPitch), // 42
 }
 
+// cardDetailRowMetrics is the shared header rhythm for a glass detail card: content
+// inset, title baseline, right-aligned value baseline, and sub-line baseline (all from
+// the card's top-left). Shared by the Skills-tab tree summary + skill-tree detail strip.
+var cardDetailRowMetrics = struct{ insetX, titleY, valueY, subY float32 }{
+	insetX: 12, titleY: 8, valueY: 10, subY: 34,
+}
+
 // Member-card column split: the right (vitals) column starts at memberCardBarSplit of
 // the card width and spans memberCardBarFracW. Two tokens (not one + 1-x) so the
 // float32 widths stay bit-identical to the original literals. Shared by the formation
@@ -404,18 +411,15 @@ func drawPanelsStats(g *core.GameState, assets Resources, body rl.Rectangle) {
 	if len(g.Party) == 0 {
 		return
 	}
+	// Grid dims come from core (locked to 2×2 by its RowCount==ColCount==2 init
+	// assert), so the layout tracks the formation instead of assuming party size 4.
 	gut := memberCardGutter
-	quadW := (body.Width - gut) / 2
-	quadH := (body.Height - gut) / 2
+	cols, rows := float32(core.ColCount), float32(core.RowCount)
+	quadW := (body.Width - gut*(cols-1)) / cols
+	quadH := (body.Height - gut*(rows-1)) / rows
 	quadRect := func(row core.Row, col core.Col) rl.Rectangle {
-		x := body.X
-		if col == core.ColRight {
-			x += quadW + gut
-		}
-		y := body.Y
-		if row == core.RowBack {
-			y += quadH + gut
-		}
+		x := body.X + float32(col)*(quadW+gut)
+		y := body.Y + float32(row)*(quadH+gut)
 		return rl.NewRectangle(x, y, quadW, quadH)
 	}
 	for i := range g.Party {
@@ -1178,10 +1182,7 @@ func drawPanelsSkills(g *core.GameState, assets Resources, body rl.Rectangle) {
 
 		// Skill-point balance — bright when there's something to spend, muted at zero.
 		spText := skillPointsLabel(m.SkillPoints)
-		spCol := textMuted
-		if m.SkillPoints > 0 {
-			spCol = inkAccent
-		}
+		spCol := accentIfPositive(m.SkillPoints, inkAccent)
 		drawTextWithShadow(font, "SKILL POINTS", innerX, contentY, FontSmall, textMuted)
 		drawTextRightAligned(font, spText, innerX+innerW, contentY, FontSmall, spCol)
 		contentY += 30
@@ -1197,15 +1198,13 @@ func drawPanelsSkills(g *core.GameState, assets Resources, body rl.Rectangle) {
 			rect := rl.NewRectangle(innerX, rowY, innerW, rowH-10)
 			drawGlassPaneRect(rect, glassMid)
 
-			drawTextWithShadow(font, tr.Name, rect.X+12, rect.Y+8, FontBody, textPrimary)
+			md := cardDetailRowMetrics
+			drawTextWithShadow(font, tr.Name, rect.X+md.insetX, rect.Y+md.titleY, FontBody, textPrimary)
 			invested := core.TreeInvestedRanks(&m, tr)
 			ratio := formatRatioSpaced(invested, core.TreeMaxRanks(tr))
-			ratioCol := textMuted
-			if invested > 0 {
-				ratioCol = giltBright
-			}
-			drawTextRightAligned(font, ratio, rect.X+rect.Width-12, rect.Y+10, FontSmall, ratioCol)
-			drawTextWithShadow(font, tr.Theme, rect.X+12, rect.Y+34, FontSmall, textDim)
+			ratioCol := accentIfPositive(invested, giltBright)
+			drawTextRightAligned(font, ratio, rect.X+rect.Width-md.insetX, rect.Y+md.valueY, FontSmall, ratioCol)
+			drawTextWithShadow(font, tr.Theme, rect.X+md.insetX, rect.Y+md.subY, FontSmall, textDim)
 		}
 
 		// Cursored member: Confirm opens the trees.

@@ -95,13 +95,7 @@ func SellableStacksInto(inv, buf []ItemStack) []ItemStack {
 // SellableCount is the no-alloc count of sellable stacks — for the per-frame
 // row-count path that needs only the length.
 func SellableCount(inv []ItemStack) int {
-	n := 0
-	for _, s := range inv {
-		if sellableStack(s) {
-			n++
-		}
-	}
-	return n
+	return countWhere(inv, sellableStack)
 }
 
 // ShopRowCount is the selectable-row count on the active shop tab — the single

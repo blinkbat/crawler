@@ -62,19 +62,14 @@ func LoadVolumes() (music, sfx float32, muted bool) {
 	if err != nil {
 		return music, sfx, false
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		key, val, ok := strings.Cut(strings.TrimSpace(line), "=")
-		if !ok {
-			continue
-		}
-		key, val = strings.TrimSpace(key), strings.TrimSpace(val)
+	forEachKeyValueLine(data, func(key, val string) {
 		if key == "mute" {
 			muted, _ = strconv.ParseBool(val) // unparsable → false
-			continue
+			return
 		}
 		f, err := strconv.ParseFloat(val, 32)
 		if err != nil {
-			continue
+			return
 		}
 		v := core.Clamp(float32(f), 0, 1)
 		switch key {
@@ -83,19 +78,36 @@ func LoadVolumes() (music, sfx float32, muted bool) {
 		case "sfx":
 			sfx = v
 		}
-	}
+	})
 	return music, sfx, muted
+}
+
+// forEachKeyValueLine parses "key=value" config lines — whitespace-trimmed, with
+// blank and '#'-comment lines skipped — calling fn for each. The shared reader for
+// the volumes + assignments files so their formats can't drift.
+func forEachKeyValueLine(data []byte, fn func(key, val string)) {
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		fn(strings.TrimSpace(key), strings.TrimSpace(val))
+	}
 }
 
 // SaveVolumes writes music + SFX volume + mute to maps/sounds/volumes.txt (creating
 // the dir if needed). Volumes clamped to [0,1] so a stray value can't persist out of range.
 func SaveVolumes(music, sfx float32, muted bool) error {
 	dir := SoundsDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, core.AssetDirMode); err != nil {
 		return err
 	}
 	body := fmt.Sprintf("music=%.3f\nsfx=%.3f\nmute=%t\n", core.Clamp(music, 0, 1), core.Clamp(sfx, 0, 1), muted)
-	return os.WriteFile(filepath.Join(dir, VolumesFile), []byte(body), 0o644)
+	return os.WriteFile(filepath.Join(dir, VolumesFile), []byte(body), core.AssetFileMode)
 }
 
 // SanitizeName normalizes a name into a safe filename stem; empty stays empty
@@ -240,23 +252,14 @@ func LoadAssignments() map[string]string {
 	if err != nil {
 		return out
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		eq := strings.IndexByte(line, '=')
-		if eq < 0 {
-			continue
-		}
-		cue := strings.TrimSpace(line[:eq])
+	forEachKeyValueLine(data, func(cue, val string) {
 		// Sanitize at parse time against path traversal in the SoundPath join.
-		name := SanitizeName(strings.TrimSpace(line[eq+1:]))
+		name := SanitizeName(val)
 		if cue == "" || name == "" {
-			continue
+			return
 		}
 		out[cue] = name
-	}
+	})
 	return out
 }
 

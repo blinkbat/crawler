@@ -19,6 +19,7 @@ package audio
 import (
 	"crawler/internal/app/audio/userconfig"
 	"crawler/internal/app/audio/wavsynth"
+	"crawler/internal/app/core"
 	"fmt"
 	"math/rand"
 	"os"
@@ -135,6 +136,10 @@ func init() {
 			panic(fmt.Sprintf("audio: soundCues[%d] (%s) has nil PCM — procedural fallback won't render", i, row.Canonical))
 		}
 	}
+	// The footfall pair must land before the next step's cluster begins.
+	if footstepGapMax >= core.StepDuration {
+		panic(fmt.Sprintf("audio: footstepGapMax %.3f must stay below core.StepDuration %.3f", footstepGapMax, core.StepDuration))
+	}
 }
 
 // SoundName returns the display label; out-of-range falls back to "Unknown".
@@ -231,14 +236,11 @@ func unloadSounds(slots []rl.Sound) {
 	}
 }
 
-// forEachCue walks every soundCues row with a non-empty Canonical.
+// forEachCue walks every soundCues row (all populated — the init assert forbids
+// an empty Canonical, so there are no sparse rows to skip).
 func forEachCue(fn func(cue Sound, row soundCue)) {
 	for cue := Sound(0); cue < soundCount; cue++ {
-		row := soundCues[cue]
-		if row.Canonical == "" {
-			continue
-		}
-		fn(cue, row)
+		fn(cue, soundCues[cue])
 	}
 }
 
