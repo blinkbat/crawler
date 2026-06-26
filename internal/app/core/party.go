@@ -527,6 +527,12 @@ func HealMember(m *PartyMember, amount int) bool {
 	if m == nil || amount <= 0 || !partyAvailable(*m) {
 		return false
 	}
+	// A starving body can't mend: no HP recovery by any means until fed back out of
+	// the Starving range (only food clears it). Eat paths feed BEFORE healing so a
+	// big enough meal lifts Starving and lets the same item's heal land.
+	if MemberStarving(*m) {
+		return false
+	}
 	GainUpTo(&m.HP, m.MaxHP, amount)
 	return true
 }
@@ -547,16 +553,22 @@ func HealWholeParty(g *GameState, amount int) {
 // RestorePartyFully fully restores every member to MaxHP + MaxMP, REVIVING the
 // dead — the healing crystal's full party reset. Sets HP/MP directly (HealMember
 // never revives). Returns the number restored. Crystal-use is out of combat, so
-// no member is Ingested here.
+// no member is Ingested here. STARVING members are skipped: crystals can't cure
+// starving (only food can), so a starving member gets nothing here.
 func RestorePartyFully(g *GameState) int {
 	if g == nil {
 		return 0
 	}
+	n := 0
 	for i := range g.Party {
+		if MemberStarving(g.Party[i]) {
+			continue
+		}
 		g.Party[i].HP = g.Party[i].MaxHP
 		g.Party[i].MP = g.Party[i].MaxMP
+		n++
 	}
-	return len(g.Party)
+	return n
 }
 
 // TickCrystalRecharge advances every dormant crystal's charge one step, re-arming
@@ -964,6 +976,9 @@ const (
 	PartyStatusStunned
 	PartyStatusAsleep
 	PartyStatusPoisoned
+	// Starving (food system) — a persistent debuff, ranked just under the combat
+	// threats and above the positive statuses.
+	PartyStatusStarving
 	// Positive statuses (Bless / Renewal) — below every threat, above Defending.
 	PartyStatusBlessed
 	PartyStatusRegen
@@ -1013,6 +1028,7 @@ var partyStatusBands = []struct {
 	{PartyStatusStunned, "STUNNED", func(m *PartyMember) (bool, int) { return m.StunTurns > 0, m.StunTurns }},
 	{PartyStatusAsleep, "ASLEEP", func(m *PartyMember) (bool, int) { return m.SleepTurns > 0, m.SleepTurns }},
 	{PartyStatusPoisoned, "POISONED", func(m *PartyMember) (bool, int) { return m.PoisonTurns > 0, m.PoisonTurns }},
+	{PartyStatusStarving, "STARVING", func(m *PartyMember) (bool, int) { return MemberStarving(*m), 0 }},
 	{PartyStatusBlessed, "BLESSED", func(m *PartyMember) (bool, int) {
 		return len(m.Buffs) > 0 && StatusModsNetBeneficial(m.Buffs), MaxStatusModTurns(m.Buffs)
 	}},

@@ -80,6 +80,10 @@ func (a *AreaDefinition) TopSolidLevel(x, z int) int {
 // Elevation layer (the scan's only input on the heightfield path) so a struct copy
 // or an edited elevation can't serve a stale top. Package-level (not a struct field)
 // to stay copy-safe, mirroring the render-layer per-area caches.
+//
+// INVARIANT: single-writer. The read-then-write in maxElevationTop is unsynchronized
+// and assumes the single-threaded game loop. If geometry queries ever run off the main
+// goroutine (e.g. an async autosave), guard this with a mutex or give it a per-caller cache.
 var maxElevationTopCache struct {
 	name          string
 	width, height int

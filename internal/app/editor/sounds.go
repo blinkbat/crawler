@@ -664,7 +664,7 @@ func updateSoundsListKeys(s *State, names []string) {
 	if rl.IsKeyPressed(rl.KeyE) {
 		loadSoundForEdit(s, names[s.soundCursor])
 	}
-	if rl.IsKeyPressed(rl.KeyX) {
+	if editorDeletePressed() {
 		confirmSoundDelete(s, names[s.soundCursor])
 	}
 }
@@ -709,12 +709,19 @@ func cycleCueAssignment(s *State, cue audio.Sound, delta int) {
 	// already source from these, and a keystroke shouldn't re-read assignments.txt.
 	options = append(options, s.soundSavedCache...)
 	current := s.soundAssignCache[audio.SoundCanonicalName(cue)]
-	idx := 0
+	idx, found := 0, false
 	for i, opt := range options {
 		if opt == current {
-			idx = i
+			idx, found = i, true
 			break
 		}
+	}
+	// A still-assigned sound deleted off disk won't appear in soundSavedCache; add it
+	// as its own slot so the cycle steps OFF its real value rather than off the
+	// "(default)" slot (which would silently discard the assignment on the first keypress).
+	if !found && current != "" {
+		options = append(options, current)
+		idx = len(options) - 1
 	}
 	idx = core.WrapIndex(idx+delta, len(options))
 	failed, err := audio.AssignUserSound(cue, options[idx])

@@ -346,6 +346,15 @@ func GainUpTo(cur *int, max, delta int) {
 	}
 }
 
+// SubFloorZero subtracts delta from *cur, flooring at 0 — the subtractive mirror
+// of GainUpTo (drain readiness/armor/shield, eat into hunger). Negative delta is
+// a no-op floor wouldn't change.
+func SubFloorZero(cur *int, delta int) {
+	if *cur -= delta; *cur < 0 {
+		*cur = 0
+	}
+}
+
 func ClampByte(v int) uint8 {
 	if v < 0 {
 		return 0

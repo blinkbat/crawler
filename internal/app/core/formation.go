@@ -581,5 +581,5 @@ func EnemyInEffectiveFront(members []Enemy, i int) bool {
 // consults this). The party→enemy melee-reach predicate. EnemyInEffectiveFront stays
 // the pure row test, still used for the enemy→party gate — a flying foe can melee.
 func EnemyMeleeReachable(members []Enemy, i int) bool {
-	return EnemyInEffectiveFront(members, i) && !EnemyInfoFor(members[i]).Flying
+	return EnemyInEffectiveFront(members, i) && !EnemyFlying(&members[i])
 }

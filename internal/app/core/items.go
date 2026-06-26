@@ -31,6 +31,8 @@ const (
 	ItemThrowingKnives
 	ItemCrossbow
 	ItemArbalest
+	ItemHealthPotion   // HP-restore consumable (Slot == SlotNone)
+	ItemMagicalBerries // HP-restore + a little satiety (Slot == SlotNone)
 
 	itemKindCount // sentinel: ItemKind cardinality (assertAppendOnly coverage)
 )
@@ -46,7 +48,7 @@ func init() {
 		ItemRapier, ItemShortBow, ItemSling,
 		ItemBattleAxe, ItemWarHammer, ItemCrustOfBread,
 		ItemMagicPhial, ItemThrowingKnives, ItemCrossbow,
-		ItemArbalest,
+		ItemArbalest, ItemHealthPotion, ItemMagicalBerries,
 	)
 }
 
@@ -123,6 +125,10 @@ type ItemDefinition struct {
 	// MPAmount is MP restored on use (Magic Phial); 0 = none. The use paths skip
 	// only when NEITHER axis would help the target.
 	MPAmount int
+	// SatietyGain is the Hunger restored on eating (FeedMember); 0 = not food. Food
+	// may ALSO carry a HealAmount — both apply on use (satiety first, so a meal big
+	// enough to lift Starving lets the heal land).
+	SatietyGain int
 	// Description is the flavor/tooltip line — authored but not yet read by any
 	// UI. Keep populating it for the eventual tooltip.
 	Description string
@@ -147,10 +153,20 @@ type ItemDefinition struct {
 }
 
 var itemDefinitions = []ItemDefinition{
-	{Kind: ItemCheese, Name: "Morsel of Cheese", HealAmount: 4, Price: 6, Description: "A bite of stale cheese. Better than nothing."},
-	{Kind: ItemBatJerky, Name: "Bat Jerky", HealAmount: 9, Price: 12, Description: "Stringy, oddly satisfying. A traveler's lunch."},
-	{Kind: ItemCrustOfBread, Name: "Crust of Bread", HealAmount: 3, Price: 3, Description: "A dry heel of bread. A small bite back to your feet."},
-	{Kind: ItemMagicPhial, Name: "Magic Phial", MPAmount: 8, Price: 14, Description: "A vial of cold blue draught. Restores a little MP."},
+	// Consumables. Foods carry SatietyGain (and a small heal); the phial/potion/
+	// berries are the dedicated restoratives.
+	{Kind: ItemCheese, Name: "Morsel of Cheese", HealAmount: 4, SatietyGain: 60, Price: 6,
+		Description: "A waxed nub of cheese, sweated soft and gone sharp at the rind. Hardly a feast, but it quiets a growling belly for a while."},
+	{Kind: ItemBatJerky, Name: "Bat Jerky", HealAmount: 9, SatietyGain: 150, Price: 12,
+		Description: "Salt-cured strips of cave bat — chewy, smoky, and shockingly filling. A whole traveler's lunch wrapped in one greasy fistful."},
+	{Kind: ItemCrustOfBread, Name: "Crust of Bread", HealAmount: 3, SatietyGain: 90, Price: 3,
+		Description: "The dry heel of a loaf, hard at the edges and dusted with grit. Gnaw it long enough and it fills a corner of an empty stomach."},
+	{Kind: ItemMagicPhial, Name: "Magic Phial", MPAmount: 8, Price: 14,
+		Description: "A thimble of cold blue draught that beads like frost on the glass. One bitter swallow and spent mana comes trickling back."},
+	{Kind: ItemHealthPotion, Name: "Health Potion", HealAmount: 14, Price: 18,
+		Description: "A stoppered vial of ruby tonic, warm against the palm and tasting of iron and crushed herbs. It knits cuts closed as you drink."},
+	{Kind: ItemMagicalBerries, Name: "Magical Berries", HealAmount: 8, SatietyGain: 45, Price: 16,
+		Description: "A cupped handful of dusk-glowing berries off a deep-grove bramble. They burst sweet on the tongue and mend you as they go down."},
 
 	// Equipment. Bonuses are modest — a starting kit, not a power spike.
 	{Kind: ItemIronSword, Name: "Iron Sword", Description: "A plain iron longsword. +2 STR.",
@@ -371,7 +387,7 @@ func liveConsumable(s ItemStack) bool {
 // ItemIsRestorative reports whether an item restores HP or MP — the single
 // definition of "restorative" the use paths gate on.
 func ItemIsRestorative(def ItemDefinition) bool {
-	return def.HealAmount > 0 || def.MPAmount > 0
+	return def.HealAmount > 0 || def.MPAmount > 0 || def.SatietyGain > 0
 }
 
 // ItemHelpsTarget reports whether using a restorative on m would do anything
@@ -381,17 +397,22 @@ func ItemHelpsTarget(def ItemDefinition, m PartyMember) bool {
 	if !ItemIsRestorative(def) {
 		return true
 	}
-	hpUseful := def.HealAmount > 0 && m.HP < m.MaxHP
+	// A starving member can't gain HP by any means but food, so a pure HP-heal does
+	// NOT help them — but food still does (satietyUseful), and feeding lifts Starving
+	// so the same item's heal lands afterward.
+	hpUseful := def.HealAmount > 0 && m.HP < m.MaxHP && !MemberStarving(m)
 	mpUseful := def.MPAmount > 0 && m.MP < m.MaxMP
-	return hpUseful || mpUseful
+	satietyUseful := def.SatietyGain > 0 && m.Hunger > 0
+	return hpUseful || mpUseful || satietyUseful
 }
 
 // MemberCanBeHealed is the "is an HP heal not wasted?" gate for out-of-battle
-// target selection: alive (heals don't revive), not ingested, not full HP. The
-// HP-only mirror of ItemHelpsTarget (no MP axis), so an HP-only heal picker
-// doesn't accept an ally who's only low on MP.
+// target selection: alive (heals don't revive), not ingested, not full HP, not
+// starving (starving blocks all HP recovery — only food helps). The HP-only mirror
+// of ItemHelpsTarget (no MP axis), so an HP-only heal picker doesn't accept an ally
+// who's only low on MP.
 func MemberCanBeHealed(m PartyMember) bool {
-	return partyAvailable(m) && m.HP < m.MaxHP
+	return partyAvailable(m) && m.HP < m.MaxHP && !MemberStarving(m)
 }
 
 // LiveConsumables returns the positive-count consumable entries — the battle

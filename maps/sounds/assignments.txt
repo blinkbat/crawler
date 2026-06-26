@@ -3,6 +3,12 @@
 crystal=crystal
 enemy_death=enemy_death
 enemy_hit=enemy_hit
+footstep_1=footstep_1
+footstep_2=footstep_2
+footstep_3=footstep_3
+footstep_4=footstep_4
+footstep_5=footstep_5
+footstep_6=footstep_6
 heal=heal
 input_great=input_great
 input_hit=input_hit

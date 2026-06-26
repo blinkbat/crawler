@@ -42,6 +42,10 @@ type objectViewLayout struct {
 
 // computeObjectViewLayout builds the current page's geometry (shared by draw +
 // input) and clamps s.objectViewPage in place (over-paged values self-heal).
+//
+// LIFETIME: the returned layout.thumbs aliases the shared objViewThumbsBuf and is
+// valid only until the next computeObjectViewLayout call. Safe today because the per-
+// frame update + draw calls don't overlap; do NOT retain a layout across a second call.
 func computeObjectViewLayout(s *State) objectViewLayout {
 	card := centeredCardRect(objViewModalW, objViewModalH)
 	items := render.ObjectPreviewItems()

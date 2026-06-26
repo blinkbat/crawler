@@ -256,17 +256,22 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	// out-of-bounds or now blocked (map may have shrunk). Check the RAW coords:
 	// clamping to an edge first could silently drop the party at a walkable corner.
 	x, z := data.PlayerTileX, data.PlayerTileZ
+	level := data.PlayerLevel
 	if area.BlockedAt(x, z) {
 		x, z = g.Player.TileX, g.Player.TileZ
+		// The saved level belonged to the blocked tile; on the fallback tile derive
+		// its own surface instead, else a coincidentally-standable saved level would
+		// drop the party at the wrong elevation.
+		level = spawnLevel(&area, x, z)
 		g.Player = NewPlayer(x, z, area.StartFacing)
 	} else {
 		g.Player = NewPlayer(x, z, data.PlayerFacing)
 	}
-	// Honor the saved standing level only if still standable (map may have been
-	// edited), else snap to the tile's lowest standable surface. NewPlayer left
+	// Honor the standing level only if still standable at this tile (map may have
+	// been edited), else snap to the tile's lowest standable surface. NewPlayer left
 	// Level zero, so this is where the loaded level is established.
-	if area.Standable(x, data.PlayerLevel, z) {
-		g.Player.Level = data.PlayerLevel
+	if area.Standable(x, level, z) {
+		g.Player.Level = level
 	} else {
 		g.Player.Level = spawnLevel(&area, x, z)
 	}

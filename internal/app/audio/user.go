@@ -104,8 +104,8 @@ func reloadCueSlot(cue Sound, assigns map[string]string) (failed bool) {
 	replaceSound(&bank[cue], newSound)
 	// Keep the live SFX volume on the freshly-swapped slot (else a reloaded cue
 	// would play at full volume until the next SetSFXVolume). Effective = 0 if muted.
-	if bank[cue].Stream.Buffer != nil {
-		rl.SetSoundVolume(bank[cue], effectiveSFXVolume())
+	if soundLoaded(bank[cue]) {
+		rl.SetSoundVolume(bank[cue], sfx.effective())
 	}
 	return !fromFile && assigned
 }
@@ -209,7 +209,7 @@ func PreviewFile(name string) {
 
 func playThroughRing(wavBytes []byte) {
 	snd := bytesToSound(wavBytes)
-	if snd.Stream.Buffer == nil {
+	if !soundLoaded(snd) {
 		// Zero Sound (dead device or malformed bytes) — don't store or play.
 		return
 	}
@@ -220,7 +220,7 @@ func playThroughRing(wavBytes []byte) {
 	found := false
 	for i := 0; i < previewRingSize; i++ {
 		idx := (previewCursor + i) % previewRingSize
-		if s := previewRing[idx]; s.Stream.Buffer == nil || !rl.IsSoundPlaying(s) {
+		if s := previewRing[idx]; !soundLoaded(s) || !rl.IsSoundPlaying(s) {
 			slot = idx
 			found = true
 			break

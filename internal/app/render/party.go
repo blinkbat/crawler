@@ -38,6 +38,7 @@ var partyStatusVisuals = [core.PartyStatusCount]struct {
 	core.PartyStatusStunned:   {Col: sharedStatusVisuals[core.PartyStatusStunned].Col, Flicker: true, Glyph: sharedStatusVisuals[core.PartyStatusStunned].Glyph},
 	core.PartyStatusAsleep:    {Col: sharedStatusVisuals[core.PartyStatusAsleep].Col, Flicker: true, Glyph: sharedStatusVisuals[core.PartyStatusAsleep].Glyph},
 	core.PartyStatusPoisoned:  {Col: sharedStatusVisuals[core.PartyStatusPoisoned].Col, Flicker: true, Glyph: sharedStatusVisuals[core.PartyStatusPoisoned].Glyph},
+	core.PartyStatusStarving:  {Col: statusStarving, Flicker: true, Glyph: drawStatusGlyphStarving},
 	core.PartyStatusBlessed:   {Col: statusBlessed, Glyph: drawStatusGlyphBlessed},
 	core.PartyStatusRegen:     {Col: statusRegen, Glyph: drawStatusGlyphRegen},
 	core.PartyStatusShielded:  {Col: statusShielded, Glyph: drawStatusGlyphShielded},
@@ -400,6 +401,12 @@ func drawStatusGlyphDown(cx, cy, r float32, col rl.Color) {
 	rl.DrawCircleV(rl.NewVector2(cx-r*0.3, cy-r*0.16), r*0.2, statusGlyphDark)
 	rl.DrawCircleV(rl.NewVector2(cx+r*0.3, cy-r*0.16), r*0.2, statusGlyphDark)
 	rl.DrawLineEx(rl.NewVector2(cx, cy+r*0.34), rl.NewVector2(cx, cy+r*0.72), 1, statusGlyphDark)
+}
+
+func drawStatusGlyphStarving(cx, cy, r float32, col rl.Color) {
+	// Empty bowl: a shallow half-disc under a rim line — the "no food" mark.
+	rl.DrawCircleSector(rl.NewVector2(cx, cy-r*0.12), r*0.72, 0, 180, 18, col)
+	rl.DrawLineEx(rl.NewVector2(cx-r*0.82, cy-r*0.12), rl.NewVector2(cx+r*0.82, cy-r*0.12), 2, col)
 }
 
 func drawStatusGlyphBurn(cx, cy, r float32, col rl.Color) {

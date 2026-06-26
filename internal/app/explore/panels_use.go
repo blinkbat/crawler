@@ -3,7 +3,6 @@ package explore
 import (
 	"crawler/internal/app/audio"
 	"crawler/internal/app/core"
-	"crawler/internal/app/input"
 )
 
 // Out-of-battle "use" actions on the panels overlay (Items consumables, Skills
@@ -168,10 +167,6 @@ func closeHealPick(g *core.GameState) {
 // updateHealPicker drives the heal-skill chooser: Up/Down walk the caster's
 // heals, Confirm commits into beginHealCast, Back cancels.
 func updateHealPicker(g *core.GameState) {
-	if input.BackPressed() {
-		closeHealPick(g)
-		return
-	}
 	caster := g.HealPickCaster
 	m, ok := validMember(g, caster)
 	if !ok {
@@ -179,35 +174,21 @@ func updateHealPicker(g *core.GameState) {
 		return
 	}
 	skills := affordableOutOfBattleSkills(m)
-	if len(skills) == 0 {
-		closeHealPick(g)
-		return
-	}
-	g.HealPickCursor = input.CursorUpDown(g.HealPickCursor, len(skills))
-	if input.ConfirmPressed() && g.HealPickCursor >= 0 && g.HealPickCursor < len(skills) {
-		skill := skills[g.HealPickCursor]
+	updateListPicker(&g.HealPickCursor, len(skills), func() { closeHealPick(g) }, func(item int) {
+		skill := skills[item]
 		closeHealPick(g)
 		beginSkillCast(g, caster, skill)
-	}
+	})
 }
 
 // updateUseTargetPicker drives the shared ally-target sub-modal: Up/Down walk the
 // living members, Confirm applies the pending item/skill, Back closes the picker.
 func updateUseTargetPicker(g *core.GameState) {
-	if input.BackPressed() {
-		closeUseTarget(g)
-		return
-	}
 	living := core.LivingPartyIndicesInto(useTargetLivingBuf, g.Party)
 	useTargetLivingBuf = living
-	if len(living) == 0 {
-		closeUseTarget(g)
-		return
-	}
-	g.UseTargetCursor = input.CursorUpDown(g.UseTargetCursor, len(living))
-	if input.ConfirmPressed() && g.UseTargetCursor >= 0 && g.UseTargetCursor < len(living) {
-		applyUseToMember(g, living[g.UseTargetCursor])
-	}
+	updateListPicker(&g.UseTargetCursor, len(living), func() { closeUseTarget(g) }, func(item int) {
+		applyUseToMember(g, living[item])
+	})
 }
 
 // applyUseToMember resolves the pending use against the chosen member: an item
@@ -230,6 +211,8 @@ func applyUseToMember(g *core.GameState, member int) {
 			break
 		}
 		g.Inventory = inv
+		// Feed first: a big enough meal lifts Starving so the food's own heal can land.
+		core.FeedMember(m, def.SatietyGain)
 		core.HealMember(m, def.HealAmount)
 		core.RestoreMP(m, def.MPAmount)
 		audio.Play(audio.SoundHeal)

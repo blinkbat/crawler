@@ -343,6 +343,10 @@ const (
 	ModalDialog
 	// ModalQuitConfirm: the quit prompt. Highest priority so nothing shadows a pending quit.
 	ModalQuitConfirm
+
+	// ModalCount bounds the modal-updater dispatch table in explore (init-asserted
+	// complete). Runtime-only enum (never serialized), so appending here is safe.
+	ModalCount
 )
 
 // ActiveModal returns the highest-priority open explore-scene modal, or ModalNone
@@ -455,6 +459,30 @@ func MeleeReachableBattleEnemyIndices(g *GameState) []int {
 		}
 	}
 	return out
+}
+
+// NoMeleeReachableEnemy reports whether a MELEE attack reaches NO foe because every
+// living enemy is out of melee range (all Flying / wholly covered). The foe-side twin
+// of BackRowMeleeBlocked's attacker-side gate: both grey the Attack/melee-skill rows,
+// this one firing when the attacker stands up front yet has nothing to swing at.
+// Allocation-free (unlike len(MeleeReachableBattleEnemyIndices)==0) for the render path.
+func NoMeleeReachableEnemy(g *GameState) bool {
+	members := BattleMembers(g)
+	for i := range members {
+		if members[i].Alive && EnemyMeleeReachable(members, i) {
+			return false
+		}
+	}
+	return true
+}
+
+// MeleeActionBlocked reports whether a melee action of class ac from party slot i can
+// connect with nothing — i stuck in the protected back row, OR no foe is melee-reachable
+// (all Flying). The single grey-out gate for the Attack row and melee skill rows; non-
+// melee never blocks. The refusal path (battle.enterEnemyTargeting / updateSkillMenu)
+// re-tests the two reasons apart to log the right line.
+func MeleeActionBlocked(g *GameState, ac AttackClass, i int) bool {
+	return BackRowMeleeBlocked(ac, g.Party, i) || (ac.IsMelee() && NoMeleeReachableEnemy(g))
 }
 
 // AoEReachesEnemy reports whether an all-enemy skill's sweep actually lands on the
@@ -731,8 +759,7 @@ func TurnForecastInto(g *GameState, into []TurnEntry, limit int) []TurnEntry {
 	} else {
 		into = into[:0]
 	}
-	phase := g.Battle.Phase
-	active := phase == BattlePlayer || phase == BattleAttackTiming || phase == BattleEnemyTiming
+	active := g.Battle.Phase.InCombat()
 	if !active || limit <= 0 || len(g.Battle.Queue) == 0 {
 		return into
 	}

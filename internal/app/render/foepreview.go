@@ -88,20 +88,8 @@ var foePreviewRT previewRT
 // battle billboards use) so the preview matches an encounter.
 var foeAnchor = rl.NewVector3(0, battleFormationCenterY, 0)
 
-// foePreviewBG / foePreviewGround tint the diorama (dark void + muted floor so
-// the contact shadow reads).
-var (
-	foePreviewBG     = rl.NewColor(26, 28, 34, 255)
-	foePreviewGround = rl.NewColor(54, 58, 66, 255)
-)
-
-// Authoring-gizmo tints shared by both previews: orange particle anchor, cyan
-// hit-glyph anchor, gold damage-number anchor.
-var (
-	gizmoParticleColor = rl.NewColor(255, 168, 86, 210)
-	gizmoGlyphColor    = rl.NewColor(176, 226, 255, 220)
-	gizmoNumberColor   = rl.NewColor(255, 232, 120, 220)
-)
+// foePreviewBG/foePreviewGround + gizmo* diorama tints now live in theme.go
+// (Visualizer diorama palette group).
 
 // foePreviewCamera is the diorama camera, derived from the DEFAULT battle tuning so
 // the preview reads at the SAME downward tilt + FOV combat does (back along +Z, the

@@ -524,6 +524,16 @@ type GameState struct {
 	// scrolling. Reset to 0 (re-centered) on overlay open / Map (re)entry.
 	PanelsMapPanX int
 	PanelsMapPanZ int
+	// PanelsMapPanAccumX/Z + PanelsMapZoomAccum are the analog stick/wheel
+	// accumulators that drain into the integer pan/zoom above. Transient input state
+	// — live here (not package globals) so they reset with the GameState lifetime.
+	PanelsMapPanAccumX float32
+	PanelsMapPanAccumZ float32
+	PanelsMapZoomAccum float32
+	// TurnHeldLast / TurnRepeatCooldown drive explore's held-turn auto-repeat.
+	// Transient input state, co-located for the same reason.
+	TurnHeldLast       bool
+	TurnRepeatCooldown float32
 	// Visited tracks stepped-on tiles for the Map fog-of-war reveal; indexed
 	// Visited[z][x]. Start tile pre-marked; updated on every successful step.
 	Visited [][]bool
@@ -700,6 +710,13 @@ type PartyMember struct {
 	MaxHP int // derived from Stats.VIT
 	MP    int
 	MaxMP int
+
+	// Hunger is the per-member satiety meter (see hunger.go): 0 = Full, climbing
+	// +HungerPerStep each landed step to SatietyMax = Starving. ONLY food lowers it
+	// (FeedMember) — crystals and heals can't. Stored inverted so a zero value (new
+	// member, or a save predating hunger) reads as Full. Drives SatietyStage, the
+	// Starving status, the starving stat penalty, and the no-heal-while-starving gate.
+	Hunger int
 	// Armor lives outside Stats so it isn't a spendable level-up stat. Defaults 0
 	// for party; enemies set it in EnemyDefinition. Clipped against phys damage in
 	// ApplyArmor; EffectiveArmor sums this with Equipped bonuses.

@@ -78,6 +78,16 @@ var (
 	// cards). Own alpha so it stays tunable apart from glassBaseWash.
 	surfaceDimScrim = rl.NewColor(6, 8, 14, 105)
 
+	// ----- Visualizer diorama (Foe/Party preview modals) -----
+	// foePreviewBG / foePreviewGround tint the diorama (dark void + muted floor so
+	// the contact shadow reads). The gizmo* tints mark the authoring anchors:
+	// orange particle, cyan hit-glyph, gold damage-number.
+	foePreviewBG       = rl.NewColor(26, 28, 34, 255)
+	foePreviewGround   = rl.NewColor(54, 58, 66, 255)
+	gizmoParticleColor = rl.NewColor(255, 168, 86, 210)
+	gizmoGlyphColor    = rl.NewColor(176, 226, 255, 220)
+	gizmoNumberColor   = rl.NewColor(255, 232, 120, 220)
+
 	// ----- Wood frames -----
 	woodDark   = rl.NewColor(48, 30, 18, 255)
 	woodMid    = rl.NewColor(96, 62, 36, 255)
@@ -200,6 +210,11 @@ var (
 	// parchment-gold; gilt-family transient, NOT muted.
 	barGhostHot = rl.NewColor(255, 226, 168, 235)
 
+	// Stat readout tints on the character sheet: a stat reads green when its
+	// effective value sits ABOVE base (gear/buff), red when BELOW (debuff/starving).
+	statBuffed   = rl.NewColor(126, 224, 150, 255)
+	statDebuffed = rl.NewColor(238, 110, 104, 255)
+
 	// ----- Per-status accents (UI_STANDARDS.md) -----
 	// Indexed by core.PartyStatusKind via partyStatusVisuals; exported so non-party
 	// surfaces (enemy pills) can pull the same hue.
@@ -213,6 +228,9 @@ var (
 	statusIngested  = mute(rl.NewColor(200, 132, 220, 240))
 	statusDefending = mute(rl.NewColor(132, 196, 255, 240))
 	statusDown      = mute(rl.NewColor(220, 102, 102, 235))
+	// statusStarving: the food system's only mechanical status — a gaunt famine
+	// brown. Flickers (a threat); browner than statusBurn's brighter orange.
+	statusStarving = mute(rl.NewColor(198, 130, 84, 240))
 	// statusBlessed: POSITIVE buff — warm holy gilt, distinct from statusStun's
 	// flatter yellow. Never flickers.
 	statusBlessed = mute(rl.NewColor(244, 212, 128, 240))

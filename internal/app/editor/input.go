@@ -27,6 +27,14 @@ func editorTabPressed() bool {
 	return input.EditorTabPressed()
 }
 
+// editorAddPressed / editorDeletePressed are the editor's list-modal verb keys
+// (A add, X delete), in one place so the list modals (packs, chests, doors, dialog
+// nodes/choices/conditions, locations, sounds) can't drift on the mnemonic. (M is
+// NOT centralized — it's a per-modal toggle, not a uniform verb.) Editor is
+// keyboard-exempt, so raw rl reads are allowed here.
+func editorAddPressed() bool    { return rl.IsKeyPressed(rl.KeyA) }
+func editorDeletePressed() bool { return rl.IsKeyPressed(rl.KeyX) }
+
 // runCardCmdsNav is runCardCmds plus keyboard navigation: Up/Down walk s.modalCursor
 // over the buttons and Enter fires the selected one. Mouse clicks + the per-cmd hot
 // accelerators still work; the matching draw highlights s.modalCursor. For the
@@ -385,6 +393,18 @@ func cyclePreviewPhase(s *State) {
 	s.flash("Preview: " + core.PhaseName(s.previewPhase))
 }
 
+// gridCursorDirs pairs each cursor-step delta with its input predicate. Package-level
+// so updateGridCursor doesn't rebuild the slice every frame.
+var gridCursorDirs = [...]struct {
+	pressed func() bool
+	dx, dz  int
+}{
+	{input.ArrowLeftPressed, -1, 0},
+	{input.ArrowRightPressed, 1, 0},
+	{input.ArrowUpPressed, 0, -1},
+	{input.ArrowDownPressed, 0, 1},
+}
+
 func updateGridCursor(s *State) {
 	if s.area.Width == 0 || s.area.Height == 0 {
 		return
@@ -394,16 +414,10 @@ func updateGridCursor(s *State) {
 	moved := false
 	// Arrow / D-pad / left stick walk the grid cursor (clamp, not wrap).
 	// Table-driven so the four directions share the activate→clamp→moved step.
-	for _, dir := range []struct {
-		pressed bool
-		dx, dz  int
-	}{
-		{input.ArrowLeftPressed(), -1, 0},
-		{input.ArrowRightPressed(), 1, 0},
-		{input.ArrowUpPressed(), 0, -1},
-		{input.ArrowDownPressed(), 0, 1},
-	} {
-		if !dir.pressed {
+	// gridCursorDirs is a package var (not a per-frame slice literal) — updateHotkeys
+	// runs this every steady-state editing frame.
+	for _, dir := range gridCursorDirs {
+		if !dir.pressed() {
 			continue
 		}
 		s.gridCursorX, s.gridCursorZ = activateCursor(s, mw, mh)
@@ -1528,7 +1542,7 @@ func updateDoorEditModal(s *State) Action {
 		s.focus = focusDoorName
 		return ActionNone
 	}
-	if rl.IsKeyPressed(rl.KeyX) {
+	if editorDeletePressed() {
 		deleteDoorAt(s, s.modalDoorIdx)
 		return ActionNone
 	}
@@ -1718,7 +1732,7 @@ func updatePackEditModal(s *State) Action {
 		return ActionNone
 	}
 	if memberCount > 0 {
-		if rl.IsKeyPressed(rl.KeyX) {
+		if editorDeletePressed() {
 			packRemoveSelected(s, pack)
 			return ActionNone
 		}
@@ -1950,7 +1964,7 @@ func updateChestEditModal(s *State) Action {
 		openChestAddDropdown(s)
 		return ActionNone
 	}
-	if itemCount > 0 && rl.IsKeyPressed(rl.KeyX) {
+	if itemCount > 0 && editorDeletePressed() {
 		chestRemoveSelected(s, chest)
 		return ActionNone
 	}

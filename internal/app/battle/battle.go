@@ -19,14 +19,15 @@ const (
 	msgNoItems        = "No items."
 	msgInvalidTarget  = "Invalid target."
 	msgNoAllySelected = "No ally selected."
-	// Back-row melee refusals: skill submenu keeps its explainer; the greyed Attack row
-	// logs a terse named-unit line (msgBackRowMeleeAttackFmt) and buzzes instead.
-	msgBackRowMeleeSkill     = "Can't reach from the back row — reposition or use a ranged/magic skill."
-	msgBackRowMeleeAttackFmt = "%s cannot reach from the back row!"
-	// msgBackRowMeleeTarget / msgFlyingMeleeTarget: confirming an unreachable (greyed)
-	// foe buzzes + logs the reason — a covered back-row foe vs a melee-immune flyer.
-	msgBackRowMeleeTarget = "Cannot use current weapon from the back row"
-	msgFlyingMeleeTarget  = "Cannot reach a flying foe with the current weapon"
+	// Greyed melee ACTION refused (Attack row or melee skill picked anyway): one pattern
+	// via refuseMeleeAction — buzz + logged named-unit line, reason picked here. Back row =
+	// actor stuck behind the live front; flying = actor up front but every foe airborne.
+	msgMeleeBackRowFmt = "%s can't reach from the back row!"
+	msgMeleeFlyingFmt  = "%s can't reach a flying foe!"
+	// Greyed FOE target confirmed anyway (mixed pack — cursor on an unreachable cell):
+	// same buzz + log, foe-side reason — a melee-immune flyer vs a foe covered by the front.
+	msgFlyingMeleeTarget  = "Can't reach a flying foe with the current weapon."
+	msgBackRowMeleeTarget = "Can't reach a foe covered behind the front rank."
 )
 
 // Start begins a battle against the pack at packIndex (the whole roster becomes
@@ -117,7 +118,7 @@ func Update(g *core.GameState, dt float32) {
 	// to leaveBattle would forfeit XP/gold/loot. winBattle sets Phase=BattleWon so
 	// this can't re-enter. Gated on an active combat phase, and on a real pack —
 	// BattleMembers reads stale/-1 ActivePack as empty, which must NOT look like a wipe.
-	inCombatPhase := g.Battle.Phase == core.BattlePlayer || g.Battle.Phase == core.BattleAttackTiming || g.Battle.Phase == core.BattleEnemyTiming
+	inCombatPhase := g.Battle.Phase.InCombat()
 	if inCombatPhase && checkEnemyWipeoutFor(g, pack, members) {
 		return
 	}
@@ -400,17 +401,9 @@ func pushEnemyReadiness(g *core.GameState, slot, amount int) bool {
 		g.Battle.Readiness = map[core.ActorRef]int{}
 	}
 	cur := g.Battle.Readiness[ref]
-	subFloorZero(&cur, amount)
+	core.SubFloorZero(&cur, amount)
 	g.Battle.Readiness[ref] = cur
 	return true
-}
-
-// subFloorZero subtracts amount from *p, flooring at 0 — the shared "drain but
-// don't go negative" edit (Sunder readiness push, Corrosive Vial armor strip).
-func subFloorZero(p *int, amount int) {
-	if *p -= amount; *p < 0 {
-		*p = 0
-	}
 }
 
 // actorAppearsBefore reports whether `ref` occupies any queue slot strictly
@@ -471,15 +464,14 @@ func startActorTurn(g *core.GameState) {
 
 		// Sleep / Stun both cost the turn and tick at turn start. Sleep clears on
 		// damage (in the damage helpers); Stun runs its full duration regardless.
-		// Sleep ticks first so a both-afflicted actor reads as "asleep".
-		// advanceSkippedTurn returns true when its DoT tick ended the battle.
-		if asleep := tickSleepAtTurnStart(g, actor); asleep {
-			if advanceSkippedTurn(g, actor) {
-				return
-			}
-			continue
-		}
-		if stunned := tickStunAtTurnStart(g, actor); stunned {
+		// They tick INDEPENDENTLY: a both-afflicted actor drains BOTH counters this
+		// turn — ticking only one would silently extend the other. Sleep is evaluated
+		// first and Stun's log line is suppressed when Sleep already spoke, so the
+		// turn still reads as "asleep". advanceSkippedTurn returns true when its DoT
+		// tick ended the battle.
+		asleep := tickSleepAtTurnStart(g, actor)
+		stunned := tickStunAtTurnStart(g, actor, asleep)
+		if asleep || stunned {
 			if advanceSkippedTurn(g, actor) {
 				return
 			}
@@ -559,11 +551,13 @@ func drainNonDamagingEnemyStatuses(g *core.GameState, actor core.ActorRef) {
 }
 
 // tickSkipStatusAtTurnStart drains one tick of a skip-this-turn status (Sleep /
-// Stun) at the afflicted actor's turn start, logs "<Name> <verb>.", and returns
-// true if the actor must skip. Shared body for Sleep/Stun. (Sleep's wake-on-damage
-// path lives in the damage helpers, independent of this drain.)
+// Stun) at the afflicted actor's turn start, logs "<Name> <verb>." (unless quiet),
+// and returns true if the actor must skip. Shared body for Sleep/Stun. quiet lets a
+// second skip-status drain its counter without logging when an earlier one already
+// spoke this turn. (Sleep's wake-on-damage path lives in the damage helpers,
+// independent of this drain.)
 func tickSkipStatusAtTurnStart(
-	g *core.GameState, actor core.ActorRef, verb string,
+	g *core.GameState, actor core.ActorRef, verb string, quiet bool,
 	counterRefParty func(*core.PartyMember) *int,
 	counterRefEnemy func(*core.Enemy) *int,
 ) bool {
@@ -580,7 +574,9 @@ func tickSkipStatusAtTurnStart(
 			return false
 		}
 		*c--
-		setBattleMessage(g, fmt.Sprintf("%s %s.", m.Name, verb))
+		if !quiet {
+			setBattleMessage(g, fmt.Sprintf("%s %s.", m.Name, verb))
+		}
 		return true
 	}
 	enemy, ok := livingEnemyAt(g, actor.Index)
@@ -592,21 +588,25 @@ func tickSkipStatusAtTurnStart(
 		return false
 	}
 	*c--
-	setBattleMessage(g, fmt.Sprintf("%s %s.", core.EnemyDisplayName(enemy), verb))
+	if !quiet {
+		setBattleMessage(g, fmt.Sprintf("%s %s.", core.EnemyDisplayName(enemy), verb))
+	}
 	return true
 }
 
 func tickSleepAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
-	return tickSkipStatusAtTurnStart(g, actor, "is asleep",
+	return tickSkipStatusAtTurnStart(g, actor, "is asleep", false,
 		func(m *core.PartyMember) *int { return &m.SleepTurns },
 		func(e *core.Enemy) *int { return &e.SleepTurns })
 }
 
-// tickStunAtTurnStart drains a Stun tick and skips the actor's turn. No skill
-// currently inflicts party Stun, but m.StunTurns is a real classified counter
-// (partyDeathStatuses) — the party branch ticks/honors it if anything ever sets it.
-func tickStunAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
-	return tickSkipStatusAtTurnStart(g, actor, "is stunned",
+// tickStunAtTurnStart drains a Stun tick and skips the actor's turn. quiet
+// suppresses the log line (set when Sleep already announced the skip this turn) so
+// the counter still drains. No skill currently inflicts party Stun, but m.StunTurns
+// is a real classified counter (partyDeathStatuses) — the party branch ticks/honors
+// it if anything ever sets it.
+func tickStunAtTurnStart(g *core.GameState, actor core.ActorRef, quiet bool) bool {
+	return tickSkipStatusAtTurnStart(g, actor, "is stunned", quiet,
 		func(m *core.PartyMember) *int { return &m.StunTurns },
 		func(e *core.Enemy) *int { return &e.StunTurns })
 }
@@ -806,7 +806,7 @@ func updateAttackTiming(g *core.GameState, dt float32) {
 		// Charge bars skip the intro only on a FRESH edge press after the release
 		// gate clears — else the target-confirm Enter would bleed in and engage the
 		// charge, then the natural key release would resolve it at quality=Miss.
-		isCharge := g.Battle.Timing.Kind == core.TimingKindCharge || g.Battle.Timing.Kind == core.TimingKindOvercharge
+		isCharge := g.Battle.Timing.IsChargeFamily()
 		if isCharge && engageReady && input.AttackTimingPressed() {
 			g.Battle.TimingIntro = 0
 		} else {
@@ -856,10 +856,15 @@ func updateAttackTiming(g *core.GameState, dt float32) {
 
 // gradeSounds is the per-grade audio cue table — all bars dispatch off it so the
 // same grade sounds the same.
+// Two bands by design: a miss cue, the "landed" cue for the lower grades, and the
+// "great" cue for the top grades. The shared value across each band is intentional
+// — retuning a band means changing BOTH of its cells.
 var gradeSounds = [...]audio.Sound{
-	core.TimingQualityMiss:      audio.SoundInputMiss,
-	core.TimingQualityNice:      audio.SoundInputHit,
-	core.TimingQualityGood:      audio.SoundInputHit,
+	core.TimingQualityMiss: audio.SoundInputMiss,
+	// Landed band.
+	core.TimingQualityNice: audio.SoundInputHit,
+	core.TimingQualityGood: audio.SoundInputHit,
+	// Great band.
 	core.TimingQualityGreat:     audio.SoundInputGreat,
 	core.TimingQualityExcellent: audio.SoundInputGreat,
 }

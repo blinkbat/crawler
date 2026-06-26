@@ -602,9 +602,10 @@ func transientStatus(g *core.GameState) string {
 
 func drawActionMenuOptions(g *core.GameState, assets Resources, x, y, rightX int32, member *core.PartyMember) {
 	cursor := core.ActionRow(g.Battle.MenuIndex)
-	// Attack greys out when a melee attacker is stuck in the back row (front still up) —
-	// same gate the menu enforces, so the row reads as unusable before it's picked.
-	attackBlocked := core.BackRowMeleeBlocked(core.BasicAttackClass(core.EquippedWeapon(*member)), g.Party, g.Battle.CurrentParty)
+	// Attack greys out when a melee attacker can connect with nothing — stuck in the back
+	// row (front still up) or no foe in melee reach (all flying) — same gate the menu
+	// enforces, so the row reads as unusable before it's picked.
+	attackBlocked := core.MeleeActionBlocked(g, core.BasicAttackClass(core.EquippedWeapon(*member)), g.Battle.CurrentParty)
 	// Labels pushed right to clear the left icon medallion (more gap than the medallion's
 	// own radius so the text isn't crowded). Rows pitch by uiRowPitch and stretch past the
 	// content inset to rowRightX so the selection plate fills the otherwise-empty trailing
@@ -816,8 +817,8 @@ func drawSkillMenuList(g *core.GameState, assets Resources, x, y, rightX int32) 
 	})
 }
 
-// skillUnusable mirrors updateSkillMenu's refusal gates (MP cost + back-row melee
-// reach) so a greyed row matches exactly what selecting it will reject.
+// skillUnusable mirrors updateSkillMenu's refusal gates (MP cost + melee reach: back
+// row or no melee-reachable foe) so a greyed row matches exactly what selecting it rejects.
 func skillUnusable(g *core.GameState, idx int, skill core.SkillID) bool {
 	if idx < 0 || idx >= len(g.Party) {
 		return false
@@ -825,7 +826,7 @@ func skillUnusable(g *core.GameState, idx int, skill core.SkillID) bool {
 	if !g.DebugAllSkills && !core.CanAffordSkill(&g.Party[idx], skill) {
 		return true
 	}
-	return core.BackRowMeleeBlocked(core.SkillAttackClassFor(skill), g.Party, idx)
+	return core.MeleeActionBlocked(g, core.SkillAttackClassFor(skill), idx)
 }
 
 // drawItemMenuList renders the inventory picker ("Name xCount" rows). Reads the prebuilt

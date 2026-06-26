@@ -516,6 +516,13 @@ func EnemyDisplayName(e *Enemy) string {
 	return TheEnemy(EnemyInfoFor(*e))
 }
 
+// TheFoe is the lowercase object-position form ("the rat") for a live instance —
+// the single source for the mid-sentence "the <noun>" that combat log lines spell
+// by hand. Use TheEnemy/EnemyDisplayName at sentence start (capitalized).
+func TheFoe(e *Enemy) string {
+	return "the " + EnemySingularNoun(e)
+}
+
 // EnemyInfoOk is the validating sibling of EnemyInfo: (def, true) for a
 // registered kind, (zero, false) otherwise.
 func EnemyInfoOk(kind EnemyKind) (EnemyDefinition, bool) {
@@ -568,6 +575,11 @@ func enemyGoverningDef(e *Enemy) *EnemyDefinition {
 // materializing the whole struct — the cheap per-frame roster/turn-queue accessors.
 func EnemyName(e *Enemy) string         { return enemyGoverningDef(e).Name }
 func EnemySingularName(e *Enemy) string { return enemyGoverningDef(e).SingularName }
+
+// EnemyFlying reads the flying flag through the governing-def POINTER — the
+// per-frame melee-reach predicates (EnemyMeleeReachable, target picker) call this
+// per enemy cell, so it must not copy the whole EnemyDefinition like EnemyInfoFor.
+func EnemyFlying(e *Enemy) bool { return enemyGoverningDef(e).Flying }
 
 // EffectiveEnemyStats returns combat stats with active debuffs folded in (the
 // enemy-side mirror of EffectiveStats): summed debuff deltas added per-stat,

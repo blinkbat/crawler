@@ -11,6 +11,38 @@ import (
 	"math"
 )
 
+// modalUpdaters dispatches the open explore-scene modal to its per-frame updater,
+// keyed by core.ModalKind. dt is passed to every row (most ignore it; updatePanels
+// animates with it). ModalNone has no row — Update handles it as fall-through. init
+// asserts every non-None kind is filled so a new modal can't silently no-op.
+var modalUpdaters = [core.ModalCount]func(*core.GameState, float32){
+	core.ModalQuitConfirm: func(g *core.GameState, _ float32) { updateQuitConfirm(g) },
+	core.ModalDialog:      func(g *core.GameState, _ float32) { updateDialogModal(g) },
+	core.ModalLevelUp:     func(g *core.GameState, _ float32) { updateLevelUpModal(g) },
+	core.ModalPanels:      func(g *core.GameState, dt float32) { updatePanels(g, dt) },
+	core.ModalChest:       func(g *core.GameState, _ float32) { updateChestModal(g) },
+	core.ModalDoorPrompt:  func(g *core.GameState, _ float32) { updateDoorPrompt(g) },
+	core.ModalShop:        func(g *core.GameState, _ float32) { updateShop(g) },
+	core.ModalRetroMenu:   func(g *core.GameState, _ float32) { updateRetroMenu(g) },
+	core.ModalCombatTune:  func(g *core.GameState, _ float32) { updateCombatTuneMenu(g) },
+	core.ModalWipeMenu:    func(g *core.GameState, _ float32) { updateWipeMenu(g) },
+	core.ModalDebugMenu:   func(g *core.GameState, _ float32) { updateDebugMenu(g) },
+	core.ModalOptionsMenu: func(g *core.GameState, _ float32) { updateOptionsMenu(g) },
+	core.ModalSoundMenu:   func(g *core.GameState, _ float32) { updateSoundMenu(g) },
+	core.ModalPauseMenu:   func(g *core.GameState, _ float32) { updateMenu(g) },
+}
+
+func init() {
+	for m := core.ModalKind(0); m < core.ModalCount; m++ {
+		if m == core.ModalNone {
+			continue
+		}
+		if modalUpdaters[m] == nil {
+			panic(fmt.Sprintf("explore: modalUpdaters missing a row for modal kind %d", m))
+		}
+	}
+}
+
 func Update(g *core.GameState) {
 	// Clamp dt: a frame stall must not fast-forward animations or overshoot tile
 	// targets. Single owner — battle.Update trusts the dt here is already clamped.
@@ -28,58 +60,12 @@ func Update(g *core.GameState) {
 		g.BattleWipePreview = core.ApproachZero(g.BattleWipePreview, dt)
 	}
 
-	// Modal dispatch order is ActiveModal's enum ladder (single source of truth).
-	// LevelUp has no Esc-out; Panels open is out-of-battle only; Chest Esc closes
-	// the chest, not the game.
-	switch core.ActiveModal(g) {
-	case core.ModalQuitConfirm:
-		updateQuitConfirm(g)
+	// Modal dispatch: ActiveModal picks the open overlay (priority ladder lives there);
+	// modalUpdaters owns it for this frame. Any non-None modal MUST have a row (init
+	// asserts) — a gap would silently fall through to movement and eat the overlay's input.
+	if m := core.ActiveModal(g); m != core.ModalNone {
+		modalUpdaters[m](g, dt)
 		return
-	case core.ModalDialog:
-		updateDialogModal(g)
-		return
-	case core.ModalLevelUp:
-		updateLevelUpModal(g)
-		return
-	case core.ModalPanels:
-		updatePanels(g, dt)
-		return
-	case core.ModalChest:
-		updateChestModal(g)
-		return
-	case core.ModalDoorPrompt:
-		updateDoorPrompt(g)
-		return
-	case core.ModalShop:
-		updateShop(g)
-		return
-	case core.ModalRetroMenu:
-		updateRetroMenu(g)
-		return
-	case core.ModalCombatTune:
-		updateCombatTuneMenu(g)
-		return
-	case core.ModalWipeMenu:
-		updateWipeMenu(g)
-		return
-	case core.ModalDebugMenu:
-		updateDebugMenu(g)
-		return
-	case core.ModalOptionsMenu:
-		updateOptionsMenu(g)
-		return
-	case core.ModalSoundMenu:
-		updateSoundMenu(g)
-		return
-	case core.ModalPauseMenu:
-		updateMenu(g)
-		return
-	case core.ModalNone:
-		// No overlay — fall through to shortcut / pause / movement below.
-	default:
-		// Hand-maintained ladder: a missing arm would silently fall through to
-		// movement and eat input the overlay should own. Fail loudly.
-		panic(fmt.Sprintf("explore: Update missing dispatch case for modal %d", core.ActiveModal(g)))
 	}
 
 	// Panels-open shortcut: before the pause check so I / middle-button jumps in directly.
@@ -218,6 +204,22 @@ func updateLeafMenu(open *bool, index *int, count int, onConfirm func(item int))
 	*index = input.CursorUpDown(*index, count)
 	if input.ConfirmPressed() {
 		onConfirm(*index)
+	}
+}
+
+// updateListPicker is the shared 1-D sub-modal loop for the list pickers that own
+// an int cursor + a slice (heal-skill, use-target, …): Back or an empty list calls
+// close; CursorUpDown walks [0,count); Confirm fires confirm(index). Pickers with
+// extra axes/inputs (skill tree's columns, chest's Take-All / dynamic clamp) keep
+// their own loop. The caller resolves count/guards first, then hands the tail here.
+func updateListPicker(index *int, count int, close func(), confirm func(item int)) {
+	if input.BackPressed() || count <= 0 {
+		close()
+		return
+	}
+	*index = input.CursorUpDown(*index, count)
+	if input.ConfirmPressed() && *index >= 0 && *index < count {
+		confirm(*index)
 	}
 }
 
@@ -458,7 +460,7 @@ func updateCombatTuneMenu(g *core.GameState) {
 
 func restartGame(g *core.GameState) {
 	core.ResetGameState(g)
-	ResetTurnRepeat()
+	ResetTurnRepeat(g)
 }
 
 // saveGame writes the run to disk from the Options submenu. Closes the submenu
@@ -536,21 +538,17 @@ func updateFreeLook(p *core.Player, dt float32) {
 	p.LookPitch = core.Approach(p.LookPitch, 0, core.FreeLookReturnSpeed*dt)
 }
 
-// Turn auto-repeat pacing. A fresh press turns once immediately; a held key
-// waits core.TurnRepeatDelay after each turn before re-firing (without this a
-// held key spins continuously the instant the turn animation finishes).
-// turnHeldLast distinguishes tap from hold; turnRepeatCooldown is the rest left.
-var (
-	turnHeldLast       bool
-	turnRepeatCooldown float32
-)
+// Turn auto-repeat pacing lives on GameState (g.TurnHeldLast / g.TurnRepeatCooldown):
+// a fresh press turns once immediately; a held key waits core.TurnRepeatDelay after
+// each turn before re-firing (without this a held key spins continuously the instant
+// the turn animation finishes). TurnHeldLast distinguishes tap from hold.
 
 // ResetTurnRepeat clears held-turn state. updatePlayer doesn't run during a
 // battle or area swap, so a turn key held uninterrupted across one would carry a
 // stale cooldown/held-edge into the next area. Called on transition + restart.
-func ResetTurnRepeat() {
-	turnHeldLast = false
-	turnRepeatCooldown = 0
+func ResetTurnRepeat(g *core.GameState) {
+	g.TurnHeldLast = false
+	g.TurnRepeatCooldown = 0
 }
 
 func updatePlayer(g *core.GameState, dt float32) {
@@ -560,10 +558,10 @@ func updatePlayer(g *core.GameState, dt float32) {
 	// tracked even during a turn animation. A new press or a release clears the
 	// cooldown (self-clearing — no stale value survives a release / scene change).
 	turnHeld := input.TurnLeftHeld() || input.TurnRightHeld()
-	if !turnHeld || !turnHeldLast {
-		turnRepeatCooldown = 0
+	if !turnHeld || !g.TurnHeldLast {
+		g.TurnRepeatCooldown = 0
 	}
-	turnHeldLast = turnHeld
+	g.TurnHeldLast = turnHeld
 
 	// Mid-animation: advance it. On completion with leftover time and a key still
 	// held, carry the leftover into arming the next step this same frame — without
@@ -582,17 +580,17 @@ func updatePlayer(g *core.GameState, dt float32) {
 	// turnRepeatCooldown. The cooldown counts down HERE (past the mid-animation
 	// return) so it ticks only at rest between turns, making the gap exactly
 	// core.TurnRepeatDelay; a fresh press zeroed it above, so taps are instant.
-	if turnRepeatCooldown > 0 {
-		turnRepeatCooldown -= dt
+	if g.TurnRepeatCooldown > 0 {
+		g.TurnRepeatCooldown -= dt
 	}
-	canTurn := turnRepeatCooldown <= 0
+	canTurn := g.TurnRepeatCooldown <= 0
 	switch {
 	case canTurn && input.TurnLeftHeld():
 		startTurn(p, -1)
-		turnRepeatCooldown = core.TurnRepeatDelay
+		g.TurnRepeatCooldown = core.TurnRepeatDelay
 	case canTurn && input.TurnRightHeld():
 		startTurn(p, 1)
-		turnRepeatCooldown = core.TurnRepeatDelay
+		g.TurnRepeatCooldown = core.TurnRepeatDelay
 	case input.StepForwardHeld():
 		startStep(p, g, 1)
 	case input.StepBackHeld():
@@ -692,6 +690,9 @@ func startStep(p *core.Player, g *core.GameState, forward int) {
 	// Out-of-battle poison tick, hooked here (one tile = the unit of time outside
 	// combat) so a fight-inflicted poison doesn't stick forever.
 	core.TickPoisonStep(g)
+	// Satiety burns one step per tile crawled (battles don't advance it, mirroring
+	// the day cycle); conscious members starve at SatietyMax.
+	core.TickHungerStep(g)
 	// Weather per step: outdoors rolls/counts down a storm, indoors recedes one.
 	core.TickWeatherStep(g)
 	// Fog-of-war: paint the 3×3 window onto Visited (radius = one tile of sight).

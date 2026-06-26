@@ -149,10 +149,10 @@ func updateSkillMenu(g *core.GameState) {
 		setBattleStatus(g, mpRefusalMessage(skill))
 		return
 	}
-	// Back-row melee (single-target or AoE cleave) reaches nothing — gate before
-	// any target selection / AoE dispatch. Submenu stays open to re-pick.
-	if core.BackRowMeleeBlocked(core.SkillAttackClassFor(skill), g.Party, g.Battle.CurrentParty) {
-		setBattleStatus(g, msgBackRowMeleeSkill)
+	// Melee (single-target or AoE cleave) reaches nothing — gate before any target
+	// selection / AoE dispatch, same buzz+log refusal as the greyed Attack row. Submenu
+	// stays open to re-pick.
+	if core.SkillAttackClassFor(skill).IsMelee() && refuseMeleeAction(g) {
 		return
 	}
 	// Persist the choice so next turn's submenu opens on this skill.
@@ -188,16 +188,33 @@ func battleEnemyTargets(g *core.GameState) []int {
 	return core.LivingBattleEnemyIndices(g)
 }
 
+// refuseMeleeAction handles a greyed melee ACTION (Attack row or melee skill) picked
+// anyway: buzz + log the reason — stuck in the back row, else up front but every foe
+// flying — leaving the turn unspent. The single source so the Attack-row and skill-
+// submenu refusals stay one pattern (same buzz, same log surface, same wording).
+// Returns true when refused; callers guard with their own melee check:
+// `if isMelee && refuseMeleeAction(g) { return }`. A no-op (returns false) when reachable.
+func refuseMeleeAction(g *core.GameState) bool {
+	backRow := !core.PartyInEffectiveFront(g.Party, g.Battle.CurrentParty)
+	if !backRow && !core.NoMeleeReachableEnemy(g) {
+		return false // a foe is in reach — not refused
+	}
+	audio.Play(audio.SoundInputMiss)
+	msg := msgMeleeFlyingFmt
+	if backRow {
+		msg = msgMeleeBackRowFmt
+	}
+	if m, ok := currentMember(g); ok {
+		setBattleMessage(g, fmt.Sprintf(msg, m.Name))
+	}
+	return true
+}
+
 // enterEnemyTargeting opens the enemy target picker, enforcing melee reach (a
 // back-row melee attacker is refused) and snapping the cursor to a reachable foe.
 // Returns false (menu state intact) when barred or no target is reachable.
 func enterEnemyTargeting(g *core.GameState, prompt string) bool {
-	if battlePendingAttackMelee(g) && !core.PartyInEffectiveFront(g.Party, g.Battle.CurrentParty) {
-		// Greyed Attack row picked anyway: buzz + log the refusal; turn is NOT spent.
-		audio.Play(audio.SoundInputMiss)
-		if m, ok := currentMember(g); ok {
-			setBattleMessage(g, fmt.Sprintf(msgBackRowMeleeAttackFmt, m.Name))
-		}
+	if battlePendingAttackMelee(g) && refuseMeleeAction(g) {
 		return false
 	}
 	targets := battleEnemyTargets(g)
@@ -328,6 +345,8 @@ func applyItem(g *core.GameState) {
 		finishActorTurn(g)
 		return
 	}
+	// Feed first: a big enough meal lifts Starving so the food's own heal can land.
+	fedSatiety := core.FeedMember(tgt, def.SatietyGain)
 	healedHP := 0
 	if def.HealAmount > 0 {
 		before := tgt.HP
@@ -342,24 +361,28 @@ func applyItem(g *core.GameState) {
 	actor := &g.Party[g.Battle.CurrentParty]
 	stampPartyBump(actor)
 	itemCat := core.LogInfo
-	if healedHP > 0 || restoredMP > 0 {
+	if healedHP > 0 || restoredMP > 0 || fedSatiety > 0 {
 		itemCat = core.LogHeal // restorative use reads as healing; a no-op use stays neutral
 	}
-	setBattleMessageCat(g, itemUseMessage(tgt.Name, def, healedHP > 0, healedHP, restoredMP), itemCat)
+	setBattleMessageCat(g, itemUseMessage(tgt.Name, def, healedHP > 0, healedHP, restoredMP, fedSatiety), itemCat)
 	g.Battle.PendingItem = core.ItemNone
 	finishActorTurn(g)
 }
 
 // itemUseMessage formats the consumed-item log line by what it restored (HP/MP/
 // both/neither). hp and mp are ACTUAL post-clamp amounts so the log can't overclaim.
-func itemUseMessage(targetName string, def core.ItemDefinition, healed bool, hp, mp int) string {
+func itemUseMessage(targetName string, def core.ItemDefinition, healed bool, hp, mp, sat int) string {
 	switch {
 	case healed && hp > 0 && mp > 0:
 		return fmt.Sprintf("%s uses %s (+%d HP, +%d MP).", targetName, def.Name, hp, mp)
+	case hp > 0 && sat > 0:
+		return fmt.Sprintf("%s eats %s (+%d HP, belly fuller).", targetName, def.Name, hp)
 	case healed && hp > 0:
 		return fmt.Sprintf("%s eats %s (+%d HP).", targetName, def.Name, hp)
 	case mp > 0:
 		return fmt.Sprintf("%s drinks %s (+%d MP).", targetName, def.Name, mp)
+	case sat > 0:
+		return fmt.Sprintf("%s eats %s — a little less hungry.", targetName, def.Name)
 	default:
 		// Name the recipient like the +HP/+MP branches (the item lands on the target).
 		return fmt.Sprintf("%s uses %s.", targetName, def.Name)
@@ -555,7 +578,7 @@ func confirmEnemyTarget(g *core.GameState) {
 // a flying foe is melee-immune (needs a ranged weapon), else it's a covered back-row foe.
 func unreachableMeleeTargetMsg(g *core.GameState, slot int) string {
 	members := core.BattleMembers(g)
-	if slot >= 0 && slot < len(members) && core.EnemyInfoFor(members[slot]).Flying {
+	if slot >= 0 && slot < len(members) && core.EnemyFlying(&members[slot]) {
 		return msgFlyingMeleeTarget
 	}
 	return msgBackRowMeleeTarget

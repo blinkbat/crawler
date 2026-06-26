@@ -38,6 +38,16 @@ func init() {
 		dialogSpeakers[sp.ID] = sp
 		dialogSpeakerOrder = append(dialogSpeakerOrder, sp.ID)
 	}
+	// Each party class needs a speaker whose id == its PartyClassSlug, else that
+	// class has no dialog voice. Renaming a class display name silently shifts its
+	// slug, so assert the mapping holds at boot rather than discovering a mute class
+	// in-game. (Speaker ids above are spelled to match the current class names.)
+	for _, class := range AllPartyClasses() {
+		if _, ok := dialogSpeakers[DialogSpeakerID(PartyClassSlug(class))]; !ok {
+			panic("core: party class " + PartyClassName(class) + " (slug " + PartyClassSlug(class) +
+				") has no matching dialog speaker — add one to dialogSpeakerList or realign the SpeakerXxx id")
+		}
+	}
 }
 
 // DialogSpeakerByID returns the registered speaker, or (zero, false).

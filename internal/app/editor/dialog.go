@@ -644,7 +644,7 @@ func updateDialogListModalGeneric(s *State, spec dialogListModalSpec) Action {
 		}
 		return ActionNone
 	}
-	if rl.IsKeyPressed(rl.KeyA) {
+	if editorAddPressed() {
 		spec.add()
 		return ActionNone
 	}
@@ -656,7 +656,7 @@ func updateDialogListModalGeneric(s *State, spec dialogListModalSpec) Action {
 			return ActionNone
 		}
 	}
-	if count > 0 && rl.IsKeyPressed(rl.KeyX) {
+	if count > 0 && editorDeletePressed() {
 		spec.del()
 	}
 	return ActionNone
@@ -1006,11 +1006,11 @@ func updateDialogNodeEditModal(s *State) Action {
 		}
 		return ActionNone
 	}
-	if rl.IsKeyPressed(rl.KeyA) {
+	if editorAddPressed() {
 		addDialogChoice(s)
 		return ActionNone
 	}
-	if len(n.Choices) > 0 && rl.IsKeyPressed(rl.KeyX) {
+	if len(n.Choices) > 0 && editorDeletePressed() {
 		removeDialogChoice(s, s.modalCursor)
 		return ActionNone
 	}
@@ -1194,11 +1194,11 @@ func updateDialogChoiceEditModal(s *State) Action {
 			}
 			return ActionNone
 		}
-		if rl.IsKeyPressed(rl.KeyA) {
+		if editorAddPressed() {
 			addDialogCond(s)
 			return ActionNone
 		}
-		if len(c.Conditions) > 0 && rl.IsKeyPressed(rl.KeyX) {
+		if len(c.Conditions) > 0 && editorDeletePressed() {
 			removeDialogCond(s, s.modalCursor)
 		}
 		return ActionNone

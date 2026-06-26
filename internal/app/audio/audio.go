@@ -224,11 +224,16 @@ func unloadBank() {
 	bank = [soundCount]rl.Sound{}
 }
 
+// soundLoaded reports whether a Sound holds a real decoded buffer (vs the zero
+// Sound a dead device / failed decode yields). The single home for the
+// "did it load" convention every load/play/unload path guards on.
+func soundLoaded(s rl.Sound) bool { return s.Stream.Buffer != nil }
+
 // unloadSounds releases every non-zero rl.Sound in the slice, zeroing each slot
 // in place so the buffer pointers can't be read again.
 func unloadSounds(slots []rl.Sound) {
 	for i := range slots {
-		if slots[i].Stream.Buffer == nil {
+		if !soundLoaded(slots[i]) {
 			continue
 		}
 		rl.UnloadSound(slots[i])
@@ -316,7 +321,7 @@ func UpdateFootsteps(dt float32) {
 // persists on the slot, but every footfall re-sets it and nothing else reads it.
 func playOneFootstep() {
 	snd := bank[footstepCues[footstepRng.Intn(len(footstepCues))]]
-	if snd.Stream.Buffer == nil {
+	if !soundLoaded(snd) {
 		return
 	}
 	rl.SetSoundPitch(snd, 1+(footstepRng.Float32()*2-1)*footstepPitchJitter)
@@ -384,7 +389,7 @@ func readOrSynthSound(name string, pcmFn func() []int16) (snd rl.Sound, fromFile
 	if data, err := os.ReadFile(UserSoundPath(name)); err == nil {
 		// A corrupt/non-WAV payload decodes to a zero Sound; only honor the disk
 		// branch on a playable decode, else fall through to synth.
-		if snd := bytesToSound(data); snd.Stream.Buffer != nil {
+		if snd := bytesToSound(data); soundLoaded(snd) {
 			return snd, true
 		}
 	}
@@ -403,7 +408,7 @@ func loadCueFromDisk(name string, pcmFn func() []int16) rl.Sound {
 // replaceSound swaps *slot for next, unloading the old buffer first (guarded
 // against the zero Sound) so a reassignment can't leak raylib's C-side buffer.
 func replaceSound(slot *rl.Sound, next rl.Sound) {
-	if slot.Stream.Buffer != nil {
+	if soundLoaded(*slot) {
 		rl.UnloadSound(*slot)
 	}
 	*slot = next

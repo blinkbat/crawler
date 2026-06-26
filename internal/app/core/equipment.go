@@ -137,8 +137,10 @@ func EffectiveDefenses(m PartyMember) (armor, mdef int) {
 	equipDelta, equipArmor, equipMDef := foldEquipment(&m)
 	buffStats, buffArmor, buffMDef := SumStatusMods(m.Buffs)
 	armor = floorInt(m.Armor + equipArmor + buffArmor)
-	// WIS-derived MDef reads effective WIS (base + equip + buff).
+	// WIS-derived MDef reads effective WIS (base + equip + buff), then the starving
+	// penalty (so a starving member's magic defense sags with the rest of their stats).
 	eff := addStatsFloored(addStatsFloored(m.Stats, equipDelta), buffStats)
+	eff = addStatsFloored(eff, starvingPenalty(&m))
 	mdef = MagicDefense(eff) + equipMDef + buffMDef
 	if m.IceArmorTurns > 0 {
 		mdef += IceArmorMDef
@@ -161,7 +163,10 @@ func EffectiveStatsPtr(m *PartyMember) Stats {
 	out := addStatsFloored(m.Stats, equipDelta)
 	// Active stat buffs fold on top, same floor-at-0; an un-buffed member is a no-op.
 	buffStats, _, _ := SumStatusMods(m.Buffs)
-	return addStatsFloored(out, buffStats)
+	out = addStatsFloored(out, buffStats)
+	// Starving saps every stat (floored at 0). Persistent, not a combat buff, so it
+	// folds here rather than living in m.Buffs (which battle exit would clear).
+	return addStatsFloored(out, starvingPenalty(m))
 }
 
 // EquipPickerRow is one selectable row in an equip slot's item picker. A Kind ==

@@ -105,35 +105,13 @@ func updatePanels(g *core.GameState, dt float32) {
 		if len(g.Party) > 0 && !core.PartyIndexInRange(g.Party, g.PanelsRowCursor) {
 			g.PanelsRowCursor = 0
 		}
-		if core.PartyIndexInRange(g.Party, g.PanelsRowCursor) {
-			row, col := g.Party[g.PanelsRowCursor].HomeRow, g.Party[g.PanelsRowCursor].HomeCol
-			dx := input.CursorLeftRight()
-			switch {
-			case input.UpPressed():
-				if row == core.RowBack {
-					if idx, ok := homeSlotMember(g, core.FlipRow(row), col); ok {
-						g.PanelsRowCursor = idx
-					}
-				}
-			case input.DownPressed():
-				if row == core.RowFront {
-					if idx, ok := homeSlotMember(g, core.FlipRow(row), col); ok {
-						g.PanelsRowCursor = idx
-					}
-				}
-			case dx == -1:
-				if col == core.ColRight {
-					if idx, ok := homeSlotMember(g, row, core.FlipCol(col)); ok {
-						g.PanelsRowCursor = idx
-					}
-				}
-			case dx == 1:
-				if col == core.ColLeft {
-					if idx, ok := homeSlotMember(g, row, core.FlipCol(col)); ok {
-						g.PanelsRowCursor = idx
-					}
-				}
-			}
+		switch dx := input.CursorLeftRight(); {
+		case input.UpPressed():
+			moveFormationCursor(g, -1, 0)
+		case input.DownPressed():
+			moveFormationCursor(g, 1, 0)
+		case dx != 0:
+			moveFormationCursor(g, 0, dx)
 		}
 		if input.ConfirmPressed() {
 			if m, ok := validMember(g, g.PanelsRowCursor); ok && m.PendingLevelUps > 0 {
@@ -201,16 +179,16 @@ func updatePanels(g *core.GameState, dt float32) {
 		// of the view at any scale.
 		px, pz := input.MapPanInput()
 		panRate := float32(g.PanelsMapZoom) * core.PanelMapPanRateFrac
-		mapPanAccumX += px * panRate * dt
-		mapPanAccumZ += pz * panRate * dt
-		g.PanelsMapPanX += drainSteps(&mapPanAccumX)
-		g.PanelsMapPanZ += drainSteps(&mapPanAccumZ)
+		g.PanelsMapPanAccumX += px * panRate * dt
+		g.PanelsMapPanAccumZ += pz * panRate * dt
+		g.PanelsMapPanX += drainSteps(&g.PanelsMapPanAccumX)
+		g.PanelsMapPanZ += drainSteps(&g.PanelsMapPanAccumZ)
 
 		// Right stick up (negative) zooms in; wheel up (positive) zooms in. Both feed
 		// one accumulator; each whole unit steps the zoom by PanelMapZoomStep (positive
 		// accum = zoom in = PanelsMapZoom decreases).
-		mapZoomAccum += -input.MapZoomAxis()*core.PanelMapZoomStickRate*dt + input.MapZoomWheel()
-		g.PanelsMapZoom -= drainSteps(&mapZoomAccum) * core.PanelMapZoomStep
+		g.PanelsMapZoomAccum += -input.MapZoomAxis()*core.PanelMapZoomStickRate*dt + input.MapZoomWheel()
+		g.PanelsMapZoom -= drainSteps(&g.PanelsMapZoomAccum) * core.PanelMapZoomStep
 		g.PanelsMapZoom = core.Clamp(g.PanelsMapZoom, core.PanelMapZoomMin, core.PanelMapZoomMax)
 		// Clamp the pan to a map's span off the player — enough to inspect any
 		// corner, not into an endless void.
@@ -249,13 +227,26 @@ func setPanelTab(g *core.GameState, t core.PanelTab) {
 	recenterPanelMap(g)
 }
 
-// Map tab analog pan/zoom accumulators: stick/key input drains here into the
-// integer tile-pan + stepped zoom. Transient (reset on open / recenter).
-var (
-	mapPanAccumX float32
-	mapPanAccumZ float32
-	mapZoomAccum float32
-)
+// moveFormationCursor walks the Character-tab cursor one step over the 2×2 home
+// grid (dRow/dCol in {-1,0,1}); a move that would leave the grid is a no-op. Folds
+// the four orthogonal arms into one rule: up from back / down from front flips the
+// row; left from right / right from left flips the column.
+func moveFormationCursor(g *core.GameState, dRow, dCol int) {
+	if !core.PartyIndexInRange(g.Party, g.PanelsRowCursor) {
+		return
+	}
+	row, col := g.Party[g.PanelsRowCursor].HomeRow, g.Party[g.PanelsRowCursor].HomeCol
+	switch {
+	case dRow < 0 && row == core.RowBack, dRow > 0 && row == core.RowFront:
+		if idx, ok := homeSlotMember(g, core.FlipRow(row), col); ok {
+			g.PanelsRowCursor = idx
+		}
+	case dCol < 0 && col == core.ColRight, dCol > 0 && col == core.ColLeft:
+		if idx, ok := homeSlotMember(g, row, core.FlipCol(col)); ok {
+			g.PanelsRowCursor = idx
+		}
+	}
+}
 
 // drainSteps drains whole units from an analog accumulator, returning the signed
 // whole-unit count and leaving the sub-unit remainder for the next frame (truncates
@@ -272,5 +263,5 @@ func drainSteps(acc *float32) int {
 func recenterPanelMap(g *core.GameState) {
 	g.PanelsMapPanX = 0
 	g.PanelsMapPanZ = 0
-	mapPanAccumX, mapPanAccumZ, mapZoomAccum = 0, 0, 0
+	g.PanelsMapPanAccumX, g.PanelsMapPanAccumZ, g.PanelsMapZoomAccum = 0, 0, 0
 }

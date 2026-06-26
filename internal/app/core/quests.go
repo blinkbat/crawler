@@ -1,5 +1,7 @@
 package core
 
+import "strings"
+
 // Quest journal. A plain list in the char menu's Quests tab. No auto-completion
 // engine — gameplay hooks call CompleteQuest / AddQuest. Save-persisted.
 
@@ -43,6 +45,20 @@ func StarterQuests() []Quest {
 			Status: QuestActive,
 		},
 	}
+}
+
+// QuestTitleFromID derives a readable player-facing title from a quest's stable
+// slug ("rescue-the-elder" → "Rescue The Elder"). Used to seed quests that have
+// no authored title (dialog-started quests carry only an ID), so the journal shows
+// words, not the raw slug.
+func QuestTitleFromID(id string) string {
+	words := strings.Fields(strings.NewReplacer("-", " ", "_", " ").Replace(id))
+	for i, w := range words {
+		r := []rune(w)
+		r[0] = []rune(strings.ToUpper(string(r[0])))[0]
+		words[i] = string(r)
+	}
+	return strings.Join(words, " ")
 }
 
 // QuestIndexByID returns the index of the quest with the given ID, or -1. The

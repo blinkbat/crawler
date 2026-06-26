@@ -162,7 +162,7 @@ func updateAdventureScene(state *appState) {
 		} else {
 			// Drop held-turn auto-repeat carry so a key held through the door
 			// doesn't start the next area mid-cooldown.
-			explore.ResetTurnRepeat()
+			explore.ResetTurnRepeat(&state.game)
 		}
 		state.game.PendingTransition = core.AreaTransition{}
 	}

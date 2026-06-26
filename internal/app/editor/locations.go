@@ -204,7 +204,7 @@ func updateLocationEditModal(s *State) Action {
 		closeModal(s)
 		return ActionNone
 	}
-	if rl.IsKeyPressed(rl.KeyX) {
+	if editorDeletePressed() {
 		deleteCurrentLocation(s)
 	}
 	return ActionNone

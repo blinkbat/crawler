@@ -427,6 +427,16 @@ func drawPanelsStats(g *core.GameState, assets Resources, body rl.Rectangle) {
 	}
 }
 
+// satietyStageColors tints the character-sheet satiety chip per stage — a green→red
+// famine ramp reusing the shared palette (no new magic colors).
+var satietyStageColors = [core.SatietyStageCount]rl.Color{
+	core.SatietyFull:     statusRegen,
+	core.SatietySated:    condEnemyScuffed,
+	core.SatietyHungry:   condEnemyInjured,
+	core.SatietyFamished: condEnemyBadlyWounded,
+	core.SatietyStarving: statusStarving,
+}
+
 // drawFormationCard paints one member's landscape card in its 2×2 quadrant: class
 // glyph + name + Lv·row + HP/MP on the left; stat grid + armor/XP + status on the
 // right. Cursor = gilt focus ring; swap source (awaiting a partner) = green outline.
@@ -457,18 +467,43 @@ func drawFormationCard(font rl.Font, g *core.GameState, i int, quad rl.Rectangle
 		col, _ := partyStatusVisual(kind)
 		drawStatusPill(font, leftX, y, chipW, 26, fadeColor(col, 0.28), fadeColor(col, 0.85), label, col, false)
 	}
+	// Satiety stage chip below the status pill — always shown so the player can watch
+	// hunger climb the ladder before Starving bites (which also surfaces as a status).
+	stage := core.MemberStage(m)
+	satLabel := core.SatietyStageLabel(stage)
+	satCol := satietyStageColors[stage]
+	satW := measurePanelStatValue(font, satLabel, FontSmall).X + 20
+	// Sit below the status pill, but clamp inside the card so a short window can't
+	// push the chip past the quadrant's bottom edge.
+	const satChipH = float32(24)
+	satY := y + 32
+	if maxY := quad.Y + quad.Height - satChipH - 4; satY > maxY {
+		satY = maxY
+	}
+	drawStatusPill(font, leftX, satY, satW, satChipH, fadeColor(satCol, 0.24), fadeColor(satCol, 0.82), satLabel, satCol, false)
 
 	// --- Right: stat grid (2 cols × ceil(StatCount/2) rows) + armor/XP ---
 	statColW := (rightW - formationStatColGap) / 2
 	colPitch := statColW + formationStatColGap // column-1 starts a gutter past column-0
 	rowH := float32(28)
 	sy := quad.Y + 16
+	// Effective stats fold in gear, combat buffs, and the starving penalty; show the
+	// EFFECTIVE value and tint it vs base — green when raised, red when lowered.
+	effStats := core.EffectiveStats(m)
 	for s := core.Stat(0); s < core.StatCount; s++ {
 		cellX := rightX + float32(int(s)%2)*colPitch
 		cellY := sy + float32(int(s)/2)*rowH
 		drawStatIcon(s, cellX+9, cellY+13, 9, woodAccentIconBright)
 		drawTextWithShadow(font, core.StatLabel(s), cellX+24, cellY, FontBody, textMuted)
-		drawTextRightAligned(font, smallIntLabel(core.StatValue(m.Stats, s)), cellX+statColW-statValueInsetX, cellY, FontBody, textPrimary)
+		base, eff := core.StatValue(m.Stats, s), core.StatValue(effStats, s)
+		statCol := textPrimary
+		switch {
+		case eff > base:
+			statCol = statBuffed
+		case eff < base:
+			statCol = statDebuffed
+		}
+		drawTextRightAligned(font, smallIntLabel(eff), cellX+statColW-statValueInsetX, cellY, FontBody, statCol)
 	}
 	ay := sy + float32((core.StatCount+1)/2)*rowH + 6
 	drawTextWithShadow(font, "ARM", rightX, ay, FontSmall, textMuted)

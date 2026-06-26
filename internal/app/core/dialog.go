@@ -387,7 +387,7 @@ func applyDialogAction(g *GameState, action *DialogAction) {
 		case DialogQuestStart:
 			g.Quests = AddQuest(g.Quests, Quest{
 				ID:     action.QuestID,
-				Title:  action.QuestID,
+				Title:  QuestTitleFromID(action.QuestID),
 				Status: QuestActive,
 			})
 		case DialogQuestComplete:

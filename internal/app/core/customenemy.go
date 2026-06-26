@@ -148,33 +148,30 @@ func validateCustomEnemy(hp, mp int, bounds enemyStatBounds) error {
 	return validateEnemyStatBounds(bounds)
 }
 
-// customEnemyBounds builds the shared stat-bounds payload from a core definition.
-func customEnemyBounds(ce CustomEnemyDef) enemyStatBounds {
+// enemyStatBoundsOf assembles the bounds payload from the eight combat scalars —
+// the single field-list both adapters below feed, so the def-side and load-side
+// can't drift. PoisonChance stays 0 (custom enemies have none).
+func enemyStatBoundsOf(name string, skillCastChance float64, armor, mdef, attackDamage, xpValue, spellPower, tier int) enemyStatBounds {
 	return enemyStatBounds{
-		Name:            ce.Name,
-		SkillCastChance: ce.SkillCastChance,
-		Armor:           ce.Armor,
-		MDef:            ce.MDef,
-		AttackDamage:    ce.AttackDamage,
-		XPValue:         ce.XPValue,
-		SpellPower:      ce.SpellPower,
-		Tier:            ce.Tier,
+		Name:            name,
+		SkillCastChance: skillCastChance,
+		Armor:           armor,
+		MDef:            mdef,
+		AttackDamage:    attackDamage,
+		XPValue:         xpValue,
+		SpellPower:      spellPower,
+		Tier:            tier,
 	}
 }
 
-// mapCustomEnemyBounds builds the same stat-bounds payload from an on-disk row,
-// so the load-side field list can't drift from customEnemyBounds.
+// customEnemyBounds builds the shared stat-bounds payload from a core definition.
+func customEnemyBounds(ce CustomEnemyDef) enemyStatBounds {
+	return enemyStatBoundsOf(ce.Name, ce.SkillCastChance, ce.Armor, ce.MDef, ce.AttackDamage, ce.XPValue, ce.SpellPower, ce.Tier)
+}
+
+// mapCustomEnemyBounds builds the same payload from an on-disk row.
 func mapCustomEnemyBounds(ce mapfile.MapCustomEnemy) enemyStatBounds {
-	return enemyStatBounds{
-		Name:            ce.Name,
-		SkillCastChance: ce.SkillCastChance,
-		Armor:           ce.Armor,
-		MDef:            ce.MDef,
-		AttackDamage:    ce.AttackDamage,
-		XPValue:         ce.XPValue,
-		SpellPower:      ce.SpellPower,
-		Tier:            ce.Tier,
-	}
+	return enemyStatBoundsOf(ce.Name, ce.SkillCastChance, ce.Armor, ce.MDef, ce.AttackDamage, ce.XPValue, ce.SpellPower, ce.Tier)
 }
 
 // CustomEnemyDefFromMap converts one on-disk custom enemy row into the core definition.

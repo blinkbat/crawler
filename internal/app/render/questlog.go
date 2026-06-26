@@ -134,6 +134,20 @@ func journalScrollFirst(cursor, count, visible int) int {
 	return first
 }
 
+// completedQuestTitleCache memoizes the "<title>  — Complete" row label so the
+// Journal Quests tab doesn't concat a fresh string per completed row every frame
+// it's open. Bounded by the distinct quest titles seen.
+var completedQuestTitleCache = map[string]string{}
+
+func completedQuestTitle(title string) string {
+	if s, ok := completedQuestTitleCache[title]; ok {
+		return s
+	}
+	s := title + "  — Complete"
+	completedQuestTitleCache[title] = s
+	return s
+}
+
 // drawJournalQuests fills the body with the quest log: tally header then a two-line row per quest; completed quests are muted with a "— Complete" suffix.
 func drawJournalQuests(g *core.GameState, font rl.Font, body rl.Rectangle) {
 	quests := g.Quests
@@ -152,7 +166,7 @@ func drawJournalQuests(g *core.GameState, font rl.Font, body rl.Rectangle) {
 		titleText := q.Title
 		if q.IsComplete() {
 			titleCol = textMuted
-			titleText = q.Title + "  — Complete"
+			titleText = completedQuestTitle(q.Title)
 		}
 		drawTextWithShadow(font, titleText, body.X+journalRowInsetX, rowY+2, FontBody, titleCol)
 		drawTextWithShadow(font, q.Desc, body.X+journalRowInsetX, rowY+journalRowDetailDY, FontSmall, textMuted)

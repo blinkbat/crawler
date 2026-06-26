@@ -85,6 +85,13 @@ const (
 	BattleEnemyTiming
 )
 
+// InCombat reports whether this is an active fighting phase (player menu or either
+// timing bar) — as opposed to BattleNone/Won/Lost. The single source for the
+// "combat is live" set (desync/wipe guards, turn-forecast gating).
+func (p BattlePhase) InCombat() bool {
+	return p == BattlePlayer || p == BattleAttackTiming || p == BattleEnemyTiming
+}
+
 // ActionMode is the BattlePlayer sub-state — which input mode the action menu is in.
 type ActionMode int
 
