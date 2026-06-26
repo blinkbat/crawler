@@ -300,6 +300,20 @@ func CursorLeftRight() int {
 	return 0
 }
 
+// CursorStep maps a single nav press onto a 1-D step: Down/Right -> +1,
+// Up/Left -> -1, nothing -> 0. For pickers (battle Swap) where both axes walk one
+// list, so the direction assembly lives here rather than re-inlined at the call site.
+func CursorStep() int {
+	switch {
+	case DownPressed():
+		return 1
+	case UpPressed():
+		return -1
+	default:
+		return CursorLeftRight()
+	}
+}
+
 // CursorLeftRightWrap applies CursorLeftRight to a wrap-around cursor in
 // [0, count) — the panels overlay moves the member column with it. Safe for
 // count <= 0.

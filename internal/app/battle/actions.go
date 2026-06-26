@@ -20,6 +20,7 @@ const (
 	setupConfirmEnemy                  // confirm a live enemy, NO MP (basic attack, Steal)
 	setupTargetedGate                  // confirm live enemy/ally per TargetMode, then pay MP
 	setupPayOnly                       // pay MP only (AoE / self / whole-party / Swipe)
+	setupReviveAlly                    // require a DOWNED ally exists, then pay MP (Resurrect)
 )
 
 // actionApply resolves the action at the given timing quality. Returns landed=true
@@ -45,6 +46,8 @@ func runSkillSetup(g *core.GameState, skill core.SkillID, kind setupKind) bool {
 		return runTargetedSetup(g, skill)
 	case setupPayOnly:
 		return chargeMP(g, skill)
+	case setupReviveAlly:
+		return setupReviveAndPay(g, skill)
 	}
 	panic("battle: skill " + core.SkillName(skill) + " has an invalid setup kind")
 }
@@ -71,40 +74,66 @@ func livingEnemyAt(g *core.GameState, slot int) (*core.Enemy, bool) {
 var skillActionHandlers = map[core.SkillID]actionHandlers{
 	// SkillNone is the basic attack — the implicit "no skill selected" row, in the
 	// registry so dispatch is a single lookup (no special-case branch).
-	core.SkillNone:          {setup: setupConfirmEnemy, apply: applyAttack},
-	core.SkillSwipe:         {setup: setupPayOnly, apply: applySwipe},
-	core.SkillPrayer:        {setup: setupTargetedGate, apply: applyPrayer, deadMsg: "Prayer cannot revive."},
-	core.SkillSteal:         {setup: setupConfirmEnemy, apply: applySteal},
-	core.SkillScan:          {setup: setupTargetedGate, apply: applyScan},
-	core.SkillFirebolt:      {setup: setupTargetedGate, apply: applyFirebolt},
-	core.SkillCrushingBlow:  {setup: setupTargetedGate, apply: applyCrushingBlow},
-	core.SkillWhirlwind:     {setup: setupPayOnly, apply: applyWhirlwind},
-	core.SkillMassMend:      {setup: setupPayOnly, apply: applyMassMend},
-	core.SkillSmite:         {setup: setupTargetedGate, apply: applySmite},
-	core.SkillBackstab:      {setup: setupTargetedGate, apply: applyBackstab},
-	core.SkillVenomStrike:   {setup: setupTargetedGate, apply: applyVenomStrike},
-	core.SkillFrostLance:    {setup: setupTargetedGate, apply: applyFrostLance},
-	core.SkillArcBolt:       {setup: setupPayOnly, apply: applyArcBolt},
-	core.SkillBless:         {setup: setupPayOnly, apply: applyBless},
-	core.SkillFireball:      {setup: setupPayOnly, apply: applyFireball},
-	core.SkillPoisonCloud:   {setup: setupPayOnly, apply: applyPoisonCloud},
-	core.SkillCleanse:       {setup: setupTargetedGate, apply: applyCleanse, deadMsg: "Cleanse can't reach the fallen."},
-	core.SkillSecondWind:    {setup: setupPayOnly, apply: applySecondWind},
-	core.SkillRenewal:       {setup: setupTargetedGate, apply: applyRenewal, deadMsg: "Renewal can't reach the fallen."},
-	core.SkillCripple:       {setup: setupTargetedGate, apply: applyCripple},
-	core.SkillFrostbite:     {setup: setupTargetedGate, apply: applyFrostbite},
-	core.SkillCorrosiveVial: {setup: setupTargetedGate, apply: applyCorrosiveVial},
-	core.SkillConeOfCold:    {setup: setupPayOnly, apply: applyConeOfCold},
-	core.SkillSunder:        {setup: setupTargetedGate, apply: applySunder},
-	core.SkillTaunt:         {setup: setupTargetedGate, apply: applyTaunt},
-	core.SkillWarBanner:     {setup: setupPayOnly, apply: applyWarBanner},
-	core.SkillStoneSkin:     {setup: setupTargetedGate, apply: applyStoneSkin, deadMsg: "Stone Skin can't reach the fallen."},
-	core.SkillBlind:         {setup: setupTargetedGate, apply: applyBlind},
-	core.SkillAegis:         {setup: setupTargetedGate, apply: applyAegis, deadMsg: "Aegis can't reach the fallen."},
-	core.SkillSmokeBomb:     {setup: setupPayOnly, apply: applySmokeBomb},
-	core.SkillIceArmor:      {setup: setupPayOnly, apply: applyIceArmor},
-	core.SkillRend:          {setup: setupTargetedGate, apply: applyRend},
-	core.SkillLacerate:      {setup: setupTargetedGate, apply: applyLacerate},
+	core.SkillNone:            {setup: setupConfirmEnemy, apply: applyAttack},
+	core.SkillSwipe:           {setup: setupPayOnly, apply: applySwipe},
+	core.SkillPrayer:          {setup: setupTargetedGate, apply: applyPrayer, deadMsg: "Prayer cannot revive."},
+	core.SkillSteal:           {setup: setupConfirmEnemy, apply: applySteal},
+	core.SkillScan:            {setup: setupTargetedGate, apply: applyScan},
+	core.SkillFirebolt:        {setup: setupTargetedGate, apply: applyFirebolt},
+	core.SkillCrushingBlow:    {setup: setupTargetedGate, apply: applyCrushingBlow},
+	core.SkillWhirlwind:       {setup: setupPayOnly, apply: applyWhirlwind},
+	core.SkillMassMend:        {setup: setupPayOnly, apply: applyMassMend},
+	core.SkillSmite:           {setup: setupTargetedGate, apply: applySmite},
+	core.SkillBackstab:        {setup: setupTargetedGate, apply: applyBackstab},
+	core.SkillVenomStrike:     {setup: setupTargetedGate, apply: applyVenomStrike},
+	core.SkillFrostLance:      {setup: setupTargetedGate, apply: applyFrostLance},
+	core.SkillArcBolt:         {setup: setupPayOnly, apply: applyArcBolt},
+	core.SkillBless:           {setup: setupPayOnly, apply: applyBless},
+	core.SkillFireball:        {setup: setupPayOnly, apply: applyFireball},
+	core.SkillPoisonCloud:     {setup: setupPayOnly, apply: applyPoisonCloud},
+	core.SkillCleanse:         {setup: setupTargetedGate, apply: applyCleanse, deadMsg: "Cleanse can't reach the fallen."},
+	core.SkillSecondWind:      {setup: setupPayOnly, apply: applySecondWind},
+	core.SkillRenewal:         {setup: setupTargetedGate, apply: applyRenewal, deadMsg: "Renewal can't reach the fallen."},
+	core.SkillCripple:         {setup: setupTargetedGate, apply: applyCripple},
+	core.SkillFrostbite:       {setup: setupTargetedGate, apply: applyFrostbite},
+	core.SkillCorrosiveVial:   {setup: setupTargetedGate, apply: applyCorrosiveVial},
+	core.SkillConeOfCold:      {setup: setupPayOnly, apply: applyConeOfCold},
+	core.SkillSunder:          {setup: setupTargetedGate, apply: applySunder},
+	core.SkillTaunt:           {setup: setupTargetedGate, apply: applyTaunt},
+	core.SkillWarBanner:       {setup: setupPayOnly, apply: applyWarBanner},
+	core.SkillStoneSkin:       {setup: setupTargetedGate, apply: applyStoneSkin, deadMsg: "Stone Skin can't reach the fallen."},
+	core.SkillBlind:           {setup: setupTargetedGate, apply: applyBlind},
+	core.SkillAegis:           {setup: setupTargetedGate, apply: applyAegis, deadMsg: "Aegis can't reach the fallen."},
+	core.SkillSmokeBomb:       {setup: setupPayOnly, apply: applySmokeBomb},
+	core.SkillIceArmor:        {setup: setupPayOnly, apply: applyIceArmor},
+	core.SkillRend:            {setup: setupTargetedGate, apply: applyRend},
+	core.SkillLacerate:        {setup: setupTargetedGate, apply: applyLacerate},
+	core.SkillSearingLight:    {setup: setupTargetedGate, apply: applySearingLight},
+	core.SkillImmolate:        {setup: setupPayOnly, apply: applyImmolate},
+	core.SkillMug:             {setup: setupTargetedGate, apply: applyMug},
+	core.SkillChainLightning:  {setup: setupPayOnly, apply: applyChainLightning},
+	core.SkillStaticField:     {setup: setupTargetedGate, apply: applyStaticField},
+	core.SkillGuard:           {setup: setupTargetedGate, apply: applyGuard, deadMsg: "Guard can't cover the fallen."},
+	core.SkillConsecrate:      {setup: setupPayOnly, apply: applyConsecrate},
+	core.SkillJudgment:        {setup: setupTargetedGate, apply: applyJudgment},
+	core.SkillRecklessSwing:   {setup: setupTargetedGate, apply: applyRecklessSwing},
+	core.SkillCombust:         {setup: setupTargetedGate, apply: applyCombust},
+	core.SkillBulwark:         {setup: setupPayOnly, apply: applyBulwark},
+	core.SkillDispel:          {setup: setupTargetedGate, apply: applyDispel},
+	core.SkillVanish:          {setup: setupPayOnly, apply: applyVanish},
+	core.SkillMartyrsBond:     {setup: setupTargetedGate, apply: applyMartyrsBond, deadMsg: "Martyr's Bond can't reach the fallen."},
+	core.SkillResurrect:       {setup: setupReviveAlly, apply: applyResurrect},
+	core.SkillMeteor:          {setup: setupPayOnly, apply: applyMeteor},
+	core.SkillAncestralSpirit: {setup: setupPayOnly, apply: applyAncestralSpirit},
+}
+
+// setupReviveAndPay refuses (no MP) when no ally is down, else pays — Resurrect's gate.
+func setupReviveAndPay(g *core.GameState, skill core.SkillID) bool {
+	if core.FirstDownedPartyMember(g.Party) < 0 {
+		setBattleStatus(g, "No fallen ally to revive.")
+		return false
+	}
+	return chargeMP(g, skill)
 }
 
 // init asserts the player-castable contract: every PlayerCastable skill has a
@@ -456,6 +485,10 @@ func chargeMP(g *core.GameState, skill core.SkillID) bool {
 		return false
 	}
 	actor := &g.Party[g.Battle.CurrentParty]
+	// Overcharge (Wizard capstone): a chance the cast is free — skip the spend entirely.
+	if core.PassiveRank(actor, core.PassiveOvercharge) > 0 && g.Rand().Float64() < core.OverchargeFreeCastChance {
+		return true
+	}
 	if !core.SpendSkillMP(actor, skill) {
 		setBattleStatus(g, mpRefusalMessage(skill))
 		return false
@@ -534,6 +567,7 @@ var vfxNoneExempt = map[core.SkillID]bool{
 	core.SkillTaunt:      true,
 	core.SkillSmokeBomb:  true,
 	core.SkillRaiseBones: true,
+	core.SkillVanish:     true, // stealth — only alters targeting, no particle
 }
 
 func init() {
@@ -554,19 +588,19 @@ func init() {
 // vfxNoneExempt set (init asserts this — see above).
 func vfxKindFor(skill core.SkillID) core.VFXKind {
 	switch skill {
-	case core.SkillSwipe, core.SkillWhirlwind, core.SkillCrushingBlow, core.SkillBackstab, core.SkillSunder, core.SkillRend, core.SkillLacerate:
+	case core.SkillSwipe, core.SkillWhirlwind, core.SkillCrushingBlow, core.SkillBackstab, core.SkillSunder, core.SkillRend, core.SkillLacerate, core.SkillMug, core.SkillRecklessSwing:
 		return core.VFXSlash
-	case core.SkillArcBolt:
+	case core.SkillArcBolt, core.SkillChainLightning, core.SkillStaticField, core.SkillDispel:
 		return core.VFXArc
-	case core.SkillFirebolt, core.SkillFireball:
+	case core.SkillFirebolt, core.SkillFireball, core.SkillImmolate, core.SkillCombust, core.SkillMeteor:
 		return core.VFXEmber
-	case core.SkillSmite, core.SkillBlind:
+	case core.SkillSmite, core.SkillBlind, core.SkillSearingLight, core.SkillConsecrate, core.SkillJudgment:
 		return core.VFXSmite
 	case core.SkillVenomStrike, core.SkillPoisonCloud, core.SkillCripple, core.SkillCorrosiveVial:
 		return core.VFXVenom
 	case core.SkillFrostLance, core.SkillFrostbite, core.SkillConeOfCold, core.SkillIceArmor:
 		return core.VFXFrost
-	case core.SkillPrayer, core.SkillMassMend, core.SkillBless, core.SkillCleanse, core.SkillSecondWind, core.SkillRenewal, core.SkillWarBanner, core.SkillStoneSkin, core.SkillAegis:
+	case core.SkillPrayer, core.SkillMassMend, core.SkillBless, core.SkillCleanse, core.SkillSecondWind, core.SkillRenewal, core.SkillWarBanner, core.SkillStoneSkin, core.SkillAegis, core.SkillGuard, core.SkillBulwark, core.SkillMartyrsBond, core.SkillResurrect, core.SkillAncestralSpirit:
 		return core.VFXHeal
 	case core.SkillSteal:
 		return core.VFXSteal
@@ -678,13 +712,55 @@ func beginSingleTargetSkill(g *core.GameState, skill core.SkillID, quality int) 
 	}
 	actor = &g.Party[g.Battle.CurrentParty]
 	stampPartyBump(actor)
-	rawDamage = applyShadowStep(g, actor, scaleSkillDamage(actor, skill, quality))
 	live = core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	target = *live
 	// resistWIS hoisted here so status-proc callers don't re-derive it.
 	resistWIS = core.EffectiveEnemyStats(&target).WIS
 	effect = core.EffectiveSkillEffect(actor, skill)
+	// Outgoing single-target passives fold in pre-crit (so each rides the multiplier),
+	// after the target is resolved (Shatter reads its control state).
+	rawDamage = applyOutgoingPassives(g, actor, &target, scaleSkillDamage(actor, skill, quality))
 	return actor, live, target, rawDamage, resistWIS, effect, true
+}
+
+// applyOutgoingPassives folds the single-target damage-out passives into a raw hit:
+// Shadow Step (strike-first), Crimson Rampage (low-HP Warrior), Shatter (vs a
+// stunned/frozen foe). Each no-ops without its node. Shared by the skill head and
+// the basic attack so the three apply from one place.
+func applyOutgoingPassives(g *core.GameState, actor *core.PartyMember, target *core.Enemy, raw int) int {
+	raw = applyShadowStep(g, actor, raw)
+	raw = applyCrimsonRampage(actor, raw)
+	raw = applyShatter(actor, target, raw)
+	return raw
+}
+
+// applyCrimsonRampage folds the Warrior's Fury capstone: +CrimsonRampageMaxBonus ×
+// (missing HP fraction) × rank, so a near-dead Warrior hits hardest. rank 0 / full
+// HP / no damage = no-op.
+func applyCrimsonRampage(actor *core.PartyMember, raw int) int {
+	rank := core.PassiveRank(actor, core.PassiveCrimsonRampage)
+	if rank <= 0 || raw <= 0 || actor.MaxHP <= 0 {
+		return raw
+	}
+	missing := 1 - float64(actor.HP)/float64(actor.MaxHP)
+	if missing <= 0 {
+		return raw
+	}
+	return raw + int(float64(raw)*missing*core.CrimsonRampageMaxBonus*float64(rank))
+}
+
+// applyShatter folds the Wizard's Cryomancy capstone: +ShatterBonusVsControlled
+// against a Stunned foe (Frost Lance's "frozen" reuses StunTurns). rank 0 / target
+// not controlled / no damage = no-op.
+func applyShatter(actor *core.PartyMember, target *core.Enemy, raw int) int {
+	if raw <= 0 || target == nil || target.StunTurns <= 0 {
+		return raw
+	}
+	rank := core.PassiveRank(actor, core.PassiveShatter)
+	if rank <= 0 {
+		return raw
+	}
+	return raw + int(float64(raw)*core.ShatterBonusVsControlled*float64(rank))
 }
 
 // beginPartyAction is the shared head of self / ally / AoE / utility apply
@@ -870,7 +946,7 @@ func applyAttack(g *core.GameState, quality int) bool {
 	// Basic Attack: MemberAttackDamage (STR/DEX per weapon) scaled by quality,
 	// Phys-tagged so armor damps it (strikeWithCrit's SkillNone fallback). The log
 	// uses damageEnemy's POST-armor figure so it matches the HP delta.
-	rawDamage := applyShadowStep(g, attacker, core.ScaleDamage(core.MemberAttackDamage(*attacker, 0), quality))
+	rawDamage := applyOutgoingPassives(g, attacker, &target, core.ScaleDamage(core.MemberAttackDamage(*attacker, 0), quality))
 	dealt, defeated, crit := strikeWithCrit(g, attacker, core.SkillNone, rawDamage, quality)
 	// Glyph keyed to the weapon (blunt/ranged = impact, edged = slash). Basic
 	// attacks are the only weapon-driven swing; skills pick VFX via vfxKindFor.
@@ -947,6 +1023,17 @@ func setupTargetedAllyAndPay(g *core.GameState, skill core.SkillID, deadMsg stri
 	return chargeMP(g, skill)
 }
 
+// healFailedLine picks the right "the heal mended nothing" line: starving blocks
+// all HP recovery (only food helps), otherwise the target was already full. starved
+// and full are the skill-specific phrasings. The single home for the starving-vs-full
+// branch shared by the single-ally and self heals.
+func healFailedLine(target *core.PartyMember, starved, full string) string {
+	if core.MemberStarving(*target) {
+		return starved
+	}
+	return full
+}
+
 // --- Prayer (Cleric, heals an ally) ---
 
 func applyPrayer(g *core.GameState, quality int) bool {
@@ -960,12 +1047,10 @@ func applyPrayer(g *core.GameState, quality int) bool {
 		healPartyMember(g, g.Battle.PartyTarget, heal)
 		landed := target.HP - before
 		if landed <= 0 {
-			// Report honestly when the prayer mends nothing: starving blocks all HP
-			// recovery (only food helps); otherwise the target was already topped off.
-			if core.MemberStarving(*target) {
-				return qualityLine(quality, actor.Name, " prays over %s, but they're too starved to mend.", target.Name)
-			}
-			return qualityLine(quality, actor.Name, " prays over %s, but they're already at full health.", target.Name)
+			// Report honestly when the prayer mends nothing (starved vs already full).
+			return healFailedLine(target,
+				qualityLine(quality, actor.Name, " prays over %s, but they're too starved to mend.", target.Name),
+				qualityLine(quality, actor.Name, " prays over %s, but they're already at full health.", target.Name))
 		}
 		selfTarget := g.Battle.PartyTarget == g.Battle.CurrentParty
 		return prayerMessage(actor.Name, target.Name, landed, quality, selfTarget)
@@ -1282,6 +1367,17 @@ func bleedDoT(arms procMessageArms) procStrike {
 	}
 }
 
+// burnDoT builds the Burn descriptor for a single-target hit + Burn DoT (Searing
+// Light); same shape as bleedDoT but onto Enemy.BurnTurns.
+func burnDoT(arms procMessageArms) procStrike {
+	return procStrike{
+		counter: func(e *core.Enemy) *int { return &e.BurnTurns },
+		chance:  func(eff core.SkillEffect) float64 { return eff.BurnChance },
+		dur:     func(eff core.SkillEffect) func(*rand.Rand) int { return eff.BurnDuration },
+		arms:    arms,
+	}
+}
+
 // stunProc builds the Great+ Stun descriptor for Smite / Frost Lance / Crushing
 // Blow (preStrike nil unless the skill pre-mutates raw damage); arms narrates.
 func stunProc(arms procMessageArms, preStrike func(int, *core.PartyMember, core.SkillID, int) int) procStrike {
@@ -1356,6 +1452,304 @@ func applyLacerate(g *core.GameState, quality int) bool {
 	return applyProcStrike(g, core.SkillLacerate, quality, bleedDoT(lacerateArms))
 }
 
+// --- Searing Light (Cleric, charge magic + radiant Burn DoT) ---
+
+func applySearingLight(g *core.GameState, quality int) bool {
+	return applyProcStrike(g, core.SkillSearingLight, quality, burnDoT(searingLightArms))
+}
+
+// --- Immolate (Wizard) / Chain Lightning (Wizard): AoE casts ---
+
+// applyImmolate is the AoE Fireball with a GUARANTEED long Burn on every target
+// (BurnChance 1.0 in its def) — the shared body rolls the per-target burn.
+func applyImmolate(g *core.GameState, quality int) bool {
+	return applyAoEStatusSkill(g, core.SkillImmolate, "immolates", "guts out with no target", quality)
+}
+
+// applyChainLightning is AoE lightning + a per-target Stun chance (the shared body's
+// StunChance roll, live only for this skill).
+func applyChainLightning(g *core.GameState, quality int) bool {
+	return applyAoEStatusSkill(g, core.SkillChainLightning, "leaps through", "earths out with no target", quality)
+}
+
+// --- Mug (Thief, sequence phys strike + Steal in one hit) ---
+
+// applyMug deals a phys hit and, on a surviving foe with loot, attempts a Steal
+// (timing-scaled chance). A kill yields no lift (nothing to pickpocket from a corpse).
+func applyMug(g *core.GameState, quality int) bool {
+	actor, live, target, rawDamage, _, effect, ok := beginSingleTargetSkill(g, core.SkillMug, quality)
+	if !ok {
+		return false
+	}
+	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillMug, rawDamage, quality)
+	enqueueSkillVFXAtEnemy(g, core.SkillMug)
+	stole := false
+	var kind core.ItemKind
+	if !defeated && live.Alive && live.Item != core.ItemNone {
+		chance := core.QualityScaledChance(core.StealChance(effect.StealChance), quality)
+		if g.Rand().Float64() < chance {
+			kind = live.Item
+			live.Item = core.ItemNone
+			g.Inventory = core.AddItem(g.Inventory, kind, 1)
+			stole = true
+		}
+	}
+	foe := core.EnemySingularNoun(&target)
+	var msg string
+	switch {
+	case defeated:
+		msg = qualityLine(quality, actor.Name, " mugs the %s for %d — it drops.", foe, damage)
+	case stole:
+		msg = fmt.Sprintf("%s%s mugs the %s for %d and lifts %s!", qualityTag(quality), actor.Name, foe, damage, core.ItemInfo(kind).Name)
+	default:
+		msg = qualityLine(quality, actor.Name, " mugs the %s for %d.", foe, damage)
+	}
+	logFoeHit(g, appendCrit(msg, crit), defeated)
+	finishActorTurn(g)
+	return true
+}
+
+// --- Static Field (Wizard, press %-current-HP magic) ---
+
+// applyStaticField deals damage as a SHARE of the target's CURRENT HP (timing-scaled,
+// floored at 1), dealt SkillTagNone so it bypasses Armor/MDef — a fixed fraction, not
+// a normal hit. Hits hardest on a healthy foe.
+func applyStaticField(g *core.GameState, quality int) bool {
+	if !ensureAliveTargetOrCancel(g, core.SkillStaticField) {
+		return false
+	}
+	actor := beginPartyAction(g)
+	live := core.BattleMemberAt(g, g.Battle.EnemyIndex)
+	target := *live
+	effect := core.EffectiveSkillEffect(actor, core.SkillStaticField)
+	raw := core.ScaleDamage(int(float64(live.HP)*effect.PercentCurrentHP), quality)
+	if raw < 1 {
+		raw = 1
+	}
+	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, raw, quality, core.SkillTagNone)
+	enqueueSkillVFXAtEnemy(g, core.SkillStaticField)
+	foe := core.EnemySingularNoun(&target)
+	msg := qualityLine(quality, actor.Name, " jolts the %s for %d.", foe, damage)
+	if defeated {
+		msg = qualityLine(quality, actor.Name, " jolts the %s for %d — it drops.", foe, damage)
+	}
+	logFoeHit(g, msg, defeated)
+	finishActorTurn(g)
+	return true
+}
+
+// --- Guard (Warrior, press ally cover) ---
+
+// applyGuard makes the caster cover the chosen ally: the ward's incoming hits
+// redirect to the guardian (core.redirectToGuardian) until the guardian's next
+// turn. No damage; always lands. Self-target is inert (SetGuard skips it).
+func applyGuard(g *core.GameState, quality int) bool {
+	return applyAllyTargetSkill(g, core.SkillGuard, core.LogInfo, func(actor, target *core.PartyMember) string {
+		core.SetGuard(g.Party, g.Battle.CurrentParty, g.Battle.PartyTarget)
+		if g.Battle.PartyTarget == g.Battle.CurrentParty {
+			return fmt.Sprintf("%s raises a guard — but stands alone.", actor.Name)
+		}
+		return fmt.Sprintf("%s guards %s — incoming blows fall on them instead.", actor.Name, target.Name)
+	})
+}
+
+// --- Consecrate (Cleric, charge AoE radiant magic) ---
+
+func applyConsecrate(g *core.GameState, quality int) bool {
+	// Pure-damage AoE (no status fields) via the shared body.
+	return applyAoEStatusSkill(g, core.SkillConsecrate, "scours", "fades with no target", quality)
+}
+
+// --- Judgment (Cleric, press execute-or-smite) ---
+
+// applyJudgment executes a foe at/under JudgmentExecuteFraction of its HP (lethal,
+// defense-bypassing), else deals heavy WIS-scaled magic. Capstone, no upgrades.
+func applyJudgment(g *core.GameState, quality int) bool {
+	if !ensureAliveTargetOrCancel(g, core.SkillJudgment) {
+		return false
+	}
+	actor := beginPartyAction(g)
+	live := core.BattleMemberAt(g, g.Battle.EnemyIndex)
+	target := *live
+	executed := float64(live.HP) <= float64(max(live.MaxHP, 1))*core.JudgmentExecuteFraction
+	raw := scaleSkillDamage(actor, core.SkillJudgment, quality)
+	tag := core.SkillTagMagic
+	if executed {
+		// A true execute bypasses MDef so the kill is guaranteed.
+		raw = live.HP
+		tag = core.SkillTagNone
+	}
+	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, raw, quality, tag)
+	enqueueSkillVFXAtEnemy(g, core.SkillJudgment)
+	foe := core.EnemySingularNoun(&target)
+	var msg string
+	switch {
+	case executed && defeated:
+		msg = qualityLine(quality, actor.Name, " passes judgment — the %s is struck down!", foe)
+	case defeated:
+		msg = qualityLine(quality, actor.Name, " judges the %s for %d — it falls.", foe, damage)
+	default:
+		msg = qualityLine(quality, actor.Name, " judges the %s for %d.", foe, damage)
+	}
+	logFoeHit(g, msg, defeated)
+	finishActorTurn(g)
+	return true
+}
+
+// --- Reckless Swing (Warrior, charge heavy phys + self Armor debuff) ---
+
+// applyRecklessSwing lands a heavy STR hit and sheds the swinger's own Armor for a
+// turn (a negative self-buff via the buff bundle — net-negative, so no Blessed pill).
+func applyRecklessSwing(g *core.GameState, quality int) bool {
+	actor, _, target, rawDamage, _, _, ok := beginSingleTargetSkill(g, core.SkillRecklessSwing, quality)
+	if !ok {
+		return false
+	}
+	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillRecklessSwing, rawDamage, quality)
+	enqueueSkillVFXAtEnemy(g, core.SkillRecklessSwing)
+	core.StampPartyBuff(actor, core.SkillRecklessSwing, core.SkillEffect{BuffArmor: -core.RecklessSwingSelfArmor, BuffTurns: core.RecklessSwingSelfTurns})
+	foe := core.EnemySingularNoun(&target)
+	msg := qualityLine(quality, actor.Name, " swings wildly at the %s for %d — guard down.", foe, damage)
+	if defeated {
+		msg = qualityLine(quality, actor.Name, " caves the %s in for %d — guard down.", foe, damage)
+	}
+	logFoeHit(g, appendCrit(msg, crit), defeated)
+	finishActorTurn(g)
+	return true
+}
+
+// --- Combust (Wizard, press Burn detonation) ---
+
+// applyCombust adds a per-remaining-Burn-turn spike to the hit and consumes the
+// target's Burn. On an unburnt foe it's just the small base magic hit.
+func applyCombust(g *core.GameState, quality int) bool {
+	actor, live, target, rawDamage, _, _, ok := beginSingleTargetSkill(g, core.SkillCombust, quality)
+	if !ok {
+		return false
+	}
+	burn := target.BurnTurns // pre-hit snapshot
+	rawDamage += burn * core.CombustDamagePerBurnTurn
+	live.BurnTurns = 0 // detonated — consume it (a kill clears it anyway)
+	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillCombust, rawDamage, quality)
+	enqueueSkillVFXAtEnemy(g, core.SkillCombust)
+	foe := core.EnemySingularNoun(&target)
+	var msg string
+	switch {
+	case defeated:
+		msg = qualityLine(quality, actor.Name, " combusts the %s for %d — it's ash.", foe, damage)
+	case burn > 0:
+		msg = qualityLine(quality, actor.Name, " detonates the %s's flames for %d!", foe, damage)
+	default:
+		msg = qualityLine(quality, actor.Name, " scorches the %s for %d.", foe, damage)
+	}
+	logFoeHit(g, appendCrit(msg, crit), defeated)
+	finishActorTurn(g)
+	return true
+}
+
+// --- Bulwark of Faith (Cleric, press party-wide Armor/MDef aura) ---
+
+func applyBulwark(g *core.GameState, quality int) bool {
+	actor := beginPartyAction(g)
+	effect := core.EffectiveSkillEffect(actor, core.SkillBulwark)
+	warded := stampPartyWideBuff(g, effect, core.SkillBulwark)
+	setBattleMessage(g, qualityLine(quality, actor.Name, " raises a bulwark of faith — %d allies gain +%d Armor / +%d MDef (%d turns).",
+		warded, effect.BuffArmor, effect.BuffMDef, effect.BuffTurns))
+	finishActorTurn(g)
+	return true
+}
+
+// --- Dispel (Wizard, press enemy-buff strip) ---
+
+func applyDispel(g *core.GameState, quality int) bool {
+	return applyEnemyDebuffSkill(g, core.SkillDispel, func(actor *core.PartyMember, enemy *core.Enemy, _ core.SkillEffect) string {
+		if removed := core.DispelEnemyBuffs(enemy); removed > 0 {
+			return fmt.Sprintf("%s dispels %s — its magic unravels.", actor.Name, core.TheFoe(enemy))
+		}
+		return fmt.Sprintf("%s dispels %s — but it carries no magic to strip.", actor.Name, core.TheFoe(enemy))
+	})
+}
+
+// --- Vanish (Thief, press self untargetable) ---
+
+// applyVanish makes the caster untargetable (VanishTurns) until their next turn —
+// the enemy target scans skip a vanished member, so aggro drops naturally.
+func applyVanish(g *core.GameState, quality int) bool {
+	actor := beginPartyAction(g)
+	actor.VanishTurns = core.VanishDuration
+	setBattleMessage(g, qualityLine(quality, actor.Name, " melts into shadow — untargetable."))
+	finishActorTurn(g)
+	return true
+}
+
+// --- Martyr's Bond (Cleric, press ally cover) ---
+
+// applyMartyrsBond has the Cleric cover an ally via the shared Guard cover mechanic
+// (the ward's hits redirect to the Cleric until the Cleric's next turn).
+func applyMartyrsBond(g *core.GameState, quality int) bool {
+	return applyAllyTargetSkill(g, core.SkillMartyrsBond, core.LogInfo, func(actor, target *core.PartyMember) string {
+		core.SetGuard(g.Party, g.Battle.CurrentParty, g.Battle.PartyTarget)
+		if g.Battle.PartyTarget == g.Battle.CurrentParty {
+			return fmt.Sprintf("%s forms a martyr's bond — but with no ally to shield.", actor.Name)
+		}
+		return fmt.Sprintf("%s forms a martyr's bond with %s — their wounds become %s's own.", actor.Name, target.Name, actor.Name)
+	})
+}
+
+// --- Resurrect (Cleric, press revive) ---
+
+// applyResurrect revives the first downed ally to ResurrectHealPercent of MaxHP and
+// pulls them back into the formation. Setup already confirmed a downed ally exists.
+func applyResurrect(g *core.GameState, quality int) bool {
+	idx := core.FirstDownedPartyMember(g.Party)
+	if idx < 0 {
+		// Defensive: the only downed ally could have been released/changed between
+		// setup and apply. Refund and bail cleanly.
+		refundSkillMP(g, core.SkillResurrect)
+		setBattleStatus(g, msgNoTarget)
+		finishActorTurn(g)
+		return false
+	}
+	actor := beginPartyAction(g)
+	m := &g.Party[idx]
+	m.HP = int(float64(m.MaxHP) * core.ResurrectHealPercent)
+	if m.HP < 1 {
+		m.HP = 1
+	}
+	// Pull the revived member back to a manned slot (the anticipated Raise hook).
+	core.ShuntPartyFormation(g.Party)
+	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillResurrect), idx)
+	setBattleMessageCat(g, qualityLine(quality, actor.Name, " calls %s back from the brink (+%d HP)!", m.Name, m.HP), core.LogHeal)
+	finishActorTurn(g)
+	return true
+}
+
+// --- Meteor (Wizard, charge delayed AoE) ---
+
+// applyMeteor arms a pending Meteor: snapshots the quality-scaled per-target damage
+// and starts the fuse. It lands in resolveMeteorIfDue when the fuse runs out.
+func applyMeteor(g *core.GameState, quality int) bool {
+	actor := beginPartyAction(g)
+	g.Battle.MeteorDamage = scaleSkillDamage(actor, core.SkillMeteor, quality)
+	g.Battle.MeteorFuse = core.MeteorFuseTurns
+	setBattleMessage(g, qualityLine(quality, actor.Name, " calls down a meteor — the sky darkens overhead!"))
+	finishActorTurn(g)
+	return true
+}
+
+// --- Ancestral Spirit (Warrior, press summon) ---
+
+// applyAncestralSpirit conjures a shade that strikes alongside the summoner each of
+// their turns (tickAncestralSpirit) for AncestralSpiritTurns, starting this turn.
+func applyAncestralSpirit(g *core.GameState, quality int) bool {
+	actor := beginPartyAction(g)
+	actor.SpiritTurns = core.AncestralSpiritTurns
+	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillAncestralSpirit), g.Battle.CurrentParty)
+	setBattleMessage(g, qualityLine(quality, actor.Name, " summons an ancestral shade to fight at their side!"))
+	finishActorTurn(g)
+	return true
+}
+
 // --- Frost Lance (Wizard, charge magic with reliable Stun on Great+) ---
 
 // FrostLance is "freeze" flavor but uses the canonical StunTurns counter (no
@@ -1401,6 +1795,11 @@ func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, hitVerb, emptyVe
 			struck = true
 		}
 		if tryProcStatus(g.Rand(), &enemy.PoisonTurns, defeated, effect.PoisonChance, quality, 0, effect.PoisonDuration, resistWIS) {
+			struck = true
+		}
+		// Per-target Stun (Chain Lightning's shock) — any grade, low chance. Every
+		// other AoE skill carries StunChance 0, so this short-circuits for them.
+		if tryProcStatus(g.Rand(), &enemy.StunTurns, defeated, effect.StunChance, quality, 0, effect.StunDuration, resistWIS) {
 			struck = true
 		}
 		// AoE stat debuff (Cone of Cold's chill) — guaranteed on a survivor.
@@ -1642,10 +2041,10 @@ func applySecondWind(g *core.GameState, quality int) bool {
 	if healPartyMember(g, g.Battle.CurrentParty, heal) {
 		core.EnqueuePartyVFX(g, vfxKindFor(core.SkillSecondWind), g.Battle.CurrentParty)
 		setBattleMessageCat(g, qualityLine(quality, actor.Name, " catches a second wind — recovers %d HP.", heal), core.LogHeal)
-	} else if core.MemberStarving(*actor) {
-		setBattleMessage(g, qualityLine(quality, actor.Name, " is too starved to catch a second wind."))
 	} else {
-		setBattleMessage(g, qualityLine(quality, actor.Name, " is already at full health."))
+		setBattleMessage(g, healFailedLine(actor,
+			qualityLine(quality, actor.Name, " is too starved to catch a second wind."),
+			qualityLine(quality, actor.Name, " is already at full health.")))
 	}
 	finishActorTurn(g)
 	return true
@@ -1821,6 +2220,9 @@ func damageEnemy(g *core.GameState, slot, rawDamage, quality int, tag core.Skill
 		}
 		return damage, false
 	}
+	// Snapshot Plague's trigger BEFORE the death clear wipes the dying foe's poison.
+	wasPoisoned := enemy.PoisonTurns > 0
+	g.Battle.EnemyKillsThisTurn++ // Killing Spree reads this at end-of-turn
 	enemy.Alive = false
 	clearEnemyStatusesOnDeath(enemy)
 	core.EnqueueEnemyVFX(g, core.VFXDeath, slot)
@@ -1833,9 +2235,35 @@ func damageEnemy(g *core.GameState, slot, rawDamage, quality int, tag core.Skill
 	for _, idx := range core.ReleaseIngestedBy(g.Party, slot) {
 		setBattleMessage(g, fmt.Sprintf("%s tumbles free.", g.Party[idx].Name))
 	}
+	// Plague (Thief): a poisoned foe's death leaps its poison to the rest of the pack.
+	if wasPoisoned && core.AnyPartyHasPassive(g.Party, core.PassivePlague) {
+		spreadPlague(g, slot)
+	}
 	// Repack the front row so a back-row enemy slides up to fill the gap.
 	core.ShuntEnemyFormation(core.BattleMembers(g))
 	return damage, true
+}
+
+// spreadPlague stamps Poison on every OTHER living enemy when a poisoned foe dies
+// (Thief's Plague capstone). No-stack: only un-poisoned foes catch it; a fixed
+// rolled duration. deadSlot is the foe that just died (skipped — already a corpse).
+func spreadPlague(g *core.GameState, deadSlot int) {
+	dur := core.PlagueSpreadMinTurns
+	if span := core.PlagueSpreadMaxTurns - core.PlagueSpreadMinTurns; span > 0 {
+		dur += g.Rand().Intn(span + 1)
+	}
+	spread := 0
+	forEachLivingEnemy(g, func(slot int, e *core.Enemy) {
+		if slot == deadSlot || e.PoisonTurns > 0 {
+			return
+		}
+		e.PoisonTurns = dur
+		core.EnqueueEnemyVFX(g, core.VFXVenom, slot)
+		spread++
+	})
+	if spread > 0 {
+		setBattleMessageCat(g, "The plague spreads through the pack!", core.LogDamageFoe)
+	}
 }
 
 // tickPoisonAfterPartyTurn ticks poison on a party member AFTER their action.
@@ -2128,6 +2556,14 @@ func applyPartyDamage(g *core.GameState, member *core.PartyMember, rawAmount int
 		core.SubFloorZero(&member.ShieldHP, absorbed)
 		amount -= absorbed
 	}
+	// Last Stand (Warrior): the first otherwise-lethal blow each battle leaves the
+	// member at 1 HP instead of downing them. Post-shield, so a fully-soaked hit
+	// doesn't burn the charge.
+	if amount >= member.HP && !member.LastStandUsed && core.PassiveRank(member, core.PassiveLastStand) > 0 {
+		amount = member.HP - 1
+		member.LastStandUsed = true
+		setBattleMessage(g, fmt.Sprintf("%s refuses to fall — Last Stand!", member.Name))
+	}
 	// Flash + HP-floor + popup + recoil (shared tail with the enemy path). Incoming hits
 	// aren't player-timed, so quality is Miss (the draw colors party popups a fixed hurt tone).
 	died := core.ApplyDamageWithPopup(core.HitTarget{
@@ -2219,6 +2655,8 @@ var partyDeathStatuses = []partyStatusCounter{
 	{"StunTurns", func(m *core.PartyMember) *int { return &m.StunTurns }, false},
 	{"IceArmorTurns", func(m *core.PartyMember) *int { return &m.IceArmorTurns }, false},
 	{"RegenTurns", func(m *core.PartyMember) *int { return &m.RegenTurns }, false},
+	{"VanishTurns", func(m *core.PartyMember) *int { return &m.VanishTurns }, true},
+	{"SpiritTurns", func(m *core.PartyMember) *int { return &m.SpiritTurns }, true},
 }
 
 // init asserts the death-clear descriptors are COMPLETE: every `int` field ending
@@ -2368,6 +2806,11 @@ var (
 		proc:     "%[1]s%[2]s lacerates the %[3]s for %[4]d — it's bleeding.",
 		plain:    "%[1]s%[2]s lacerates the %[3]s for %[4]d.",
 	}
+	searingLightArms = procMessageArms{
+		defeated: "%[1]s%[2]s's Searing Light burns the %[3]s away for %[4]d.",
+		proc:     "%[1]s%[2]s sears the %[3]s for %[4]d — it's burning.",
+		plain:    "%[1]s%[2]s sears the %[3]s for %[4]d.",
+	}
 )
 
 func backstabMessage(name string, target core.Enemy, damage, quality int, defeated, crit bool) string {
@@ -2411,7 +2854,7 @@ func bloodthirstHeal(g *core.GameState, partyIndex, physDamage int) {
 	}
 	member := &g.Party[partyIndex]
 	rank := core.PassiveRank(member, core.PassiveBloodthirst)
-	if rank <= 0 || physDamage <= 0 || member.HP <= 0 || member.Ingested || core.MemberStarving(*member) {
+	if rank <= 0 || physDamage <= 0 || !core.MemberAvailable(*member) || core.MemberStarving(*member) {
 		return // starving members can't mend — lifesteal included
 	}
 	heal := scaleByRank(physDamage, rank, core.BloodthirstHealPerRank)
@@ -2436,6 +2879,105 @@ func applyBloodthirst(g *core.GameState, actor core.ActorRef) {
 	bloodthirstHeal(g, actor.Index, g.Battle.PhysDamageThisTurn)
 }
 
+// applyKillingSpree grants the Thief's Cutpurse capstone an ATB burst when their
+// turn felled at least one foe (EnemyKillsThisTurn). No-op without the node / no kills.
+func applyKillingSpree(g *core.GameState, actor core.ActorRef) {
+	if !actor.ValidPartyIndex(g.Party) || g.Battle.EnemyKillsThisTurn <= 0 {
+		return
+	}
+	if core.PassiveRank(&g.Party[actor.Index], core.PassiveKillingSpree) <= 0 {
+		return
+	}
+	gainPartyReadiness(g, actor.Index, core.KillingSpreeReadiness)
+	setBattleMessageCat(g, fmt.Sprintf("%s rides the kill — a burst of speed!", g.Party[actor.Index].Name), core.LogHeal)
+}
+
+// applyOverchargeRegen trickles MP back to a Wizard holding Overcharge at the end
+// of their turn (the passive's sustain half; the free-cast half lives in chargeMP).
+func applyOverchargeRegen(g *core.GameState, actor core.ActorRef) {
+	if !actor.ValidPartyIndex(g.Party) {
+		return
+	}
+	m := &g.Party[actor.Index]
+	if m.HP <= 0 || core.PassiveRank(m, core.PassiveOvercharge) <= 0 {
+		return
+	}
+	core.GainUpTo(&m.MP, m.MaxMP, core.OverchargeMPRegenPerTurn)
+}
+
+// tickAncestralSpirit lets the summoner's shade strike a living foe at the end of
+// the summoner's turn, then drains one turn. Kept OUT of the phys/kill tallies (the
+// shade, not the member). No-op without an active shade / no foe.
+func tickAncestralSpirit(g *core.GameState, actor core.ActorRef) {
+	if !actor.IsParty || !actor.ValidPartyIndex(g.Party) {
+		return
+	}
+	m := &g.Party[actor.Index]
+	if m.HP <= 0 || m.SpiritTurns <= 0 {
+		return
+	}
+	m.SpiritTurns--
+	target := core.NextLivingBattleEnemy(g)
+	if target < 0 {
+		return
+	}
+	raw := int(float64(core.MemberAttackDamage(*m, 0)) * core.AncestralSpiritDamageMult)
+	if raw < 1 {
+		raw = 1
+	}
+	noun := core.EnemySingularNoun(core.BattleMemberAt(g, target))
+	physTally, killTally := g.Battle.PhysDamageThisTurn, g.Battle.EnemyKillsThisTurn
+	dealt, defeated := damageEnemy(g, target, raw, core.TimingQualityGood, core.SkillTagPhys)
+	g.Battle.PhysDamageThisTurn, g.Battle.EnemyKillsThisTurn = physTally, killTally
+	core.EnqueueEnemyVFX(g, core.VFXSlash, target)
+	switch {
+	case defeated:
+		setBattleMessageCat(g, fmt.Sprintf("%s's ancestral shade cuts the %s down for %d!", m.Name, noun, dealt), core.LogDeath)
+	case dealt > 0:
+		setBattleMessageCat(g, fmt.Sprintf("%s's ancestral shade strikes the %s for %d.", m.Name, noun, dealt), core.LogDamageFoe)
+	}
+	if m.SpiritTurns == 0 {
+		setBattleMessage(g, fmt.Sprintf("%s's ancestral shade fades.", m.Name))
+	}
+}
+
+// resolveMeteorIfDue counts a pending Meteor's fuse down one turn; at 0 the AoE
+// lands on every living enemy for the cast-time damage. No-op when none is in flight.
+func resolveMeteorIfDue(g *core.GameState) {
+	if g.Battle.MeteorFuse <= 0 {
+		return
+	}
+	g.Battle.MeteorFuse--
+	if g.Battle.MeteorFuse > 0 {
+		return
+	}
+	dmg := g.Battle.MeteorDamage
+	g.Battle.MeteorDamage = 0
+	hits := 0
+	forEachLivingEnemy(g, func(slot int, _ *core.Enemy) {
+		damageEnemy(g, slot, dmg, core.TimingQualityGood, core.SkillTagMagic)
+		core.EnqueueEnemyVFX(g, core.VFXEmber, slot)
+		hits++
+	})
+	if hits > 0 {
+		triggerBigShake(g)
+		setBattleMessageCat(g, "The meteor crashes down across the pack!", core.LogDamageFoe)
+	}
+}
+
+// gainPartyReadiness adds to a party actor's carry-over ATB gauge (Killing Spree's
+// speed burst) — the positive party-side mirror of pushEnemyReadiness.
+func gainPartyReadiness(g *core.GameState, partyIndex, amount int) {
+	if amount <= 0 || !partyIndexValid(g, partyIndex) {
+		return
+	}
+	ref := core.ActorRef{IsParty: true, Index: partyIndex}
+	if g.Battle.Readiness == nil {
+		g.Battle.Readiness = map[core.ActorRef]int{}
+	}
+	g.Battle.Readiness[ref] += amount
+}
+
 // offTurnReflect applies an off-turn counter-strike at enemySlot for `raw` damage
 // with the given tag/VFX, prints the defeated/dealt messages, and returns the
 // damage dealt. The strike is kept OUT of the per-turn Bloodthirst tally
@@ -2448,9 +2990,13 @@ func offTurnReflect(g *core.GameState, enemySlot, raw int, tag core.SkillTag, vf
 		return 0, false
 	}
 	noun := core.EnemySingularNoun(enemy)
+	// Keep this off-turn strike out of BOTH per-turn tallies (Bloodthirst lifesteal
+	// and Killing Spree kills) — it lands outside the actor's own turn.
 	physTally := g.Battle.PhysDamageThisTurn
+	killTally := g.Battle.EnemyKillsThisTurn
 	dealt, defeated = damageEnemy(g, enemySlot, raw, core.TimingQualityGood, tag)
 	g.Battle.PhysDamageThisTurn = physTally
+	g.Battle.EnemyKillsThisTurn = killTally
 	core.EnqueueEnemyVFX(g, vfx, enemySlot)
 	if defeated {
 		setBattleMessageCat(g, defeatedMsg(noun, dealt), core.LogDeath)
@@ -2478,7 +3024,9 @@ func tryRiposte(g *core.GameState, dodger, enemySlot int) {
 	name := member.Name
 	dealt, _ := offTurnReflect(g, enemySlot, raw, core.SkillTagPhys, core.WeaponHitVFX(core.EquippedWeapon(*member)),
 		func(noun string, _ int) string { return fmt.Sprintf("%s ripostes — the %s drops!", name, noun) },
-		func(noun string, amount int) string { return fmt.Sprintf("%s ripostes the %s for %d.", name, noun, amount) })
+		func(noun string, amount int) string {
+			return fmt.Sprintf("%s ripostes the %s for %d.", name, noun, amount)
+		})
 	// Feed Bloodthirst directly (the enemy-turn tally would otherwise drop it).
 	bloodthirstHeal(g, dodger, dealt)
 }
@@ -2504,8 +3052,12 @@ func tryRetribution(g *core.GameState, enemySlot, defender, dealt int) {
 	}
 	name := g.Party[defender].Name
 	offTurnReflect(g, enemySlot, reflect, core.SkillTagMagic, core.VFXSmite,
-		func(noun string, amount int) string { return fmt.Sprintf("%s's retribution fells the %s for %d!", name, noun, amount) },
-		func(noun string, amount int) string { return fmt.Sprintf("The %s takes %d from %s's retribution.", noun, amount, name) })
+		func(noun string, amount int) string {
+			return fmt.Sprintf("%s's retribution fells the %s for %d!", name, noun, amount)
+		},
+		func(noun string, amount int) string {
+			return fmt.Sprintf("The %s takes %d from %s's retribution.", noun, amount, name)
+		})
 }
 
 func resolveEnemyMiss(g *core.GameState, slot int) {
@@ -2535,7 +3087,7 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	stampEnemyBump(enemy)
 	// Dodge precedes damage: a sidestep eats the whole swing (no damage/proc/
 	// lifesteal). The defend quality is still recorded. Skills aren't dodgeable.
-	if core.RollDodge(g.Rand(), core.EffectiveStats(g.Party[target])) {
+	if core.MemberRollDodge(g.Rand(), &g.Party[target]) {
 		recordQuality(g, defendQuality, target, true)
 		setBattleMessage(g, fmt.Sprintf("%s sidesteps %s.", g.Party[target].Name, core.TheFoe(enemy)))
 		// Riposte on dodge (Warrior Battle Sense).

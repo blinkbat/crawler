@@ -1045,6 +1045,11 @@ func drawDoorLinks(s *State, cell float32) {
 // Derived so a future scrollbar bump can't silently break the clearance.
 const overlayGutterPad = scrollbarThickness + 5 // = 16
 
+// overlayMinGridDim is the minimum grid (canvas) dimension below which the
+// grid-corner overlays hide — the shared width gate for the minimap and the
+// recent-brush row, so the two visibility checks can't drift apart.
+const overlayMinGridDim = float32(260)
+
 // minimapRect computes the overview minimap's on-screen rect (bottom-right of
 // the grid) and whether it shows (hidden when no map / grid too small). Shared
 // by draw and click-to-jump.
@@ -1052,7 +1057,7 @@ func minimapRect(s *State) (rl.Rectangle, bool) {
 	if s.area.Width == 0 || s.area.Height == 0 || s.rect.cellPx <= 0 {
 		return rl.Rectangle{}, false
 	}
-	if s.rect.grid.Width < 260 || s.rect.grid.Height < 260 {
+	if s.rect.grid.Width < overlayMinGridDim || s.rect.grid.Height < overlayMinGridDim {
 		return rl.Rectangle{}, false
 	}
 	const maxDim = float32(150)
@@ -1133,7 +1138,7 @@ func drawMinimap(s *State) {
 
 // brushRecentsVisible reports whether the recent-brush swatch row should show.
 func brushRecentsVisible(s *State) bool {
-	return len(s.recentBrushes) > 0 && s.rect.grid.Width >= 260 && s.rect.grid.Height >= 200
+	return len(s.recentBrushes) > 0 && s.rect.grid.Width >= overlayMinGridDim && s.rect.grid.Height >= 200
 }
 
 // brushRecentRect is the i-th recent-brush swatch rect (grid bottom-left).

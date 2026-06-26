@@ -170,6 +170,9 @@ type SkillEffect struct {
 	// IceArmorTurns: reactive frost ward on the caster (Ice Armor) — gains MDef
 	// and chills attackers while it runs. Fixed duration, end-of-turn tick. Zero = none.
 	IceArmorTurns int
+	// PercentCurrentHP: damage dealt as a SHARE of the target's CURRENT HP (Static
+	// Field), bypassing defenses (the handler tags it None). Zero = no %-HP head.
+	PercentCurrentHP float64
 }
 
 // NegStatDebuff builds a no-stack enemy stat debuff from a positive buff delta:
@@ -249,6 +252,46 @@ var skillDefinitions = []skillDefinition{
 	{Skill: SkillRend, Name: "Rend", Description: "STR-scaled phys hit that opens a Bleed wound — damage over time. Charge.", Cost: 4, TargetMode: ActionEnemyTarget, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigameCharge, Effect: SkillEffect{Damage: RendDamageBase, BleedChance: RendBleedChance, BleedMinTurns: BleedMinTurns, BleedMaxTurns: BleedMaxTurns}, PlayerCastable: true},
 	// Lacerate (Thief): sequence Bleed (same as Rend), lighter hit — stacks alongside Poison (separate counters).
 	{Skill: SkillLacerate, Name: "Lacerate", Description: "STR-scaled phys cut that opens a Bleed — stacks alongside Poison. Sequence.", Cost: 4, TargetMode: ActionEnemyTarget, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigameSequence, Effect: SkillEffect{Damage: LacerateDamageBase, BleedChance: LacerateBleedChance, BleedMinTurns: BleedMinTurns, BleedMaxTurns: BleedMaxTurns}, PlayerCastable: true},
+	// Searing Light (Cleric): WIS-scaled magic + a radiant Burn DoT (reuses the Burn
+	// counter, like Arc Bolt's lightning burn) — Smite's damage-over-time sibling. Charge.
+	{Skill: SkillSearingLight, Name: "Searing Light", Description: "WIS-scaled radiant magic that sears a Burn into the target — damage over time. Charge.", Cost: 4, TargetMode: ActionEnemyTarget, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: SearingLightDamageBase, BurnChance: SearingLightBurnChance, BurnMinTurns: FireBurnMinTurns, BurnMaxTurns: FireBurnMaxTurns}, PlayerCastable: true},
+	// Immolate (Wizard): AoE fire that GUARANTEES a long Burn on every enemy (BurnChance
+	// 1.0) — the sustained-zone counterpart to Fireball. Charge.
+	{Skill: SkillImmolate, Name: "Immolate", Description: "INT-scaled fire across the whole pack that sets every enemy ablaze — a long, guaranteed Burn. Charge.", Cost: 8, TargetMode: ActionMenu, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: ImmolateDamageBase, AppliesAOEEnemies: true, BurnChance: 1.0, BurnMinTurns: ImmolateBurnMinTurns, BurnMaxTurns: ImmolateBurnMaxTurns}, PlayerCastable: true},
+	// Mug (Thief): a phys strike that also attempts a Steal in one hit (sequence timing
+	// drives the lift chance).
+	{Skill: SkillMug, Name: "Mug", Description: "STR-scaled phys hit that also tries to pickpocket the target. Sequence — timing drives the lift.", Cost: 2, TargetMode: ActionEnemyTarget, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigameSequence, Effect: SkillEffect{Damage: MugDamageBase, StealChance: MugStealChance}, PlayerCastable: true},
+	// Chain Lightning (Wizard): AoE lightning + a per-target Stun chance (the shock),
+	// via applyAoEStatusSkill's StunChance roll. Charge.
+	{Skill: SkillChainLightning, Name: "Chain Lightning", Description: "INT-scaled lightning that leaps across the whole pack, with a chance to Stun each enemy. Charge.", Cost: 7, TargetMode: ActionMenu, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: ChainLightningDamageBase, AppliesAOEEnemies: true, StunChance: ChainLightningStunChance, StunMinTurns: ChainLightningStunTurns, StunMaxTurns: ChainLightningStunTurns}, PlayerCastable: true},
+	// Static Field (Wizard): damage as a SHARE of the target's CURRENT HP (Utility-kind so
+	// no stat scaling); the handler deals it SkillTagNone, bypassing defenses. No flat damage.
+	{Skill: SkillStaticField, Name: "Static Field", Description: "A field that saps a share of the target's current HP — bypasses armor. Hits hardest on the healthiest foe. Press.", Cost: 5, TargetMode: ActionEnemyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{PercentCurrentHP: StaticFieldPercentCurrentHP}, PlayerCastable: true},
+	// Guard (Warrior): cover an ally — their incoming hits redirect to the guardian until
+	// the guardian's next turn. No damage; always lands; NoUpgrades (binary cover).
+	{Skill: SkillGuard, Name: "Guard", Description: "Cover an ally — their incoming hits fall on you instead, until your next turn. No damage.", Cost: 3, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagBuff, Minigame: MinigamePress, Effect: SkillEffect{}, PlayerCastable: true, NoUpgrades: true},
+	// Consecrate (Cleric): WIS-scaled radiant magic across the whole pack. Charge.
+	{Skill: SkillConsecrate, Name: "Consecrate", Description: "Hallow the ground — radiant WIS-scaled magic strikes every enemy. Charge.", Cost: 7, TargetMode: ActionMenu, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: ConsecrateDamageBase, AppliesAOEEnemies: true}, PlayerCastable: true},
+	// Judgment (Cleric): execute a foe at/under JudgmentExecuteFraction HP, else heavy magic. NoUpgrades.
+	{Skill: SkillJudgment, Name: "Judgment", Description: "Pass judgment — a foe near death is executed outright; otherwise it takes heavy radiant magic. Press.", Cost: 8, TargetMode: ActionEnemyTarget, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{Damage: JudgmentDamageBase}, PlayerCastable: true, NoUpgrades: true},
+	// Reckless Swing (Warrior): heavy STR phys hit that sheds the swinger's own Armor a turn. Charge.
+	{Skill: SkillRecklessSwing, Name: "Reckless Swing", Description: "A wild, heavy hit — big STR damage, but you drop your guard (Armor) for a turn. Charge.", Cost: 3, TargetMode: ActionEnemyTarget, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigameCharge, Effect: SkillEffect{Damage: RecklessSwingDamageBase}, PlayerCastable: true},
+	// Combust (Wizard): detonate the target's remaining Burn for a per-turn spike, consuming it. Press.
+	{Skill: SkillCombust, Name: "Combust", Description: "Detonate a burning foe — the more Burn left, the bigger the blast. Consumes the Burn. Press.", Cost: 4, TargetMode: ActionEnemyTarget, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{Damage: 1}, PlayerCastable: true},
+	// Bulwark of Faith (Cleric): party-wide Armor + MDef aura. NoUpgrades.
+	{Skill: SkillBulwark, Name: "Bulwark of Faith", Description: "Raise a sacred aegis — the whole party gains Armor and MDef for several turns. No damage.", Cost: 6, TargetMode: ActionMenu, Kind: SkillKindUtility, Tag: SkillTagBuff, Minigame: MinigamePress, Effect: SkillEffect{BuffArmor: BulwarkArmor, BuffMDef: BulwarkMDef, BuffTurns: BulwarkTurns, AppliesAOEPartyBuff: true}, PlayerCastable: true, NoUpgrades: true},
+	// Dispel (Wizard): strip the target enemy's beneficial StatusMods. No damage. NoUpgrades.
+	{Skill: SkillDispel, Name: "Dispel", Description: "Unravel an enemy's magic — strip any beneficial effect from the target. No damage.", Cost: 3, TargetMode: ActionEnemyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{}, PlayerCastable: true, NoUpgrades: true},
+	// Vanish (Thief): become untargetable for a turn and drop aggro. Self, no damage. NoUpgrades.
+	{Skill: SkillVanish, Name: "Vanish", Description: "Slip into shadow — enemies can't target you until your next turn. No damage.", Cost: 3, TargetMode: ActionMenu, Kind: SkillKindUtility, Tag: SkillTagBuff, Minigame: MinigamePress, Effect: SkillEffect{}, PlayerCastable: true, NoUpgrades: true},
+	// Martyr's Bond (Cleric): cover a living ally — their hits redirect to the Cleric (shares Guard). NoUpgrades.
+	{Skill: SkillMartyrsBond, Name: "Martyr's Bond", Description: "Bond with an ally — their incoming blows fall on you instead, until your next turn. No damage.", Cost: 4, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagBuff, Minigame: MinigamePress, Effect: SkillEffect{}, PlayerCastable: true, NoUpgrades: true},
+	// Resurrect (Cleric): revive the first downed ally at a fraction of MaxHP. NoUpgrades.
+	{Skill: SkillResurrect, Name: "Resurrect", Description: "Call a fallen ally back to life at part of their health. Press.", Cost: 10, TargetMode: ActionMenu, Kind: SkillKindHeal, Tag: SkillTagHeal, Minigame: MinigamePress, Effect: SkillEffect{}, PlayerCastable: true, NoUpgrades: true},
+	// Meteor (Wizard): a massive AoE that lands after a fuse. INT-scaled at cast. NoUpgrades.
+	{Skill: SkillMeteor, Name: "Meteor", Description: "Call down a meteor — after a short delay it crashes across the whole pack for massive INT-scaled damage. Charge.", Cost: 12, TargetMode: ActionMenu, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: MeteorDamageBase, AppliesAOEEnemies: true}, PlayerCastable: true, NoUpgrades: true},
+	// Ancestral Spirit (Warrior): conjure a shade that strikes alongside the summoner each turn. NoUpgrades.
+	{Skill: SkillAncestralSpirit, Name: "Ancestral Spirit", Description: "Summon a warrior shade — it strikes a foe alongside you each turn for a while. No direct damage on cast.", Cost: 6, TargetMode: ActionMenu, Kind: SkillKindUtility, Tag: SkillTagBuff, Minigame: MinigamePress, Effect: SkillEffect{}, PlayerCastable: true, NoUpgrades: true},
 	// Arc Bolt (Wizard): recall AoE magic — quality-scaled damage to all living enemies.
 	{Skill: SkillArcBolt, Name: "Arc Bolt", Description: "INT-scaled magic AoE. Memorize the glyph pattern, then recall it — arcs to every enemy.", Cost: 7, TargetMode: ActionMenu, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameRecall, Effect: SkillEffect{Damage: 0, AppliesAOEEnemies: true}, PlayerCastable: true},
 	// Scan (Thief): no damage; IDs the target's kind (Bestiary.MarkScanned,
@@ -475,8 +518,8 @@ func SkillUsableOutOfBattle(skill SkillID) bool {
 		e.BuffArmor != 0 || e.BuffMDef != 0 || e.AppliesAOEPartyBuff || e.BuffStats != (Stats{}) {
 		return false
 	}
-	// Beneficial: restores HP, or cures status (Cleanse — its cure isn't an Effect field).
-	return e.Heal > 0 || skill == SkillCleanse
+	// Beneficial: restores HP, or cures status (a cure isn't an Effect field).
+	return e.Heal > 0 || SkillCuresDebuffs(skill)
 }
 
 // OutOfBattleSkillScope classifies how an out-of-battle support skill applies, so
@@ -985,6 +1028,9 @@ const (
 	// Positive defensive wards (Aegis ShieldHP / Ice Armor) — with Bless/Regen.
 	PartyStatusShielded
 	PartyStatusIceArmor
+	// Guarding: the Warrior is actively covering an ally (Guard). A defensive
+	// commitment, ranked just above the one-shot Defending brace.
+	PartyStatusGuarding
 	PartyStatusDefending
 	// PartyStatusCount is the length-assert sentinel; new kinds slot in above it.
 	PartyStatusCount
@@ -1035,6 +1081,7 @@ var partyStatusBands = []struct {
 	{PartyStatusRegen, "REGEN", func(m *PartyMember) (bool, int) { return m.RegenTurns > 0, m.RegenTurns }},
 	{PartyStatusShielded, "SHIELD", func(m *PartyMember) (bool, int) { return m.ShieldHP > 0, m.ShieldHP }},
 	{PartyStatusIceArmor, "ICE ARMOR", func(m *PartyMember) (bool, int) { return m.IceArmorTurns > 0, m.IceArmorTurns }},
+	{PartyStatusGuarding, "GUARDING", func(m *PartyMember) (bool, int) { return m.Guarding, 0 }},
 	{PartyStatusDefending, "DEFENDING", func(m *PartyMember) (bool, int) { return m.Defending, 0 }},
 }
 

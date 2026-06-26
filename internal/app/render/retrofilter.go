@@ -1,6 +1,9 @@
 package render
 
 import (
+	"fmt"
+	"strings"
+
 	"crawler/internal/app/core"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -45,6 +48,40 @@ func init() {
 		if name == "" {
 			panic("render: retroUniformNames missing an entry for RetroFilterKind " + core.RetroFilterName(core.RetroFilterKind(k)))
 		}
+	}
+}
+
+// init asserts the retro shader's bayer[]/gbRamp[] GLSL constants still carry the
+// exact values of their Go twins in spriteedit.go (bayer4x4 / gbGreenRamp). GLSL
+// arrays can't be shared, so the CPU palette filter mirrors them by hand; editing
+// one side without the other now panics at startup instead of drifting silently.
+func init() {
+	src := strings.NewReplacer(" ", "", "\n", "", "\t", "").Replace(retroFilterFragmentShader)
+
+	var bayer strings.Builder
+	bayer.WriteString("float[16](")
+	for i, v := range bayer4x4 {
+		if i > 0 {
+			bayer.WriteByte(',')
+		}
+		fmt.Fprintf(&bayer, "%.1f", v)
+	}
+	bayer.WriteByte(')')
+	if !strings.Contains(src, bayer.String()) {
+		panic("render: retro shader bayer[] disagrees with bayer4x4 (spriteedit.go) — mirror the change to both")
+	}
+
+	var ramp strings.Builder
+	ramp.WriteString("vec3[4](")
+	for i, c := range gbGreenRamp {
+		if i > 0 {
+			ramp.WriteByte(',')
+		}
+		fmt.Fprintf(&ramp, "vec3(%.3f,%.3f,%.3f)", c[0], c[1], c[2])
+	}
+	ramp.WriteByte(')')
+	if !strings.Contains(src, ramp.String()) {
+		panic("render: retro shader gbRamp[] disagrees with gbGreenRamp (spriteedit.go) — mirror the change to both")
 	}
 }
 

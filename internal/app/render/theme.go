@@ -19,6 +19,25 @@ const tau = 6.2831853
 // degToRad converts degrees to radians (π/180).
 const degToRad = float32(math.Pi / 180)
 
+// worldUp is the +Y world-up / yaw axis, shared by every billboard, look-at, and
+// yaw rotation so the literal isn't re-created at each call site. Passed by value
+// (raylib copies the struct), so callers can't mutate the shared vector.
+var worldUp = rl.NewVector3(0, 1, 0)
+
+// indexInRange reports whether i is a valid index into a length-n table.
+func indexInRange(i, n int) bool { return i >= 0 && i < n }
+
+// clampTableIndex returns idx when it indexes a length-n table, else fallback —
+// the shared "a corrupt save / stray enum value fails soft to a known-present row"
+// guard for the fixed visual tables (rainVisuals, doorProps, …) indexed by an
+// on-disk enum.
+func clampTableIndex[T ~int](idx T, n int, fallback T) T {
+	if indexInRange(int(idx), n) {
+		return idx
+	}
+	return fallback
+}
+
 // hashSalt is Knuth's multiplicative-hash constant (golden-ratio odd multiplier,
 // 0x9E3779B9) for spreading seeds across the 32-bit hash space.
 const hashSalt = uint32(2654435761)
@@ -243,6 +262,9 @@ var (
 	// statusIceArmor: POSITIVE frost ward — pale icy blue-white, cooler than
 	// statusSleep. Never flickers.
 	statusIceArmor = mute(rl.NewColor(186, 226, 248, 240))
+	// statusGuarding: POSITIVE cover commitment (Warrior's Guard) — a steely azure,
+	// deeper than statusDefending's brighter block-blue. Never flickers.
+	statusGuarding = mute(rl.NewColor(150, 172, 214, 240))
 	// Outline tints paired with the fills above for the enemy-pill silhouette
 	// (lighter/more saturated = "glow with a hard rim").
 	statusBurnOutline   = mute(rl.NewColor(255, 200, 120, 220))
@@ -503,6 +525,9 @@ const (
 	focusPlateInsetY = int32(2)
 	menuRowInsetX    = int32(18)
 	menuRowInsetY    = int32(6)
+	// menuRowTextInsetX is the pause-menu label's inset from the row's text origin
+	// (the plate bleeds left by menuRowInsetX; the label sits in by this).
+	menuRowTextInsetX = int32(12)
 
 	// Heading underline minimum width (so short headings still read as labelled)
 	// + drawBar value/label pads.

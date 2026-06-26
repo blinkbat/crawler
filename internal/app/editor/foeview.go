@@ -163,24 +163,39 @@ func init() {
 	}
 }
 
-// assetActionLabels is the Asset tab's button row; slice index IS the action
-// identity (assetActionRevert, …) the click handlers dispatch on. Add an action
-// by appending a label AND a switch case (a caseless label is a visible gap, not
-// a silent Revert). PNG import is the drag-drop path, not a button.
-var assetActionLabels = []string{"Revert"}
+// assetAction is one Asset-tab button: its label and what it does to the override,
+// in one row (like modalCmd / dropdownEntry) so a label can't drift from its
+// behavior. Add an action by appending an entry here — no parallel index const or
+// switch case to keep in step. PNG import is the drag-drop path, not a button.
+type assetAction struct {
+	label string
+	apply func(s *State, ov *core.EnemyVisualOverride)
+}
 
-const assetActionRevert = 0
-
-// applyAssetAction runs Asset-tab button `i` against override `ov` (shared).
-// default is an explicit no-op so a caseless label reads as a gap, not Revert.
-func applyAssetAction(s *State, ov *core.EnemyVisualOverride, i int) {
-	switch i {
-	case assetActionRevert:
+var assetActions = []assetAction{
+	{"Revert", func(s *State, ov *core.EnemyVisualOverride) {
 		clearVisualAdjustments(ov)
 		s.assetPreviewStale = true
 		s.flash("Reverted sprite FX (" + assetFieldNames() + ")")
-	default:
+	}},
+}
+
+// assetActionLabels are the Asset tab's button labels, derived from assetActions.
+var assetActionLabels = func() []string {
+	out := make([]string, len(assetActions))
+	for i, a := range assetActions {
+		out[i] = a.label
 	}
+	return out
+}()
+
+// applyAssetAction runs Asset-tab button `i` against override `ov` (shared);
+// out-of-range is an explicit no-op.
+func applyAssetAction(s *State, ov *core.EnemyVisualOverride, i int) {
+	if i < 0 || i >= len(assetActions) {
+		return
+	}
+	assetActions[i].apply(s, ov)
 }
 
 // savedVisualFlash is the save toast for both Visualizers (which also re-bake the

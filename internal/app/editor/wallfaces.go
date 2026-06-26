@@ -26,8 +26,10 @@ func openWallFacesModal(s *State, x, z int) {
 // wallFaceDirs: base skin (dir -1) then each cardinal override (core facing values).
 var wallFaceDirs = []int{-1, core.North, core.East, core.South, core.West}
 
-// wallFaceCmds rebuilds the rows each frame so labels reflect the live skin.
-func wallFaceCmds(s *State) []modalCmd {
+// wallFacesLayout rebuilds the rows (labels reflect the live skin) AND their button
+// rects in one place, so the cmd dropdown anchors, the draw pass, and the click
+// hit-test all share one geometry instead of each re-deriving the stack.
+func wallFacesLayout(s *State) (cmds []modalCmd, rects []rl.Rectangle) {
 	x, z := s.wallFaceX, s.wallFaceZ
 	labels := make([]string, len(wallFaceDirs))
 	for i, d := range wallFaceDirs {
@@ -42,8 +44,8 @@ func wallFaceCmds(s *State) []modalCmd {
 		}
 		labels[i] = face + ":  " + core.FaceSkinName(skin)
 	}
-	rects := modalButtonStack(centeredCardRect(wallFacesModalW, wallFacesModalH), labels)
-	cmds := make([]modalCmd, len(wallFaceDirs))
+	rects = modalButtonStack(centeredCardRect(wallFacesModalW, wallFacesModalH), labels)
+	cmds = make([]modalCmd, len(wallFaceDirs))
 	for i, d := range wallFaceDirs {
 		dir := d
 		anchor := rects[i]
@@ -53,14 +55,14 @@ func wallFaceCmds(s *State) []modalCmd {
 			return ActionNone
 		}}
 	}
-	return cmds
+	return cmds, rects
 }
 
 func drawWallFacesModal(s *State, font rl.Font, theme render.Theme) {
 	card := drawModalHeader(font, theme, wallFacesModalW, wallFacesModalH,
 		"WALL FACES AT "+core.TileCoord(s.wallFaceX, s.wallFaceZ), theme.BorderActive)
-	labels := cmdLabels(wallFaceCmds(s))
-	drawModalButtons(font, modalButtonStack(card, labels), labels)
+	cmds, rects := wallFacesLayout(s)
+	drawModalButtons(font, rects, cmdLabels(cmds))
 	render.DrawTextWithShadow(font, "Pick a face to set its cliff-face skin · Esc closes",
 		card.X+modalContentInset, card.Y+44, editorFontHint, theme.TextHint)
 }
@@ -75,8 +77,7 @@ func updateWallFacesModal(s *State) Action {
 		closeModal(s)
 		return ActionNone
 	}
-	cmds := wallFaceCmds(s)
-	rects := modalButtonStack(centeredCardRect(wallFacesModalW, wallFacesModalH), cmdLabels(cmds))
+	cmds, rects := wallFacesLayout(s)
 	if act, ran := runModalCmds(cmds, rects); ran {
 		return act
 	}

@@ -367,7 +367,7 @@ func drawMenuRow(font rl.Font, text string, x, y, innerW int32, selected bool) {
 	if selected {
 		DrawSelectedRowI(x-menuRowInsetX, y-menuRowInsetY, innerW, pauseMenuRowH)
 	}
-	drawEngravedText(font, text, float32(x+12), float32(y), FontHeading, textPrimary)
+	drawEngravedText(font, text, float32(x+menuRowTextInsetX), float32(y), FontHeading, textPrimary)
 }
 
 // DrawQuitConfirm paints the quit-confirm modal (g.QuitConfirmOpen): engraved

@@ -342,11 +342,22 @@ const (
 	//   RetributionReflectPerRank — Cleric Conviction: reflect this share of damage taken.
 	//   ShadowStepBonusPerRank    — Thief Shadow Arts: +single-target damage when striking first.
 	//   RiposteDamageMult         — Warrior Battle Sense: dodge counter damage (single rank).
+	//   CrimsonRampageMaxBonus    — Warrior Fury capstone: +dmg share at 0 HP (scales with missing HP).
+	//   ShatterBonusVsControlled  — Wizard Cryomancy capstone: +single-target dmg vs a stunned/frozen foe.
+	//   FleetFootedSPDPerRank     — Thief Cutpurse: +SPD/rank.
+	//   FleetFootedDodgePerRank   — Thief Cutpurse: +dodge chance/rank.
+	//   KillingSpreeReadiness     — Thief Cutpurse capstone: ATB gauge granted on a kill (single rank).
+	//   OvderchargeFreeCastChance — (see Overcharge block) Wizard Storm capstone.
 	LuckyStrikeCritPerRank    = 0.05
 	BloodthirstHealPerRank    = 0.10
 	RetributionReflectPerRank = 0.20
 	ShadowStepBonusPerRank    = 0.15
 	RiposteDamageMult         = 0.75
+	CrimsonRampageMaxBonus    = 1.0                   // at 1 HP a Fury Warrior hits ~twice as hard
+	ShatterBonusVsControlled  = 0.5                   // +50% to a single-target hit on a stunned/frozen foe
+	FleetFootedSPDPerRank     = 1                     // +SPD per rank (folded into actorSpeed)
+	FleetFootedDodgePerRank   = 0.04                  // +dodge chance per rank
+	KillingSpreeReadiness     = ATBReadyThreshold / 2 // ~half a turn's gauge on a kill
 
 	// StatusShortenDivisor: each this-many WIS shaves one turn off a rolled
 	// enemy-applied status duration. Floor 1 (shortens, never skips).
@@ -661,6 +672,54 @@ const (
 	// SkillLacerate (Thief, Venomancy): same Bleed DoT as Rend, flavored to stack with
 	// the tree's Poison (separate counters).
 	SkillLacerate
+	// SkillSearingLight (Cleric, Radiance): WIS-scaled magic + a radiant Burn DoT
+	// (reuses Enemy.BurnTurns, like Arc Bolt's lightning burn) — Smite's DoT sibling.
+	SkillSearingLight
+	// SkillImmolate (Wizard, Pyromancy): AoE fire that GUARANTEES a long Burn on every
+	// target — the sustained-zone counterpart to Fireball (trades upfront damage for DoT).
+	SkillImmolate
+	// SkillMug (Thief, Cutpurse): a phys strike that also attempts a Steal in one hit
+	// (sequence timing drives the lift chance).
+	SkillMug
+	// SkillChainLightning (Wizard, Storm): AoE lightning with a per-target Stun chance
+	// (the shock) — rides applyAoEStatusSkill's StunChance roll.
+	SkillChainLightning
+	// SkillStaticField (Wizard, Storm): damage as a SHARE of the target's CURRENT HP
+	// (effect.PercentCurrentHP), SkillTagNone so it bypasses defenses. Floored at 1.
+	SkillStaticField
+	// SkillGuard (Warrior, Battle Sense): cover an ally — their incoming hits redirect
+	// to the guardian until the guardian's next turn. No magnitude (NoUpgrades).
+	SkillGuard
+	// SkillConsecrate (Cleric, Radiance): WIS-scaled radiant magic across the whole pack.
+	SkillConsecrate
+	// SkillJudgment (Cleric, Radiance capstone): executes a foe at/under JudgmentExecuteFraction
+	// of its HP, else heavy WIS-scaled magic. NoUpgrades.
+	SkillJudgment
+	// SkillRecklessSwing (Warrior, Fury): a heavy STR-scaled phys hit that sheds the
+	// swinger's own Armor (negative self-buff) for a turn.
+	SkillRecklessSwing
+	// SkillCombust (Wizard, Pyromancy): detonates the target's remaining Burn for a
+	// per-turn magic spike, consuming it.
+	SkillCombust
+	// SkillBulwark (Cleric, Conviction capstone): party-wide Armor + MDef aura. NoUpgrades.
+	SkillBulwark
+	// SkillDispel (Wizard, Storm): strips the target enemy's beneficial StatusMods. NoUpgrades.
+	SkillDispel
+	// SkillVanish (Thief, Shadow Arts): the caster becomes untargetable (VanishTurns)
+	// for a turn and drops aggro. NoUpgrades.
+	SkillVanish
+	// SkillMartyrsBond (Cleric, Conviction): the Cleric covers an ally — its incoming
+	// hits redirect to the Cleric (shares the Guard cover mechanic). NoUpgrades.
+	SkillMartyrsBond
+	// SkillResurrect (Cleric, Mercy capstone): revives the first downed party member
+	// at a fraction of MaxHP. NoUpgrades.
+	SkillResurrect
+	// SkillMeteor (Wizard, Pyromancy capstone): a massive AoE that lands after a fuse
+	// (Battle.MeteorFuse), resolved at end-of-turn. NoUpgrades.
+	SkillMeteor
+	// SkillAncestralSpirit (Warrior, Ancestral Call): conjures a shade that strikes a
+	// foe alongside the summoner each of its turns for AncestralSpiritTurns. NoUpgrades.
+	SkillAncestralSpirit
 
 	skillIDCount // sentinel: SkillID cardinality (assertAppendOnly coverage)
 )
@@ -683,6 +742,12 @@ func init() {
 		SkillWarBanner, SkillStoneSkin, SkillBlind,
 		SkillAegis, SkillSmokeBomb, SkillIceArmor,
 		SkillRend, SkillLacerate,
+		SkillSearingLight, SkillImmolate, SkillMug,
+		SkillChainLightning, SkillStaticField, SkillGuard,
+		SkillConsecrate, SkillJudgment, SkillRecklessSwing,
+		SkillCombust, SkillBulwark, SkillDispel,
+		SkillVanish, SkillMartyrsBond, SkillResurrect,
+		SkillMeteor, SkillAncestralSpirit,
 	)
 }
 
@@ -829,6 +894,117 @@ const (
 	// Renewal is Heal-kind: the per-turn amount snapshots WIS-scaled value at cast.
 	RenewalRegenBase  = 2 // base per-turn heal (tier 0)
 	RenewalRegenTurns = 3 // base duration (fixed)
+)
+
+// Searing Light (Cleric, Radiance) tuning — WIS-scaled magic + a radiant Burn DoT.
+// Reuses the Burn counter (Enemy.BurnTurns) at the fire-burn duration; the Cleric's
+// Smite-with-a-DoT. High chance so the burn reads reliable.
+const (
+	SearingLightDamageBase = 1
+	SearingLightBurnChance = 0.85
+)
+
+// Immolate (Wizard, Pyromancy) tuning — AoE fire that GUARANTEES a long Burn on
+// every target (BurnChance 1.0), trading Fireball's upfront damage for the DoT.
+const (
+	ImmolateDamageBase   = 1
+	ImmolateBurnMinTurns = 3 // longer than FireBurnMin/MaxTurns — a sustained zone
+	ImmolateBurnMaxTurns = 4
+)
+
+// Mug (Thief, Cutpurse) tuning — a phys strike that also attempts a Steal in one
+// hit. Lift chance sits below dedicated Steal (StealBaseChance) since it also damages.
+const (
+	MugDamageBase  = 2
+	MugStealChance = 0.30
+)
+
+// Chain Lightning (Wizard, Storm) tuning — AoE lightning + a per-target Stun chance
+// (the shock). Rides applyAoEStatusSkill's StunChance roll (0 short-circuits for
+// every other AoE skill, so this is the lone whole-pack stunner).
+const (
+	ChainLightningDamageBase = 1
+	ChainLightningStunChance = 0.25
+	ChainLightningStunTurns  = 1 // brief — a pack-wide stun must stay short
+)
+
+// Static Field (Wizard, Storm) tuning — damage as a SHARE of the target's CURRENT
+// HP, dealt SkillTagNone (bypasses Armor/MDef: a fixed fraction, not a normal hit),
+// floored at 1. Scales hard on big foes, chips on the rest.
+const (
+	StaticFieldPercentCurrentHP = 0.18 // tier-0 share of current HP
+	StaticFieldPercentPerTier   = 0.06 // +share per purchased tier
+)
+
+// Overcharge (Wizard, Storm capstone) tuning — passive MP economy: a per-turn MP
+// trickle plus a chance any cast costs nothing (checked in the MP chokepoint).
+const (
+	OverchargeFreeCastChance = 0.35 // chance a cast spends 0 MP
+	OverchargeMPRegenPerTurn = 1    // MP regained at the caster's end of turn
+)
+
+// Plague (Thief, Venomancy capstone) tuning — when a POISONED enemy dies and any
+// Thief holds the node, its poison leaps to the other living enemies.
+const (
+	PlagueSpreadMinTurns = 2
+	PlagueSpreadMaxTurns = 3
+)
+
+// Judgment (Cleric, Radiance capstone) tuning — execute: a target at/under the HP
+// fraction is slain outright, else takes heavy WIS-scaled magic.
+const (
+	JudgmentExecuteFraction = 0.25 // current-HP fraction at/under which the foe is executed
+	JudgmentDamageBase      = 6    // base magic damage when not executed (WIS-scaled)
+)
+
+// Combust (Wizard, Pyromancy) tuning — detonate the target's remaining Burn for a
+// spike (per-remaining-turn), consuming the Burn. Tier ladder adds per-turn punch.
+const (
+	CombustDamagePerBurnTurn = 4 // magic damage per remaining Burn turn (tier 0)
+)
+
+// Consecrate (Cleric, Radiance) + Reckless Swing (Warrior, Fury) tuning.
+const (
+	ConsecrateDamageBase    = 2 // tier-0 per-target radiant damage (WIS-scaled magic AoE)
+	RecklessSwingDamageBase = 5 // tier-0 heavy phys hit (STR-scaled)
+	RecklessSwingSelfArmor  = 3 // Armor the swinger sheds for a turn (self-debuff)
+	RecklessSwingSelfTurns  = 1
+)
+
+// Bulwark of Faith (Cleric, Conviction capstone) tuning — party-wide Armor + MDef aura.
+const (
+	BulwarkArmor = 3
+	BulwarkMDef  = 3
+	BulwarkTurns = 4
+)
+
+// Meteor (Wizard, Pyromancy capstone) tuning — a massive AoE that lands after a
+// fuse (Battle.MeteorFuse counts actor-turns down; resolves at end-of-turn).
+const (
+	MeteorDamageBase = 14 // per-target magic damage when it lands (INT-scaled at cast)
+	// MeteorFuseTurns counts the cast turn's own end-of-turn tick plus the turns that
+	// pass before it falls — so 3 means it lands after two other turns.
+	MeteorFuseTurns = 3
+)
+
+// Vanish (Thief, Shadow Arts) tuning — untargetable window. 2 so it survives the
+// cast turn's own end-of-turn drain and shields through the enemies' turns.
+const (
+	VanishDuration = 2
+)
+
+// Resurrect (Cleric, Mercy capstone) tuning — revives a downed ally at this share
+// of MaxHP.
+const (
+	ResurrectHealPercent = 0.5
+)
+
+// Ancestral Spirit (Warrior, Ancestral Call) tuning — a conjured shade that strikes
+// alongside the summoner each of its turns. Damage is a share of the summoner's
+// basic attack. AncestralSpiritTurns + 1 accounts for the cast turn's own drain.
+const (
+	AncestralSpiritTurns      = 4
+	AncestralSpiritDamageMult = 0.6
 )
 
 // XP / level constants. Per-character, geometric per-level cost: LevelXPBase ×

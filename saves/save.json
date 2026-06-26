@@ -5,24 +5,25 @@
   "playerTileZ": 24,
   "playerFacing": 0,
   "playerLevel": 10,
-  "stepCount": 1790,
-  "gold": 99,
+  "stepCount": 2336,
+  "gold": 134,
   "party": [
     {
       "Class": 0,
       "Name": "Warrior",
       "Stats": {
-        "STR": 6,
+        "STR": 8,
         "DEX": 2,
         "INT": 1,
         "WIS": 1,
         "VIT": 8,
-        "SPD": 3
+        "SPD": 4
       },
       "HP": 16,
       "MaxHP": 16,
-      "MP": 4,
+      "MP": 0,
       "MaxMP": 4,
+      "Hunger": 450,
       "Armor": 0,
       "Equipped": [
         0,
@@ -57,10 +58,10 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 2,
-      "XP": 186,
+      "Level": 3,
+      "XP": 81,
       "PendingLevelUps": 0,
-      "SkillPoints": 0,
+      "SkillPoints": 1,
       "SkillTiers": {
         "1": 0,
         "38": 0
@@ -69,7 +70,7 @@
         "cleave": 1,
         "rend": 1
       },
-      "SkillCursor": 0
+      "SkillCursor": 1
     },
     {
       "Class": 1,
@@ -80,12 +81,13 @@
         "INT": 2,
         "WIS": 6,
         "VIT": 7,
-        "SPD": 4
+        "SPD": 7
       },
       "HP": 14,
       "MaxHP": 14,
-      "MP": 9,
+      "MP": 0,
       "MaxMP": 9,
+      "Hunger": 396,
       "Armor": 0,
       "Equipped": [
         11,
@@ -120,10 +122,10 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 2,
-      "XP": 186,
+      "Level": 3,
+      "XP": 81,
       "PendingLevelUps": 0,
-      "SkillPoints": 0,
+      "SkillPoints": 1,
       "SkillTiers": {
         "8": 0
       },
@@ -142,12 +144,13 @@
         "INT": 2,
         "WIS": 1,
         "VIT": 7,
-        "SPD": 6
+        "SPD": 9
       },
       "HP": 14,
       "MaxHP": 14,
-      "MP": 5,
+      "MP": 2,
       "MaxMP": 5,
+      "Hunger": 396,
       "Armor": 0,
       "Equipped": [
         0,
@@ -163,7 +166,7 @@
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 2,
+      "DamagePopup": 1,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "SwapSlide": 0,
@@ -182,10 +185,10 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 2,
-      "XP": 186,
+      "Level": 3,
+      "XP": 81,
       "PendingLevelUps": 0,
-      "SkillPoints": 0,
+      "SkillPoints": 1,
       "SkillTiers": {
         "3": 0,
         "9": 0
@@ -205,12 +208,13 @@
         "INT": 6,
         "WIS": 2,
         "VIT": 7,
-        "SPD": 4
+        "SPD": 7
       },
       "HP": 14,
       "MaxHP": 14,
-      "MP": 10,
+      "MP": 3,
       "MaxMP": 10,
+      "Hunger": 396,
       "Armor": 0,
       "Equipped": [
         11,
@@ -245,10 +249,10 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 2,
-      "XP": 186,
+      "Level": 3,
+      "XP": 81,
       "PendingLevelUps": 0,
-      "SkillPoints": 0,
+      "SkillPoints": 1,
       "SkillTiers": {
         "12": 0
       },
@@ -269,12 +273,12 @@
       "Count": 2
     },
     {
-      "Kind": 2,
+      "Kind": 1,
       "Count": 2
     },
     {
-      "Kind": 1,
-      "Count": 3
+      "Kind": 11,
+      "Count": 1
     }
   ],
   "quests": [
@@ -287,16 +291,16 @@
   ],
   "bestiary": {
     "0": {
-      "kills": 28
+      "kills": 37
     },
     "1": {
-      "kills": 7
+      "kills": 10
     },
     "2": {
-      "kills": 4
+      "kills": 5
     },
     "3": {
-      "kills": 3
+      "kills": 4
     }
   },
   "crystals": [

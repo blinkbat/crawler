@@ -20,10 +20,7 @@ func DrawDoors(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		}
 		yaw := southFacingYaw(d.Facing)
 		// Out-of-range style falls back to Building (index 0, always present).
-		style := d.Style
-		if style < 0 || int(style) >= len(assets.doorProps) {
-			style = core.DoorStyleBuilding
-		}
+		style := clampTableIndex(d.Style, len(assets.doorProps), core.DoorStyleBuilding)
 		assets.doorProps[style].draw(center, 1.0, yaw)
 	}
 }

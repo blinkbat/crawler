@@ -211,10 +211,10 @@ func applyUseToMember(g *core.GameState, member int) {
 			break
 		}
 		g.Inventory = inv
-		// Feed first: a big enough meal lifts Starving so the food's own heal can land.
-		core.FeedMember(m, def.SatietyGain)
-		core.HealMember(m, def.HealAmount)
-		core.RestoreMP(m, def.MPAmount)
+		// core.ApplyRestorative owns the feed→heal→restore order (shared with battle).
+		res := core.ApplyRestorative(m, def)
+		// Consuming an item out of combat is a real action — log it like the battle path.
+		g.LogMessageCat(core.ItemUseMessage(m.Name, def, res), core.RestorativeUseCategory(res))
 		audio.Play(audio.SoundHeal)
 	case g.UsePendingSkill != core.SkillNone:
 		skill := g.UsePendingSkill
@@ -230,7 +230,7 @@ func applyUseToMember(g *core.GameState, member int) {
 		}
 		// Don't burn MP on a cast that does nothing: a cure needs a curable debuff,
 		// a heal needs missing HP. Checked before spending MP (mirrors the battle guards).
-		cure := skill == core.SkillCleanse
+		cure := core.SkillCuresDebuffs(skill)
 		if (cure && !core.HasCurableDebuff(recipient)) || (!cure && !core.MemberCanBeHealed(*recipient)) {
 			audio.Play(audio.SoundInputMiss)
 			break

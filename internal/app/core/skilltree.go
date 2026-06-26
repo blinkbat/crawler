@@ -55,10 +55,11 @@ type SkillEffectDelta struct {
 	ArmorReduction int // Corrosive Vial armor-strip delta
 	ATBPush        int // Sunder readiness-shove delta
 	// BuffArmor / BuffMDef: Stone Skin ward deltas.
-	BuffArmor     int
-	BuffMDef      int
-	ShieldHP      int // Aegis absorb-pool delta
-	IceArmorTurns int // Ice Armor duration delta
+	BuffArmor        int
+	BuffMDef         int
+	ShieldHP         int     // Aegis absorb-pool delta
+	IceArmorTurns    int     // Ice Armor duration delta
+	PercentCurrentHP float64 // Static Field %-current-HP delta
 }
 
 // tier builds one SkillTierUpgrade row with Cost defaulting to 1 SkillPoint.
@@ -228,6 +229,47 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 		tier(2, "+1 Bleed turn", "The wound bleeds one turn longer on min and max rolls.", SkillEffectDelta{BleedMinTurns: StatusTurnStep, BleedMaxTurns: StatusTurnStep}),
 		tier(3, "+15% Bleed", "Bleed-apply chance bumped by 15%.", SkillEffectDelta{BleedChance: 0.15}),
 	},
+	// ── Radiance / Pyromancy / Storm / Cutpurse (tree-node skills) ───
+	SkillSearingLight: {
+		tier(1, "+2 damage", "+2 base radiant damage on the sear.", SkillEffectDelta{Damage: 2}),
+		tier(2, "+1 Burn turn", "The radiant Burn lingers one turn longer on min and max rolls.", SkillEffectDelta{BurnMinTurns: StatusTurnStep, BurnMaxTurns: StatusTurnStep}),
+		tier(3, "+15% Burn", "Burn-apply chance bumped by 15% — a maxed Searing Light almost always ignites.", SkillEffectDelta{BurnChance: 0.15}),
+	},
+	SkillImmolate: {
+		tier(1, "+2 damage", "+2 base fire damage to every enemy in the zone.", SkillEffectDelta{Damage: 2}),
+		tier(2, "+1 Burn turn", "Every enemy's Burn lasts one turn longer.", SkillEffectDelta{BurnMinTurns: StatusTurnStep, BurnMaxTurns: StatusTurnStep}),
+		tier(3, "+1 Burn turn", "Another turn of Burn — a maxed Immolate roasts the whole pack for the fight.", SkillEffectDelta{BurnMinTurns: StatusTurnStep, BurnMaxTurns: StatusTurnStep}),
+	},
+	SkillMug: {
+		tier(1, "+2 damage", "+2 base damage on the strike.", SkillEffectDelta{Damage: 2}),
+		tier(2, "+15% lift", "Mug's steal succeeds 15% more often.", SkillEffectDelta{StealChance: 0.15}),
+		tier(3, "+2 damage", "Another +2 base damage. A maxed Mug hits and lifts.", SkillEffectDelta{Damage: 2}),
+	},
+	SkillChainLightning: {
+		tier(1, "+1 damage", "+1 base damage per arc target.", SkillEffectDelta{Damage: 1}),
+		tier(2, "+1 damage", "Another +1 damage per target.", SkillEffectDelta{Damage: 1}),
+		tier(3, "+15% Stun", "Every arc target rolls a 15% higher Stun chance.", SkillEffectDelta{StunChance: 0.15}),
+	},
+	SkillStaticField: {
+		tier(1, "+6% HP", "Saps another 6% of the target's current HP.", SkillEffectDelta{PercentCurrentHP: StaticFieldPercentPerTier}),
+		tier(2, "+6% HP", "Another +6% of current HP.", SkillEffectDelta{PercentCurrentHP: StaticFieldPercentPerTier}),
+		tier(3, "+6% HP", "A maxed Static Field tears away a third of a healthy foe's HP.", SkillEffectDelta{PercentCurrentHP: StaticFieldPercentPerTier}),
+	},
+	SkillConsecrate: {
+		tier(1, "+2 damage", "+2 base radiant damage to every enemy.", SkillEffectDelta{Damage: 2}),
+		tier(2, "+2 damage", "Another +2 base damage across the pack.", SkillEffectDelta{Damage: 2}),
+		tier(3, "+2 damage", "A third +2 — maxed Consecrate scours the whole field.", SkillEffectDelta{Damage: 2}),
+	},
+	SkillRecklessSwing: {
+		tier(1, "+3 damage", "+3 base damage on the wild swing.", SkillEffectDelta{Damage: 3}),
+		tier(2, "+3 damage", "Another +3 base damage.", SkillEffectDelta{Damage: 3}),
+		tier(3, "+3 damage", "A third +3 — a maxed Reckless Swing hits like a truck (mind the open guard).", SkillEffectDelta{Damage: 3}),
+	},
+	SkillCombust: {
+		tier(1, "+2 base", "+2 base magic damage on the detonation.", SkillEffectDelta{Damage: 2}),
+		tier(2, "+2 base", "Another +2 base damage.", SkillEffectDelta{Damage: 2}),
+		tier(3, "+3 base", "A maxed Combust turns a long Burn into a devastating blast.", SkillEffectDelta{Damage: 3}),
+	},
 }
 
 // init asserts every player-castable skill has exactly MaxSkillTier rows in
@@ -336,6 +378,7 @@ func addSkillEffectDelta(eff *SkillEffect, d SkillEffectDelta) {
 	eff.BuffMDef += d.BuffMDef
 	eff.ShieldHP += d.ShieldHP
 	eff.IceArmorTurns += d.IceArmorTurns
+	eff.PercentCurrentHP += d.PercentCurrentHP
 }
 
 // deltaTierOnlyFields are SkillEffectDelta fields with NO matching SkillEffect field; they ride

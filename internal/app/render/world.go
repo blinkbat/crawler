@@ -355,7 +355,7 @@ func Camera(g *core.GameState) rl.Camera3D {
 	// the whole frustum — the look-target (position+direction) rides along, so the view
 	// pans without rotating. Ground-plane only (X/Z); vertical framing is CamLift.
 	if battleTune.CamShiftX != 0 || battleTune.CamShiftZ != 0 {
-		right := rl.Vector3Normalize(rl.Vector3CrossProduct(direction, rl.NewVector3(0, 1, 0)))
+		right := rl.Vector3Normalize(rl.Vector3CrossProduct(direction, worldUp))
 		shiftX := battleTune.CamShiftX * battleCamBlend
 		shiftZ := battleTune.CamShiftZ * battleCamBlend
 		position.X += right.X*shiftX + direction.X*shiftZ
@@ -1018,7 +1018,7 @@ func drawWallTorch(assets Resources, m *core.AreaDefinition, x, z int, center rl
 		size := (0.11 - float32(i)*0.025) * (1 + 0.12*float32(math.Sin(float64(t*11.0+fp))))
 		tint := torchFlameTints[i]
 		rl.DrawModelEx(torchFlameModel, rl.NewVector3(px, y, pz),
-			rl.NewVector3(0, 1, 0), 0, rl.NewVector3(size, size*1.4, size), tint)
+			worldUp, 0, rl.NewVector3(size, size*1.4, size), tint)
 	}
 }
 
@@ -1326,7 +1326,7 @@ func drawGroundShadowAt(cx, cy, cz, radius float32) {
 	rl.DrawModelEx(
 		groundShadowModel,
 		rl.NewVector3(cx, cy, cz),
-		rl.NewVector3(0, 1, 0), 0,
+		worldUp, 0,
 		rl.NewVector3(radius*2, 1, radius*2),
 		rl.White,
 	)
@@ -1369,7 +1369,7 @@ func faceBackfaceCulled(camPos rl.Vector3, cx, cz, fdx, fdz, half float32) bool 
 func drawYawedModel(model rl.Model, cx, cy, cz, yawDeg float32, scale rl.Vector3) {
 	rl.DrawModelEx(model,
 		rl.NewVector3(cx, cy, cz),
-		rl.NewVector3(0, 1, 0), yawDeg,
+		worldUp, yawDeg,
 		scale, rl.White)
 }
 
@@ -1500,7 +1500,7 @@ func drawPebbleCluster(assets Resources, cx, cz, groundY float32, tileHash uint3
 		return
 	}
 	baseModel := assets.rockProp.models[0]
-	rotationAxis := rl.NewVector3(0, 1, 0)
+	rotationAxis := worldUp
 
 	// 2..4 per cluster, 25/50/25 center-weighted.
 	count := 2 + int(tileHash&0x01) + int((tileHash>>1)&0x01)

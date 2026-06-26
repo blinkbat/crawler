@@ -155,7 +155,8 @@ var PackAINames = [...]string{
 }
 
 // InBoundsWH reports whether (x,z) lies inside a w×h map. Exported so core can
-// share the one definition (core.inBoundsWH delegates here).
+// share the one definition (core.AreaDefinition.InBounds and the areas.go load
+// validators call it directly).
 func InBoundsWH(x, z, w, h int) bool {
 	return x >= 0 && x < w && z >= 0 && z < h
 }

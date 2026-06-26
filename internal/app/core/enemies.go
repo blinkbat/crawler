@@ -620,6 +620,27 @@ func StampEnemyDebuff(e *Enemy, source SkillID, effect SkillEffect) bool {
 	return true
 }
 
+// DispelEnemyBuffs strips every NET-BENEFICIAL StatusMod from the enemy (the
+// Wizard's Dispel) and returns how many were removed. Negative debuffs (our
+// Cripple/Blind/etc.) are kept — we don't want to cleanse the foe. Forward-
+// compatible: enemies carry no self-buffs today, so it usually finds nothing.
+func DispelEnemyBuffs(e *Enemy) int {
+	if e == nil || len(e.Debuffs) == 0 {
+		return 0
+	}
+	kept := e.Debuffs[:0]
+	removed := 0
+	for _, mod := range e.Debuffs {
+		if StatusModsNetBeneficial([]StatusMod{mod}) {
+			removed++
+			continue
+		}
+		kept = append(kept, mod)
+	}
+	e.Debuffs = kept
+	return removed
+}
+
 // EnemyLevel is the foe's level, defaulting an unauthored (0) definition to
 // DefaultEnemyLevel. Read by the flee-chance math.
 func EnemyLevel(e *Enemy) int {

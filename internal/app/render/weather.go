@@ -99,11 +99,7 @@ func DrawWeather(g *core.GameState) {
 
 	if intensity > weatherIntensityEpsilon {
 		// Defensive clamp: an out-of-range Kind (corrupt save) would panic indexing the fixed table.
-		kind := w.Kind
-		if kind < 0 || int(kind) >= core.RainKindCount {
-			kind = core.RainLight
-		}
-		vis := rainVisuals[kind]
+		vis := rainVisuals[clampTableIndex(w.Kind, core.RainKindCount, core.RainLight)]
 		// Overcast wash over the world view.
 		rl.DrawRectangle(0, 0, int32(sw), int32(sh),
 			colorWithAlpha(rainWashColor, uint8(intensity*vis.washAlpha)))

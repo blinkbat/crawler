@@ -64,7 +64,7 @@ type treePart struct {
 // when rotationAxis is the zero value.
 func partRotationAxis(p treePart) rl.Vector3 {
 	if p.rotationAxis.X == 0 && p.rotationAxis.Y == 0 && p.rotationAxis.Z == 0 {
-		return rl.NewVector3(0, 1, 0)
+		return worldUp
 	}
 	return p.rotationAxis
 }
@@ -85,7 +85,7 @@ func rotateOffsetY(offset rl.Vector3, scale, yawDeg float32) rl.Vector3 {
 	if yawDeg == 0 {
 		return scaled
 	}
-	return rl.Vector3RotateByAxisAngle(scaled, rl.NewVector3(0, 1, 0), yawDeg*degToRad)
+	return rl.Vector3RotateByAxisAngle(scaled, worldUp, yawDeg*degToRad)
 }
 
 const (
@@ -215,7 +215,7 @@ func yawedTiltAxis(axis rl.Vector3, yaw float32) rl.Vector3 {
 	if yaw == 0 {
 		return axis
 	}
-	return rl.Vector3RotateByAxisAngle(axis, rl.NewVector3(0, 1, 0), yaw*degToRad)
+	return rl.Vector3RotateByAxisAngle(axis, worldUp, yaw*degToRad)
 }
 
 // treePartVariance is the per-part static jitter for one seed: canopy scale
@@ -1237,7 +1237,7 @@ func loadExoticFlowerProp(shader rl.Shader) propModel {
 	orange := rl.NewColor(232, 150, 78, 255)
 	teal := rl.NewColor(96, 196, 188, 255)
 	gold := rl.NewColor(232, 206, 120, 255)
-	yAxis := rl.NewVector3(0, 1, 0)
+	yAxis := worldUp
 	return propModel{
 		models: models,
 		parts: []treePart{
@@ -1387,8 +1387,8 @@ func loadCobwebProp(shader rl.Shader) propModel {
 			// Main slanted disc — tilted so it reads as a web at an angle.
 			{modelIdx: 0, offset: rl.NewVector3(-0.28, 0.16, -0.28), scale: rl.NewVector3(1, 1, 1), rotation: 35, rotationAxis: rl.NewVector3(1, 0, 1), tint: web},
 			// Two thinner strands.
-			{modelIdx: 1, offset: rl.NewVector3(-0.10, 0.12, -0.18), scale: rl.NewVector3(1, 1, 1), rotation: 30, rotationAxis: rl.NewVector3(0, 1, 0), tint: wisp},
-			{modelIdx: 1, offset: rl.NewVector3(-0.20, 0.08, -0.30), scale: rl.NewVector3(1, 1, 1), rotation: -20, rotationAxis: rl.NewVector3(0, 1, 0), tint: wisp},
+			{modelIdx: 1, offset: rl.NewVector3(-0.10, 0.12, -0.18), scale: rl.NewVector3(1, 1, 1), rotation: 30, rotationAxis: worldUp, tint: wisp},
+			{modelIdx: 1, offset: rl.NewVector3(-0.20, 0.08, -0.30), scale: rl.NewVector3(1, 1, 1), rotation: -20, rotationAxis: worldUp, tint: wisp},
 		},
 	}
 }

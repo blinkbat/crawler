@@ -697,17 +697,22 @@ func PropIsNonBlocking(c byte) bool {
 // PropBlockHeight is how many voxel levels a blocking prop occupies upward (its
 // "tallness" for level-aware collision); 0 if non-blocking/empty. Squat props
 // block 1, full trees/cairns/formations block 2 — so a ground tree blocks the
-// walk-under path while leaving the deck above walkable.
+// walk-under path while leaving the deck above walkable. Derived from propDefs.
 func PropBlockHeight(c byte) int {
-	switch c {
-	case TileTreeYoung, TileRockLarge, TileBushLarge:
-		return 1
-	case TileTree, TileTreeTwin, TileRockCairn, TileRockFormation, TileRockFormationTail,
-		TileTreeTall, TileTreeXL:
-		return 2
-	}
-	return 0
+	return propBlockHeights[c]
 }
+
+// propBlockHeights is the O(1) char→tallness lookup, derived from propDefs so a
+// new prop's height lives in the single registry, not a parallel switch.
+var propBlockHeights = func() map[byte]int {
+	m := make(map[byte]int, len(propDefs))
+	for _, d := range propDefs {
+		if d.BlockHeight != 0 {
+			m[d.Char] = d.BlockHeight
+		}
+	}
+	return m
+}()
 
 // PropLevelAuto is the "no explicit level — rest on the column's lowest
 // standable surface" sentinel, disjoint from the base-36 level chars. Absent
@@ -1058,48 +1063,51 @@ func DecorFootprintTail(anchor byte) byte {
 
 // propDef is one prop-layer entry: char, TileLabel, and whether it's walkable.
 // propDefs is the SINGLE source for the prop char list, the props row of
-// tileLabelTable (populated in init), and PropIsNonBlocking — add a prop here
-// and all three derive automatically.
+// tileLabelTable (populated in init), PropIsNonBlocking, and PropBlockHeight —
+// add a prop here and all of them derive automatically. BlockHeight is voxel
+// tallness for level-aware collision (0 = non-blocking OR a full-column blocker
+// handled by the 2D BlockedAt path; squat props 1; full trees/cairns 2).
 type propDef struct {
 	Char        byte
 	Label       string
 	NonBlocking bool
+	BlockHeight int
 }
 
 var propDefs = []propDef{
-	{TileTree, "Tree", false},
-	{TileTreeXL, "Tree XL", false},
-	{TileTreeTall, "Tall Tree", false},
-	{TileTreeTwin, "Twin Trees", false},
-	{TileTreeYoung, "Young Tree", false},
-	{TileRockLarge, "Boulder", false},
-	{TileBushLarge, "Large Bush", false},
-	{TileCrate, "Crate", false},
-	{TileBarrel, "Barrel", false},
-	{TileUrn, "Urn", false},
-	{TileStalagmite, "Stalagmite", false},
-	{TilePillar, "Pillar", false},
-	{TileBrokenPillar, "Broken Pillar", false},
-	{TileStatue, "Statue", false},
-	{TileObelisk, "Obelisk", false},
-	{TileFountain, "Fountain", false},
-	{TileRockCairn, "Rock Cairn", false},
-	{TileRockFormation, "Rock Formation (anchor)", false},
-	{TileRockFormationTail, "Rock Formation (tail)", false},
-	{TileWell, "Well", false},
-	{TileGravestone, "Gravestone", false},
-	{TileSignPost, "Sign Post", false},
-	{TileHayBale, "Hay Bale", false},
-	{TileScarecrow, "Scarecrow", false},
-	{TileBookshelf, "Bookshelf", false},
-	{TileTable, "Table", false},
-	{TileBed, "Bed", false},
-	{TileBrazier, "Brazier", false},
-	{TileSarcophagus, "Sarcophagus", false},
-	{TileTorch, "Wall Torch", true},               // mounts on wall, leaves floor clear
-	{TilePropExoticFlower, "Exotic Flower", true}, // decorative plants — walkable
-	{TilePropTallFern, "Tall Fern", true},
-	{TilePropGrassTuft, "Grass Tuft", true},
+	{TileTree, "Tree", false, 2},
+	{TileTreeXL, "Tree XL", false, 2},
+	{TileTreeTall, "Tall Tree", false, 2},
+	{TileTreeTwin, "Twin Trees", false, 2},
+	{TileTreeYoung, "Young Tree", false, 1},
+	{TileRockLarge, "Boulder", false, 1},
+	{TileBushLarge, "Large Bush", false, 1},
+	{TileCrate, "Crate", false, 0},
+	{TileBarrel, "Barrel", false, 0},
+	{TileUrn, "Urn", false, 0},
+	{TileStalagmite, "Stalagmite", false, 0},
+	{TilePillar, "Pillar", false, 0},
+	{TileBrokenPillar, "Broken Pillar", false, 0},
+	{TileStatue, "Statue", false, 0},
+	{TileObelisk, "Obelisk", false, 0},
+	{TileFountain, "Fountain", false, 0},
+	{TileRockCairn, "Rock Cairn", false, 2},
+	{TileRockFormation, "Rock Formation (anchor)", false, 2},
+	{TileRockFormationTail, "Rock Formation (tail)", false, 2},
+	{TileWell, "Well", false, 0},
+	{TileGravestone, "Gravestone", false, 0},
+	{TileSignPost, "Sign Post", false, 0},
+	{TileHayBale, "Hay Bale", false, 0},
+	{TileScarecrow, "Scarecrow", false, 0},
+	{TileBookshelf, "Bookshelf", false, 0},
+	{TileTable, "Table", false, 0},
+	{TileBed, "Bed", false, 0},
+	{TileBrazier, "Brazier", false, 0},
+	{TileSarcophagus, "Sarcophagus", false, 0},
+	{TileTorch, "Wall Torch", true, 0},               // mounts on wall, leaves floor clear
+	{TilePropExoticFlower, "Exotic Flower", true, 0}, // decorative plants — walkable
+	{TilePropTallFern, "Tall Fern", true, 0},
+	{TilePropGrassTuft, "Grass Tuft", true, 0},
 }
 
 // propTileCharList is the canonical list of every prop-layer char, derived from
@@ -1200,9 +1208,55 @@ func DecorTileChars() []byte {
 	return out
 }
 
-// blockingFloorChars is the single source of truth for blocking floor chars; a
-// future blocker (lava, void) is one append here.
-var blockingFloorChars = []byte{FloorDeepWater}
+// floorDef is one explicit floor-layer entry: char + TileLabel + whether it
+// blocks movement. floorDefs is the SINGLE source for the floor char list, the
+// floor row of tileLabelTable (populated in init), and the blocking-floor set —
+// mirrors propDefs/decorDefs. FloorAuto is a sentinel (labelled "" in
+// tileLabelTable, kept out of the list).
+type floorDef struct {
+	Char     byte
+	Label    string
+	Blocking bool
+}
+
+var floorDefs = []floorDef{
+	{FloorGrass, "Grass", false},
+	{FloorDirt, "Dirt", false},
+	{FloorDarkGrass, "Dark Grass", false},
+	{FloorStone, "Stone", false},
+	{FloorCobble, "Cobble", false},
+	{FloorPlank, "Planks", false},
+	{FloorWater, "Water", false},
+	{FloorDeepWater, "Deep Water", true}, // the lone blocking floor (renders flat, refuses movement)
+	{FloorSand, "Sand", false},
+	{FloorSnow, "Snow", false},
+	{FloorRampNorth, "Ramp ↑N", false},
+	{FloorRampEast, "Ramp →E", false},
+	{FloorRampSouth, "Ramp ↓S", false},
+	{FloorRampWest, "Ramp ←W", false},
+}
+
+// floorTileCharList enumerates every floor char with a defined visual (excludes
+// the FloorAuto sentinel), derived from floorDefs; feeds TileLabel coverage.
+var floorTileCharList = func() []byte {
+	out := make([]byte, len(floorDefs))
+	for i, d := range floorDefs {
+		out[i] = d.Char
+	}
+	return out
+}()
+
+// blockingFloorChars is the blocking-floor set, derived from floorDefs; a future
+// blocker (lava, void) is one `Blocking: true` floorDefs entry.
+var blockingFloorChars = func() []byte {
+	var out []byte
+	for _, d := range floorDefs {
+		if d.Blocking {
+			out = append(out, d.Char)
+		}
+	}
+	return out
+}()
 
 // blockingFloorCharSet is the O(1) lookup mirror (BlockedAt runs on every
 // movement / pack-AI / nearest-open-tile query, so set membership beats a scan).
@@ -1225,15 +1279,6 @@ func BlockingFloorChars() []byte {
 	return append([]byte(nil), blockingFloorChars...)
 }
 
-// floorTileCharList enumerates every floor char with a defined visual (excludes
-// the FloorAuto sentinel); feeds TileLabel coverage.
-var floorTileCharList = []byte{
-	FloorGrass, FloorDirt, FloorDarkGrass, FloorStone,
-	FloorCobble, FloorPlank, FloorWater, FloorDeepWater,
-	FloorSand, FloorSnow,
-	FloorRampNorth, FloorRampEast, FloorRampSouth, FloorRampWest,
-}
-
 // TileLayer enumerates the four char-carrying grid layers (walls/floor/decor/
 // props). The editor's Layer enum adds Ceiling (reuses '.'/'#' from walls, no
 // own row) and Entities (spawn slices, not tile chars).
@@ -1254,22 +1299,10 @@ var tileLabelTable = map[TileLayer]map[byte]string{
 	TileLayerWalls: {
 		TileOpen: "", // default rock skin
 	},
+	// Floor labels are populated from floorDefs in init (single source); only the
+	// auto sentinel lives here.
 	TileLayerFloor: {
-		FloorAuto:      "",
-		FloorGrass:     "Grass",
-		FloorDirt:      "Dirt",
-		FloorDarkGrass: "Dark Grass",
-		FloorStone:     "Stone",
-		FloorCobble:    "Cobble",
-		FloorPlank:     "Planks",
-		FloorWater:     "Water",
-		FloorDeepWater: "Deep Water",
-		FloorSand:      "Sand",
-		FloorSnow:      "Snow",
-		FloorRampNorth: "Ramp ↑N",
-		FloorRampEast:  "Ramp →E",
-		FloorRampSouth: "Ramp ↓S",
-		FloorRampWest:  "Ramp ←W",
+		FloorAuto: "",
 	},
 	// Decor labels are populated from decorDefs in init (single source); only the
 	// sentinels live here.
@@ -1304,6 +1337,11 @@ func init() {
 	for _, d := range decorDefs {
 		decorLabelsInit[d.Char] = d.Label
 	}
+	// Derive floor labels from floorDefs (the single floor registry).
+	floorLabelsInit := tileLabelTable[TileLayerFloor]
+	for _, d := range floorDefs {
+		floorLabelsInit[d.Char] = d.Label
+	}
 	floorLabels := tileLabelTable[TileLayerFloor]
 	for _, c := range floorTileCharList {
 		if _, ok := floorLabels[c]; !ok {
@@ -1335,6 +1373,14 @@ func init() {
 	// desync the two — if this fires, update mapfile.MaxLevelChar to match.
 	if c := ElevationChar(MaxElevationLevel); c != mapfile.MaxLevelChar {
 		panic(fmt.Sprintf("core: ElevationChar(MaxElevationLevel)=%q but mapfile.MaxLevelChar=%q — bump them together", c, rune(mapfile.MaxLevelChar)))
+	}
+	// FaceOverride.Skins ([FacingCount]byte) and mapfile.MapFace.Skins are copied
+	// whole to each other in faceOverridesFromMap / mapFacesFromArea; their lengths
+	// must match. (Equal-length array types are identical, so today a mismatch is a
+	// cryptic compile error on those assignments — pin it with a clear message in
+	// case the conversion is ever rewritten field-by-field.)
+	if a, b := len(FaceOverride{}.Skins), len(mapfile.MapFace{}.Skins); a != b {
+		panic(fmt.Sprintf("core: FaceOverride.Skins len=%d but mapfile.MapFace.Skins len=%d — keep them equal (= FacingCount)", a, b))
 	}
 }
 

@@ -43,6 +43,7 @@ var partyStatusVisuals = [core.PartyStatusCount]struct {
 	core.PartyStatusRegen:     {Col: statusRegen, Glyph: drawStatusGlyphRegen},
 	core.PartyStatusShielded:  {Col: statusShielded, Glyph: drawStatusGlyphShielded},
 	core.PartyStatusIceArmor:  {Col: statusIceArmor, Glyph: drawStatusGlyphIceArmor},
+	core.PartyStatusGuarding:  {Col: statusGuarding, Glyph: drawStatusGlyphGuarding},
 	core.PartyStatusDefending: {Col: statusDefending, Glyph: drawStatusGlyphDefending},
 }
 
@@ -377,6 +378,14 @@ func drawStatusGlyphDefending(cx, cy, r float32, col rl.Color) {
 	// Shield: rounded badge body + a heraldic center spine.
 	rl.DrawRectangleRounded(rl.NewRectangle(cx-r*0.62, cy-r*0.7, r*1.24, r*1.5), 0.45, 6, col)
 	rl.DrawLineEx(rl.NewVector2(cx, cy-r*0.55), rl.NewVector2(cx, cy+r*0.55), 1.5, fadeColor(statusGlyphDark, 0.6))
+}
+
+func drawStatusGlyphGuarding(cx, cy, r float32, col rl.Color) {
+	// Cover: a guarding shield with a smaller warded ally tucked behind its edge —
+	// distinct from the Defending lone shield (this one is protecting someone).
+	rl.DrawCircleV(rl.NewVector2(cx+r*0.42, cy+r*0.12), r*0.28, fadeColor(col, 0.5)) // the warded ally
+	rl.DrawRectangleRounded(rl.NewRectangle(cx-r*0.66, cy-r*0.68, r*1.12, r*1.44), 0.45, 6, col)
+	rl.DrawLineEx(rl.NewVector2(cx-r*0.1, cy-r*0.52), rl.NewVector2(cx-r*0.1, cy+r*0.52), 1.5, fadeColor(statusGlyphDark, 0.6))
 }
 
 func drawStatusGlyphShielded(cx, cy, r float32, col rl.Color) {

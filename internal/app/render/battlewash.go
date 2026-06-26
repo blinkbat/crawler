@@ -54,7 +54,7 @@ func wipeEase(t float32) float32 { return core.Smoothstep(t) }
 // wipe FX (Zoom/Spin/Wobble) for this frame; identity (worldUp, fov) otherwise. dir is
 // the camera's normalized look direction (for the roll axis).
 func battleWipeCamera(g *core.GameState, dir rl.Vector3, fov float32) (rl.Vector3, float32) {
-	up := rl.NewVector3(0, 1, 0)
+	up := worldUp
 	t, active := battleWipeProgress(g)
 	if !active {
 		return up, fov
@@ -77,7 +77,6 @@ func battleWipeCamera(g *core.GameState, dir rl.Vector3, fov float32) (rl.Vector
 
 // wipeRollUp rolls the camera up-vector by `roll` radians around the look axis.
 func wipeRollUp(dir rl.Vector3, roll float32) rl.Vector3 {
-	worldUp := rl.NewVector3(0, 1, 0)
 	right := rl.Vector3Normalize(rl.Vector3CrossProduct(dir, worldUp))
 	camUp := rl.Vector3Normalize(rl.Vector3CrossProduct(right, dir))
 	c, s := float32(math.Cos(float64(roll))), float32(math.Sin(float64(roll)))

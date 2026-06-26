@@ -7,6 +7,16 @@ import (
 	"crawler/internal/app/core"
 )
 
+// noiseShade is the painter idiom shared across the texture generators: lighten c
+// toward `light` on positive noise, darken toward `dark` on negative noise, scaled
+// by posK/negK. Pure MixColor math — same result as the two open-coded calls it
+// replaces, just in one place.
+func noiseShade(c, light, dark color.RGBA, n, posK, negK float64) color.RGBA {
+	c = core.MixColor(c, light, math.Max(0, n)*posK)
+	c = core.MixColor(c, dark, math.Max(0, -n)*negK)
+	return c
+}
+
 // makeSoftShadowPixels builds the radial ground-shadow sprite: a dark disc whose alpha falls (1-d)^1.6 to a transparent edge.
 func makeSoftShadowPixels(size int) []color.RGBA {
 	pixels := make([]color.RGBA, size*size)
@@ -44,8 +54,7 @@ func makeRockWallPixels(w, h int) []color.RGBA {
 			fine := fbmNoise(float64(x)*1.4+97, float64(y)*1.4-211, 0.046, 4)
 			n := broad*0.55 + fine*0.45
 			c := base
-			c = core.MixColor(c, highlight, math.Max(0, n)*0.72)
-			c = core.MixColor(c, shadow, math.Max(0, -n)*0.55)
+			c = noiseShade(c, highlight, shadow, n, 0.72, 0.55)
 
 			// Crack scatter as soft pits, each with a lit lower lip so it reads concave.
 			pit := hashByteXY(x/3, y/3)
@@ -319,8 +328,7 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 
 			n := fbmNoise(float64(x)*1.4, float64(y)*1.4, 0.16, 4)
 			// Muted highlight so crests don't flare against the base.
-			c = core.MixColor(c, color.RGBA{R: 188, G: 184, B: 172, A: 255}, math.Max(0, n)*0.30)
-			c = core.MixColor(c, pitDark, math.Max(0, -n)*0.42)
+			c = noiseShade(c, color.RGBA{R: 188, G: 184, B: 172, A: 255}, pitDark, n, 0.30, 0.42)
 
 			// Directional bevel: top lip brightest, left dimmer; bottom shadowed,
 			// right less. Per-brick hash jitters lip strength.
@@ -360,8 +368,7 @@ func makeGrassPixels(w, h int) []color.RGBA {
 		for x := 0; x < w; x++ {
 			broad := fbmNoise(float64(x), float64(y), 0.020, 3)
 			c := base
-			c = core.MixColor(c, light, math.Max(0, broad)*0.55)
-			c = core.MixColor(c, dark, math.Max(0, -broad)*0.40)
+			c = noiseShade(c, light, dark, broad, 0.55, 0.40)
 			// Canopy dapple — broad warm-lemon pools for large-scale light structure.
 			dap := fbmNoise(float64(x)-340, float64(y)+209, 0.008, 2)
 			if dap > 0.28 {
@@ -427,8 +434,7 @@ func makeStoneFloorPixels(w, h int) []color.RGBA {
 			}
 
 			n := fbmNoise(float64(x)*1.6, float64(y)*1.6, 0.18, 4)
-			c = core.MixColor(c, highlight, math.Max(0, n)*0.32)
-			c = core.MixColor(c, color.RGBA{R: 24, G: 22, B: 20, A: 255}, math.Max(0, -n)*0.40)
+			c = noiseShade(c, highlight, color.RGBA{R: 24, G: 22, B: 20, A: 255}, n, 0.32, 0.40)
 
 			// Foot-worn sheen — soft radial lift peaking at the slab center.
 			fx := float64(localX) - float64(slab)/2
@@ -470,8 +476,7 @@ func makeDirtPixels(w, h int) []color.RGBA {
 			brush := fbmNoise(float64(x)*1.3+47, float64(y)*1.3+131, 0.078, 4)
 			n := broad*0.5 + brush*0.5
 			c := base
-			c = core.MixColor(c, light, math.Max(0, n)*0.70)
-			c = core.MixColor(c, dark, math.Max(0, -n)*0.55)
+			c = noiseShade(c, light, dark, n, 0.70, 0.55)
 			if broad > 0.18 && brush > 0.28 {
 				c = core.MixColor(c, light, 0.18)
 			}
@@ -504,8 +509,7 @@ func makeDarkGrassPixels(w, h int) []color.RGBA {
 			broad := fbmNoise(float64(x)+411, float64(y)+97, 0.020, 3)
 			m := fbmNoise(float64(x)-227, float64(y)+311, 0.014, 2)
 			c := base
-			c = core.MixColor(c, light, math.Max(0, broad)*0.55)
-			c = core.MixColor(c, dark, math.Max(0, -broad)*0.40)
+			c = noiseShade(c, light, dark, broad, 0.55, 0.40)
 			if m > 0.46 {
 				c = core.MixColor(c, moss, (m-0.46)*0.60)
 			}
@@ -599,8 +603,7 @@ func makeCobblePixels(w, h int) []color.RGBA {
 			}
 
 			n := fbmNoise(float64(x)*1.4, float64(y)*1.4, 0.20, 4)
-			c = core.MixColor(c, light, math.Max(0, n)*0.20)
-			c = core.MixColor(c, dark, math.Max(0, -n)*0.30)
+			c = noiseShade(c, light, dark, n, 0.20, 0.30)
 
 			// Sparse darker pits — chips and weather.
 			if hashByteXY(cellX*23+localX/3, cellY*29+localY/3)%88 < 3 {
@@ -645,8 +648,7 @@ func makePlankPixels(w, h int) []color.RGBA {
 			}
 			// Horizontal grain: stretched along x, finer in y, so it reads as wood fibers.
 			n := fbmNoise(float64(x)*0.15, float64(y)*1.6, 0.20, 4)
-			c = core.MixColor(c, warm, math.Max(0, n)*0.35)
-			c = core.MixColor(c, grain, math.Max(0, -n)*0.55)
+			c = noiseShade(c, warm, grain, n, 0.35, 0.55)
 
 			// Board edge darkening so each plank reads as raised.
 			edge := min(localY-gap, boardH-1-localY)
@@ -747,8 +749,7 @@ func makeSandPixels(w, h int) []color.RGBA {
 		for x := 0; x < w; x++ {
 			dune := fbmNoise(float64(x)+47, float64(y)-83, 0.018, 3)
 			c := base
-			c = core.MixColor(c, warm, math.Max(0, dune)*0.40)
-			c = core.MixColor(c, dark, math.Max(0, -dune)*0.32)
+			c = noiseShade(c, warm, dark, dune, 0.40, 0.32)
 			// Very sparse pebble flecks.
 			if hashByteXY(x*7, y*11)%680 < 2 {
 				c = core.MixColor(c, pebble, 0.45)
@@ -809,8 +810,7 @@ func makeBarkPixels(w, h int) []color.RGBA {
 			if ridge > 0.46 && prevRidge < 0.40 {
 				c = core.MixColor(c, rim, 0.45)
 			}
-			c = core.MixColor(c, light, math.Max(0, n)*0.32)
-			c = core.MixColor(c, deep, math.Max(0, -n)*0.40)
+			c = noiseShade(c, light, deep, n, 0.32, 0.40)
 
 			// Sparse pits + vertical moss patches (up the shaded side).
 			if hashByteXY(x/3, y/3)%180 < 2 {
@@ -843,8 +843,7 @@ func makeLeafPixels(w, h int) []color.RGBA {
 			n := broad*0.55 + fine*0.45
 			m := fbmNoise(float64(x)+183, float64(y)-77, 0.05, 3)
 			c := base
-			c = core.MixColor(c, light, math.Max(0, n)*0.80)
-			c = core.MixColor(c, deep, math.Max(0, -n)*0.55)
+			c = noiseShade(c, light, deep, n, 0.80, 0.55)
 			if m > 0.50 {
 				c = core.MixColor(c, gold, (m-0.50)*0.70)
 			}
@@ -877,8 +876,7 @@ func makeMarblePixels(w, h int) []color.RGBA {
 			n := fbmNoise(float64(x), float64(y), 0.04, 4)
 			m := fbmNoise(float64(x)+177, float64(y)-91, 0.10, 3)
 			c := base
-			c = core.MixColor(c, warm, math.Max(0, n)*0.35)
-			c = core.MixColor(c, cool, math.Max(0, -n)*0.30)
+			c = noiseShade(c, warm, cool, n, 0.35, 0.30)
 
 			// Veins: thin streaks where two FBM samples cross zero, wrapped in a
 			// warm bruise (mineral staining) before the dark crack core.
@@ -915,8 +913,7 @@ func makeGranitePixels(w, h int) []color.RGBA {
 		for x := 0; x < w; x++ {
 			n := fbmNoise(float64(x)*1.3, float64(y)*1.3, 0.18, 4)
 			c := base
-			c = core.MixColor(c, light, math.Max(0, n)*0.40)
-			c = core.MixColor(c, dark, math.Max(0, -n)*0.45)
+			c = noiseShade(c, light, dark, n, 0.40, 0.45)
 			// Mica flecks.
 			if hashByteXY(x*5, y*5)%420 < 3 {
 				c = core.MixColor(c, flake, 0.55)

@@ -97,8 +97,13 @@ func wrapNextWhere[T any](slice []T, start int, pred func(T) bool) int {
 // partyAlive / partyAvailable / enemyAlive: the canonical predicates the walkers
 // feed through, keeping "alive AND not ingested" in one spot.
 func partyAlive(m PartyMember) bool     { return m.HP > 0 }
-func partyAvailable(m PartyMember) bool { return m.HP > 0 && !m.Ingested }
+func partyAvailable(m PartyMember) bool { return MemberAvailable(m) }
 func enemyAlive(e Enemy) bool           { return e.Alive }
+
+// MemberAvailable reports whether a member can act / be targeted — alive AND not
+// ingested. The one home for "ingested counts as unavailable"; call sites must use
+// this rather than re-inlining `HP <= 0 || Ingested`.
+func MemberAvailable(m PartyMember) bool { return m.HP > 0 && !m.Ingested }
 
 func LivingPartyCount(party []PartyMember) int {
 	return countWhere(party, partyAlive)
@@ -117,6 +122,17 @@ func LivingPartyIndicesInto(buf []int, party []PartyMember) []int {
 
 func PartyMemberAlive(party []PartyMember, index int) bool {
 	return PartyIndexInRange(party, index) && partyAlive(party[index])
+}
+
+// FirstDownedPartyMember returns the seat index of the first downed (HP <= 0)
+// member, or -1 if none are down — the Cleric's Resurrect auto-target.
+func FirstDownedPartyMember(party []PartyMember) int {
+	for i := range party {
+		if party[i].HP <= 0 {
+			return i
+		}
+	}
+	return -1
 }
 
 // PartyMemberAvailable reports whether the member can act / be targeted this turn
@@ -144,7 +160,10 @@ func WrapNextAvailablePartyMember(party []PartyMember, start int) int {
 // (first available after EnemyAttackCursor) WITHOUT advancing the cursor, or -1.
 // Shared so battle (commits) and render (previews) don't drift.
 func PeekNextEnemyTarget(g *GameState) int {
-	return WrapNextAvailablePartyMember(g.Party, g.Battle.EnemyAttackCursor+1)
+	// Skip a Vanished member (untargetable) so a back-row caster can't strike it.
+	return wrapNextWhere(g.Party, g.Battle.EnemyAttackCursor+1, func(m PartyMember) bool {
+		return partyAvailable(m) && m.VanishTurns == 0
+	})
 }
 
 // AvailablePartyTargets returns indices of members choosable as a heal/item target
@@ -217,6 +236,8 @@ var partyTurnsCounterClass = map[string]partyTurnsClass{
 	"PoisonTurns":   turnsLingeringCurable,
 	"RegenTurns":    turnsBenign,
 	"IceArmorTurns": turnsBenign,
+	"VanishTurns":   turnsBenign, // beneficial (untargetable); combat-only, cleared on exit
+	"SpiritTurns":   turnsBenign, // Ancestral Spirit shade; combat-only, cleared on exit
 }
 
 // transientStatusCounters returns pointers to the shared curable counters
@@ -248,6 +269,14 @@ func init() {
 	if got := len(transientStatusCounters(&PartyMember{})); got != curable {
 		panic("core: transientStatusCounters must list exactly the turnsCurableTransient entries in partyTurnsCounterClass")
 	}
+}
+
+// SkillCuresDebuffs reports whether skill's benefit is a status cure (rather than
+// an HP heal). The single home for "is this a cure skill" — a cure's effect isn't a
+// SkillEffect field, so it can't be inferred from def.Effect; both the out-of-battle
+// benefit gate and the explore apply path key off this instead of `== SkillCleanse`.
+func SkillCuresDebuffs(skill SkillID) bool {
+	return skill == SkillCleanse
 }
 
 // CureDebuffs clears the curable NEGATIVE statuses (Poison + the four shared
@@ -300,11 +329,17 @@ func ClearMemberTransientStatuses(m *PartyMember) {
 		*c = 0
 	}
 	m.Defending = false
+	m.Guarding = false
+	m.Guarded = false
+	m.GuardedBy = 0
+	m.LastStandUsed = false // re-arms next battle
 	m.Buffs = nil
 	m.ShieldHP = 0
 	m.IceArmorTurns = 0
 	m.RegenTurns = 0
 	m.RegenPerTurn = 0
+	m.VanishTurns = 0
+	m.SpiritTurns = 0
 }
 
 // clearPartyCombatTransients strips state that must never outlive a battle:
@@ -539,7 +574,7 @@ func PeekNextMeleeEnemyTarget(g *GameState) int {
 	// value-only wrapNextWhere predicate carry it.
 	frontHasLiving := PartyFrontHasLiving(g.Party)
 	return wrapNextWhere(g.Party, g.Battle.EnemyAttackCursor+1, func(m PartyMember) bool {
-		return partyAvailable(m) && (m.Row == RowFront || !frontHasLiving)
+		return partyAvailable(m) && m.VanishTurns == 0 && (m.Row == RowFront || !frontHasLiving)
 	})
 }
 
@@ -555,7 +590,7 @@ func tauntedAttackerTarget(g *GameState) (int, bool) {
 	if t < 0 || t >= len(g.Party) {
 		return -1, false
 	}
-	if g.Party[t].HP <= 0 || g.Party[t].Ingested {
+	if !MemberAvailable(g.Party[t]) || g.Party[t].VanishTurns > 0 {
 		return -1, false
 	}
 	return t, true
@@ -571,10 +606,74 @@ func PeekEnemyAttackerTarget(g *GameState) int {
 	if forced, ok := tauntedAttackerTarget(g); ok {
 		return forced
 	}
+	var target int
 	if g.Battle.EnemyPendingSkill == SkillNone {
-		return PeekNextMeleeEnemyTarget(g)
+		target = PeekNextMeleeEnemyTarget(g)
+	} else {
+		target = PeekNextEnemyTarget(g)
 	}
-	return PeekNextEnemyTarget(g)
+	// Guard redirect rides here (like Taunt above) so the render forecast and the
+	// commit path agree on who's actually struck.
+	return redirectToGuardian(g, target)
+}
+
+// redirectToGuardian returns the slot a hit aimed at `target` actually lands on:
+// the guardian covering target (Warrior's Guard) instead of target, or target
+// unchanged. A MELEE attacker only intercepts onto a front-row-reachable guardian
+// (mirrors the front gate — a back-row guardian can't soak a melee swing it
+// couldn't otherwise take); a casting attacker reaches any row. Lapses when the
+// guardian is down/ingested or is the target itself.
+func redirectToGuardian(g *GameState, target int) int {
+	if target < 0 || target >= len(g.Party) {
+		return target
+	}
+	ward := g.Party[target]
+	if !ward.Guarded {
+		return target
+	}
+	guardian := ward.GuardedBy
+	if guardian < 0 || guardian >= len(g.Party) || guardian == target {
+		return target
+	}
+	if !MemberAvailable(g.Party[guardian]) {
+		return target
+	}
+	if g.Battle.EnemyPendingSkill == SkillNone &&
+		!(g.Party[guardian].Row == RowFront || !PartyFrontHasLiving(g.Party)) {
+		return target
+	}
+	return guardian
+}
+
+// SetGuard makes `guardian` cover `ward`: ward's incoming hits redirect to the
+// guardian (redirectToGuardian) until the guardian's next turn clears it
+// (ClearGuardBy in beginPartyTurn). A guardian covers ONE ward — re-guarding drops
+// the prior cover. Self-guard is inert (clears, sets nothing). Bounds-checked.
+func SetGuard(party []PartyMember, guardian, ward int) {
+	if guardian < 0 || guardian >= len(party) || ward < 0 || ward >= len(party) {
+		return
+	}
+	ClearGuardBy(party, guardian) // drop any prior ward this guardian covered
+	if guardian == ward {
+		return // nothing to cover
+	}
+	party[guardian].Guarding = true
+	party[ward].Guarded = true
+	party[ward].GuardedBy = guardian
+}
+
+// ClearGuardBy ends `guardian`'s cover: clears its Guarding flag and drops the
+// Guarded link on any ward it was protecting. Called when the guardian acts again.
+func ClearGuardBy(party []PartyMember, guardian int) {
+	if guardian >= 0 && guardian < len(party) {
+		party[guardian].Guarding = false
+	}
+	for i := range party {
+		if party[i].Guarded && party[i].GuardedBy == guardian {
+			party[i].Guarded = false
+			party[i].GuardedBy = 0
+		}
+	}
 }
 
 func LivingBattleCount(g *GameState) int {

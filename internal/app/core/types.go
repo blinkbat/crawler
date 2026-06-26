@@ -760,6 +760,27 @@ type PartyMember struct {
 	// (by design: tanks are slow, making Defend more valuable for them).
 	Defending bool
 
+	// Guarding / Guarded+GuardedBy (Warrior's Guard cover): a guardian with Guarding
+	// covers the ward at GuardedBy, whose incoming hits redirect to the guardian
+	// (redirectToGuardian) until the guardian's next turn clears it (beginPartyTurn).
+	// GuardedBy is meaningless unless Guarded (mirrors Ingested/IngestedBy). Combat-only.
+	Guarding  bool
+	Guarded   bool
+	GuardedBy int
+
+	// LastStandUsed: the Warrior's Last Stand (survive a lethal blow at 1 HP) has
+	// already fired this battle. Combat-only; cleared on battle exit so it re-arms
+	// next fight. VanishTurns: the Thief is untargetable (Vanish) for this many of
+	// its own turns; enemies skip a vanished member (PeekEnemyAttackerTarget) and it
+	// drains at end-of-turn. Combat-only.
+	LastStandUsed bool
+	VanishTurns   int
+
+	// SpiritTurns: an Ancestral Spirit (Warrior) shade fights alongside this member
+	// for this many of its own turns — it strikes a foe at the member's end-of-turn,
+	// then the counter drains. Combat-only.
+	SpiritTurns int
+
 	// PoisonTurns ticks AFTER the member's own action, dealing PoisonTickDamage.
 	// Inflicted by the Diseased Rat; does not stack.
 	PoisonTurns int
@@ -1079,6 +1100,17 @@ type Battle struct {
 	// finishActorTurn converts it to Warrior Bloodthirst lifesteal then zeroes it.
 	// Only SkillTagPhys hits feed it. Turn-lifetime despite sitting here.
 	PhysDamageThisTurn int
+
+	// EnemyKillsThisTurn counts enemies the cursor actor felled this turn (Thief
+	// Killing Spree reads it at end-of-turn for an ATB burst), zeroed alongside
+	// PhysDamageThisTurn. Off-turn reflect kills snapshot/restore around it. Turn-lifetime.
+	EnemyKillsThisTurn int
+
+	// MeteorFuse / MeteorDamage: a pending Meteor (Wizard capstone). MeteorFuse counts
+	// actor-turns down to 0, when the AoE lands for MeteorDamage per living enemy.
+	// 0 fuse = none in flight. Battle-lifetime; cleared on battle reset.
+	MeteorFuse   int
+	MeteorDamage int
 
 	// Timed-hit minigame: Timing drives the bar; TimingFlash holds it visible a
 	// beat after a press; TimingIntro is a pre-bar pause. LastQuality* drives the

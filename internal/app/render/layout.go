@@ -95,7 +95,7 @@ func drawTextureBillboard(camera rl.Camera3D, tex rl.Texture2D, pos rl.Vector3, 
 // its own plane (around center) — used to topple a downed party member flat.
 func drawTextureBillboardRotated(camera rl.Camera3D, tex rl.Texture2D, pos rl.Vector3, size rl.Vector2, deg float32, tint rl.Color) {
 	source := rl.NewRectangle(0, 0, float32(tex.Width), float32(tex.Height))
-	rl.DrawBillboardPro(camera, tex, source, pos, rl.NewVector3(0, 1, 0), size, rl.NewVector2(0, 0), deg, tint)
+	rl.DrawBillboardPro(camera, tex, source, pos, worldUp, size, rl.NewVector2(0, 0), deg, tint)
 }
 
 // tileWorldPos returns the world-space center of tile (x, z) at vertical offset y.

@@ -8,11 +8,18 @@ import "math/rand"
 // Bloodthirst=heal a share of phys damage, Retribution=reflect damage taken,
 // Shadow Step=bonus damage acting first, Lucky Strike=added crit.
 const (
-	PassiveRiposte     = "riposte"
-	PassiveBloodthirst = "bloodthirst"
-	PassiveRetribution = "retribution"
-	PassiveShadowStep  = "shadow-step"
-	PassiveLuckyStrike = "lucky-strike"
+	PassiveRiposte        = "riposte"
+	PassiveBloodthirst    = "bloodthirst"
+	PassiveRetribution    = "retribution"
+	PassiveShadowStep     = "shadow-step"
+	PassiveLuckyStrike    = "lucky-strike"
+	PassiveCrimsonRampage = "crimson-rampage" // Warrior Fury: +dmg the lower the caster's HP
+	PassiveLastStand      = "last-stand"      // Warrior: survive a lethal blow at 1 HP once/battle
+	PassiveFleetFooted    = "fleet-footed"    // Thief Cutpurse: +dodge + SPD
+	PassiveKillingSpree   = "killing-spree"   // Thief Cutpurse: a kill grants an ATB burst
+	PassivePlague         = "plague"          // Thief Venomancy: poison spreads on a poisoned foe's death
+	PassiveShatter        = "shatter"         // Wizard Cryomancy: +dmg vs a stunned/frozen foe
+	PassiveOvercharge     = "overcharge"      // Wizard Storm: MP trickle + chance of a free cast
 )
 
 // passiveNodeIDs is the canonical list the init guard walks.
@@ -22,6 +29,13 @@ var passiveNodeIDs = []string{
 	PassiveRetribution,
 	PassiveShadowStep,
 	PassiveLuckyStrike,
+	PassiveCrimsonRampage,
+	PassiveLastStand,
+	PassiveFleetFooted,
+	PassiveKillingSpree,
+	PassivePlague,
+	PassiveShatter,
+	PassiveOvercharge,
 }
 
 // init asserts every passive id resolves to a real tree node granting NO castable
@@ -68,4 +82,32 @@ func MemberCritChance(m *PartyMember, quality int) float64 {
 // MemberCritChance. Member-aware sibling of RollCrit.
 func MemberRollCrit(rng *rand.Rand, m *PartyMember, quality int) bool {
 	return RollChance(rng, MemberCritChance(m, quality))
+}
+
+// MemberDodgeChance is DodgeChance plus the Thief's Fleet Footed bonus
+// (FleetFootedDodgePerRank per rank). Member-aware sibling of DodgeChance.
+func MemberDodgeChance(m *PartyMember) float64 {
+	if m == nil {
+		return 0
+	}
+	c := DodgeChance(EffectiveStats(*m))
+	c += float64(PassiveRank(m, PassiveFleetFooted)) * FleetFootedDodgePerRank
+	return c
+}
+
+// MemberRollDodge rolls a dodge for a member, folding in Fleet Footed via
+// MemberDodgeChance. Member-aware sibling of RollDodge.
+func MemberRollDodge(rng *rand.Rand, m *PartyMember) bool {
+	return RollChance(rng, MemberDodgeChance(m))
+}
+
+// AnyPartyHasPassive reports whether any party member holds rank >= 1 in the
+// passive node (the global trigger behind Plague's poison-spread on death).
+func AnyPartyHasPassive(party []PartyMember, nodeID string) bool {
+	for i := range party {
+		if PassiveRank(&party[i], nodeID) > 0 {
+			return true
+		}
+	}
+	return false
 }

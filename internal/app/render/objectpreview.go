@@ -133,7 +133,7 @@ func objectPreviewCamera(bb rl.BoundingBox, zoom float32) rl.Camera3D {
 	return rl.Camera3D{
 		Position:   rl.Vector3Add(center, rl.Vector3Scale(objectPreviewDir, dist)),
 		Target:     center,
-		Up:         rl.NewVector3(0, 1, 0),
+		Up:         worldUp,
 		Fovy:       fovy,
 		Projection: rl.CameraPerspective,
 	}

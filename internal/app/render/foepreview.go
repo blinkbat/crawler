@@ -103,7 +103,7 @@ func foePreviewCamera() rl.Camera3D {
 	return rl.Camera3D{
 		Position:   rl.NewVector3(0, target.Y+dist*float32(math.Sin(pitch)), dist*float32(math.Cos(pitch))),
 		Target:     target,
-		Up:         rl.NewVector3(0, 1, 0),
+		Up:         worldUp,
 		Fovy:       tune.CamFOV,
 		Projection: rl.CameraPerspective,
 	}

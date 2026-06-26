@@ -75,7 +75,7 @@ func drawClassGlyph(cx, cy, r float32, class core.PartyClass, col color.RGBA) {
 	// Bounds-guard the table index: a corrupt save / stray class literal should fail
 	// soft (no glyph) rather than panic mid-draw. The init scan guarantees the table
 	// is fully populated for valid classes, not that the runtime index is in range.
-	if int(class) < 0 || int(class) >= len(classGlyphDrawers) {
+	if !indexInRange(int(class), len(classGlyphDrawers)) {
 		return
 	}
 	classGlyphDrawers[class](cx, cy, r, col)

@@ -572,6 +572,21 @@ func init() {
 	}
 }
 
+// assertNameTableAligned panics unless defs and mapNames have equal length and
+// every def's on-disk name matches mapNames at the same index — the shared
+// "core enum-def table ↔ its mapfile.*Names twin stay in lockstep" check the
+// facing / door-style / pack-AI registries each need at startup.
+func assertNameTableAligned[T any](label string, defs []T, name func(T) string, mapNames []string) {
+	if len(defs) != len(mapNames) {
+		panic(fmt.Sprintf("core: %s length %d != mapfile names %d — add a row when extending the enum", label, len(defs), len(mapNames)))
+	}
+	for i, d := range defs {
+		if name(d) != mapNames[i] {
+			panic(fmt.Sprintf("core: %s[%d]=%q disagrees with mapfile names (%q) — keep them in sync", label, i, name(d), mapNames[i]))
+		}
+	}
+}
+
 // findMaterialDef is the forward (enum→row) scan, shared by MaterialName /
 // MaterialIsIndoor. ok=false when out of range.
 func findMaterialDef(m MaterialSet) (materialDef, bool) {
@@ -646,15 +661,13 @@ func facingFromName(s string) (int, bool) {
 // init asserts facingDefs covers every facing once, in mapfile.FacingNames order,
 // with a non-empty short label — so a missing/blank row panics at startup.
 func init() {
-	if len(facingDefs) != FacingCount || len(mapfile.FacingNames) != FacingCount {
-		panic("core: facingDefs length must match FacingCount and mapfile.FacingNames — add a row when extending the facing enum")
+	if len(facingDefs) != FacingCount {
+		panic("core: facingDefs length must match FacingCount — add a row when extending the facing enum")
 	}
+	assertNameTableAligned("facingDefs", facingDefs, func(d facingDef) string { return d.name }, mapfile.FacingNames[:])
 	for i, d := range facingDefs {
 		if d.value != i {
 			panic("core: facingDefs row order must match the North/East/South/West enum")
-		}
-		if d.name != mapfile.FacingNames[i] {
-			panic("core: facingDefs[" + d.name + "] disagrees with mapfile.FacingNames — keep them in sync")
 		}
 		if d.short == "" {
 			panic("core: facingDefs[" + d.name + "] has an empty short label")
@@ -732,14 +745,7 @@ func doorStyleFromName(s string) DoorStyle {
 }
 
 func init() {
-	if len(doorStyleDefs) != len(mapfile.DoorStyleNames) {
-		panic("core: doorStyleDefs length must match mapfile.DoorStyleNames — add a row when extending DoorStyle")
-	}
-	for i, d := range doorStyleDefs {
-		if d.name != mapfile.DoorStyleNames[i] {
-			panic("core: doorStyleDefs[" + d.name + "] disagrees with mapfile.DoorStyleNames — keep them in sync")
-		}
-	}
+	assertNameTableAligned("doorStyleDefs", doorStyleDefs[:], func(d doorStyleDef) string { return d.name }, mapfile.DoorStyleNames[:])
 }
 
 // packAIDef bundles a PackAI's on-disk slug and editor label in one row, indexed
@@ -786,14 +792,7 @@ func PackAILabel(ai PackAI) string {
 }
 
 func init() {
-	if len(packAIDefs) != len(mapfile.PackAINames) {
-		panic("core: packAIDefs length must match mapfile.PackAINames — add a row when extending PackAI")
-	}
-	for i, d := range packAIDefs {
-		if d.name != mapfile.PackAINames[i] {
-			panic("core: packAIDefs[" + d.name + "] disagrees with mapfile.PackAINames — keep them in sync")
-		}
-	}
+	assertNameTableAligned("packAIDefs", packAIDefs[:], func(d packAIDef) string { return d.name }, mapfile.PackAINames[:])
 }
 
 // enemyKindByName flattens the registry's MapToken+MapAliases into one

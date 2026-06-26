@@ -247,7 +247,7 @@ func simulateTurnQueue(g *core.GameState, persist bool) []core.ActorRef {
 	}
 	actors := make([]tickActor, 0, len(g.Party)+len(members))
 	for i, p := range g.Party {
-		if p.HP <= 0 || p.Ingested {
+		if !core.MemberAvailable(p) {
 			continue
 		}
 		ref := core.ActorRef{IsParty: true, Index: i}
@@ -365,6 +365,8 @@ func actorSpeed(g *core.GameState, actor core.ActorRef) int {
 			return 0
 		}
 		spd := core.EffectiveStatsPtr(&g.Party[actor.Index]).SPD
+		// Fleet Footed (Thief) lifts turn rate before the Webbed halving.
+		spd += core.PassiveRank(&g.Party[actor.Index], core.PassiveFleetFooted) * core.FleetFootedSPDPerRank
 		if g.Party[actor.Index].WebbedTurns > 0 {
 			spd /= core.WebbedSpeedDivisor
 		}
@@ -540,6 +542,14 @@ func drainNonDamagingPartyStatuses(g *core.GameState, actor core.ActorRef) {
 	tickBlessAfterPartyTurn(g, actor)
 	tickIceArmorAfterPartyTurn(g, actor)
 	tickRegenAfterPartyTurn(g, actor)
+	tickVanishAfterPartyTurn(g, actor)
+	applyOverchargeRegen(g, actor)
+}
+
+// tickVanishAfterPartyTurn drains the Thief's Vanish (untargetable) one turn at the
+// end of their turn; clears silently. Re-targetable once it hits 0.
+func tickVanishAfterPartyTurn(g *core.GameState, actor core.ActorRef) {
+	tickPartyStatusCounter(g, actor, func(m *core.PartyMember) *int { return &m.VanishTurns }, "")
 }
 
 // drainNonDamagingEnemyStatuses ticks the enemy no-damage counters (buff/debuff
@@ -652,10 +662,18 @@ func finishActorTurn(g *core.GameState) {
 		drainNonDamagingPartyStatuses(g, g.Battle.Queue[g.Battle.QueueCursor])
 		// Bloodthirst converts the actor's phys output to lifesteal (no-op without the node).
 		applyBloodthirst(g, g.Battle.Queue[g.Battle.QueueCursor])
+		// Killing Spree grants an ATB burst if the turn scored a kill (no-op without the node).
+		applyKillingSpree(g, g.Battle.Queue[g.Battle.QueueCursor])
+		// The summoner's Ancestral Spirit shade strikes alongside them (no-op without one).
+		tickAncestralSpirit(g, g.Battle.Queue[g.Battle.QueueCursor])
 	}
-	// Zero the phys tally now lifesteal is banked, so reflect/counter damage can't
-	// leak into the next member's Bloodthirst.
+	// A pending Meteor counts down each turn and lands when its fuse runs out. Before
+	// the tally-zero so its kills don't leak into the next actor's Killing Spree.
+	resolveMeteorIfDue(g)
+	// Zero the per-turn tallies now they're banked, so reflect/counter damage can't
+	// leak into the next member's Bloodthirst / Killing Spree.
 	g.Battle.PhysDamageThisTurn = 0
+	g.Battle.EnemyKillsThisTurn = 0
 	if checkEnemyWipeout(g) {
 		return
 	}
@@ -680,6 +698,8 @@ func beginPartyTurn(g *core.GameState, partyIndex int) {
 	resetBattleAction(g)
 	if core.PartyIndexInRange(g.Party, partyIndex) {
 		g.Party[partyIndex].Defending = false
+		// Guard covers "this round" — it lapses when the guardian acts again.
+		core.ClearGuardBy(g.Party, partyIndex)
 		g.Battle.PartyTarget = partyIndex
 	} else {
 		// Out-of-bounds partyIndex (bogus queue actor): fall back to the first
@@ -702,6 +722,8 @@ func updatePlayerBattle(g *core.GameState) {
 	}
 
 	switch g.Battle.ActionMode {
+	case core.ActionMenu:
+		updateActionMenu(g)
 	case core.ActionEnemyTarget:
 		updateEnemyTargeting(g)
 	case core.ActionPartyTarget:
@@ -717,7 +739,9 @@ func updatePlayerBattle(g *core.GameState) {
 	case core.ActionSwapTarget:
 		updateSwapTarget(g)
 	default:
-		updateActionMenu(g)
+		// Fail loudly on an unhandled mode rather than silently routing to the menu —
+		// parity with the modal/updateMenu switches' "new kind panics at startup" contract.
+		panic(fmt.Sprintf("updatePlayerBattle: unhandled ActionMode %d", g.Battle.ActionMode))
 	}
 }
 
@@ -1425,6 +1449,9 @@ func resetBattleTransients(b *core.Battle) {
 	b.EnemyPendingSkill = core.SkillNone
 	b.EnemyAttackMisses = false
 	b.PhysDamageThisTurn = 0
+	b.EnemyKillsThisTurn = 0
+	b.MeteorFuse = 0
+	b.MeteorDamage = 0
 	b.Queue = nil
 	b.QueueCursor = 0
 	b.NextRoundQueue = nil

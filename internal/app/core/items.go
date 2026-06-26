@@ -1,6 +1,10 @@
 package core
 
-import "crawler/internal/app/core/mapfile"
+import (
+	"fmt"
+
+	"crawler/internal/app/core/mapfile"
+)
 
 // ItemKind identifies an item. Stack-counted in GameState.Inventory: one
 // ItemStack per kind with a Count.
@@ -404,6 +408,63 @@ func ItemHelpsTarget(def ItemDefinition, m PartyMember) bool {
 	mpUseful := def.MPAmount > 0 && m.MP < m.MaxMP
 	satietyUseful := def.SatietyGain > 0 && m.Hunger > 0
 	return hpUseful || mpUseful || satietyUseful
+}
+
+// RestorativeResult reports what a consumed restorative actually applied
+// (post-clamp), so call sites can log / flash by the real amounts.
+type RestorativeResult struct {
+	HP, MP, Satiety int
+}
+
+// ApplyRestorative applies a consumable's def to m in the canonical order — feed
+// first (a big enough meal lifts Starving so the item's own heal can land), then
+// heal HP, then restore MP — and returns the actual amounts. The single home for
+// the restorative effect sequence; the explore and battle item paths both use it
+// so the ordering can't drift between them.
+func ApplyRestorative(m *PartyMember, def ItemDefinition) RestorativeResult {
+	if m == nil {
+		return RestorativeResult{}
+	}
+	sat := FeedMember(m, def.SatietyGain)
+	hp := 0
+	if def.HealAmount > 0 {
+		before := m.HP
+		if HealMember(m, def.HealAmount) {
+			hp = m.HP - before
+		}
+	}
+	mp := RestoreMP(m, def.MPAmount)
+	return RestorativeResult{HP: hp, MP: mp, Satiety: sat}
+}
+
+// ItemUseMessage formats the consumed-item log line by what it restored (HP/MP/
+// both/neither). res carries ACTUAL post-clamp amounts so the log can't overclaim.
+// Shared by the battle and explore item-use paths.
+func ItemUseMessage(targetName string, def ItemDefinition, res RestorativeResult) string {
+	switch {
+	case res.HP > 0 && res.MP > 0:
+		return fmt.Sprintf("%s uses %s (+%d HP, +%d MP).", targetName, def.Name, res.HP, res.MP)
+	case res.HP > 0 && res.Satiety > 0:
+		return fmt.Sprintf("%s eats %s (+%d HP, belly fuller).", targetName, def.Name, res.HP)
+	case res.HP > 0:
+		return fmt.Sprintf("%s eats %s (+%d HP).", targetName, def.Name, res.HP)
+	case res.MP > 0:
+		return fmt.Sprintf("%s drinks %s (+%d MP).", targetName, def.Name, res.MP)
+	case res.Satiety > 0:
+		return fmt.Sprintf("%s eats %s — a little less hungry.", targetName, def.Name)
+	default:
+		// Name the recipient like the +HP/+MP branches (the item lands on the target).
+		return fmt.Sprintf("%s uses %s.", targetName, def.Name)
+	}
+}
+
+// RestorativeUseCategory is LogHeal when a restorative landed anything, else
+// LogInfo (a no-op use reads as neutral). Shared by both item-use paths.
+func RestorativeUseCategory(res RestorativeResult) LogCategory {
+	if res.HP > 0 || res.MP > 0 || res.Satiety > 0 {
+		return LogHeal
+	}
+	return LogInfo
 }
 
 // MemberCanBeHealed is the "is an HP heal not wasted?" gate for out-of-battle

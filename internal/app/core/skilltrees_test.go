@@ -67,17 +67,21 @@ func TestBuySkillNode_LearnsThenUpgradesLadder(t *testing.T) {
 }
 
 // TestBuySkillNode_PassiveNodeGrantsNoSkill: a GrantSkill==SkillNone node records its rank but must
-// not change LearnedSkills or the SkillTiers map. Uses passive `searing-light` after root `smite`.
+// not change LearnedSkills or the SkillTiers map. Uses passive `bloodthirst` after granting
+// `cleave`→`rend` (Warrior Fury) — searing-light is now an active granting node.
 func TestBuySkillNode_PassiveNodeGrantsNoSkill(t *testing.T) {
-	m := PartyMember{Class: ClassCleric, SkillPoints: 2}
-	if !BuySkillNode(&m, "smite") { // grants Smite
-		t.Fatal("buy smite failed")
+	m := PartyMember{Class: ClassWarrior, SkillPoints: 3}
+	if !BuySkillNode(&m, "cleave") { // grants Swipe (root)
+		t.Fatal("buy cleave failed")
+	}
+	if !BuySkillNode(&m, "rend") { // grants Rend (requires cleave)
+		t.Fatal("buy rend failed")
 	}
 	learnedBefore := len(LearnedSkills(&m))
 	tiersBefore := len(m.SkillTiers)
 
-	if !BuySkillNode(&m, "searing-light") { // passive, grants nothing
-		t.Fatal("buy searing-light failed")
+	if !BuySkillNode(&m, "bloodthirst") { // passive, grants nothing (requires rend)
+		t.Fatal("buy bloodthirst failed")
 	}
 	if got := len(LearnedSkills(&m)); got != learnedBefore {
 		t.Errorf("passive node changed LearnedSkills count %d -> %d", learnedBefore, got)
@@ -85,7 +89,7 @@ func TestBuySkillNode_PassiveNodeGrantsNoSkill(t *testing.T) {
 	if len(m.SkillTiers) != tiersBefore {
 		t.Errorf("passive node wrote a SkillTiers entry: %v", m.SkillTiers)
 	}
-	if got := TreeNodeRank(&m, "searing-light"); got != 1 {
-		t.Errorf("searing-light rank = %d, want 1", got)
+	if got := TreeNodeRank(&m, "bloodthirst"); got != 1 {
+		t.Errorf("bloodthirst rank = %d, want 1", got)
 	}
 }

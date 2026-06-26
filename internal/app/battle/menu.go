@@ -308,7 +308,7 @@ func applyItem(g *core.GameState) {
 	target := g.Battle.PartyTarget
 	// Re-check Ingested (a mantrap can swallow the chosen ally between target-select
 	// and confirm): without it the stack is consumed and the heal no-ops — item wasted.
-	if !partyIndexValid(g, target) || g.Party[target].HP <= 0 || g.Party[target].Ingested {
+	if !partyIndexValid(g, target) || !core.MemberAvailable(g.Party[target]) {
 		setBattleStatus(g, msgInvalidTarget)
 		return
 	}
@@ -345,48 +345,17 @@ func applyItem(g *core.GameState) {
 		finishActorTurn(g)
 		return
 	}
-	// Feed first: a big enough meal lifts Starving so the food's own heal can land.
-	fedSatiety := core.FeedMember(tgt, def.SatietyGain)
-	healedHP := 0
-	if def.HealAmount > 0 {
-		before := tgt.HP
-		if healPartyMember(g, target, def.HealAmount) {
-			healedHP = tgt.HP - before
-		}
-	}
-	restoredMP := 0
-	if def.MPAmount > 0 {
-		restoredMP = core.RestoreMP(tgt, def.MPAmount)
+	// core.ApplyRestorative owns the feed→heal→restore order (shared with explore).
+	res := core.ApplyRestorative(tgt, def)
+	if res.HP > 0 {
+		tgt.DamageFlash = core.FlashDuration // battle-only VFX: flash + cue on a real HP heal
+		audio.Play(audio.SoundHeal)
 	}
 	actor := &g.Party[g.Battle.CurrentParty]
 	stampPartyBump(actor)
-	itemCat := core.LogInfo
-	if healedHP > 0 || restoredMP > 0 || fedSatiety > 0 {
-		itemCat = core.LogHeal // restorative use reads as healing; a no-op use stays neutral
-	}
-	setBattleMessageCat(g, itemUseMessage(tgt.Name, def, healedHP > 0, healedHP, restoredMP, fedSatiety), itemCat)
+	setBattleMessageCat(g, core.ItemUseMessage(tgt.Name, def, res), core.RestorativeUseCategory(res))
 	g.Battle.PendingItem = core.ItemNone
 	finishActorTurn(g)
-}
-
-// itemUseMessage formats the consumed-item log line by what it restored (HP/MP/
-// both/neither). hp and mp are ACTUAL post-clamp amounts so the log can't overclaim.
-func itemUseMessage(targetName string, def core.ItemDefinition, healed bool, hp, mp, sat int) string {
-	switch {
-	case healed && hp > 0 && mp > 0:
-		return fmt.Sprintf("%s uses %s (+%d HP, +%d MP).", targetName, def.Name, hp, mp)
-	case hp > 0 && sat > 0:
-		return fmt.Sprintf("%s eats %s (+%d HP, belly fuller).", targetName, def.Name, hp)
-	case healed && hp > 0:
-		return fmt.Sprintf("%s eats %s (+%d HP).", targetName, def.Name, hp)
-	case mp > 0:
-		return fmt.Sprintf("%s drinks %s (+%d MP).", targetName, def.Name, mp)
-	case sat > 0:
-		return fmt.Sprintf("%s eats %s — a little less hungry.", targetName, def.Name)
-	default:
-		// Name the recipient like the +HP/+MP branches (the item lands on the target).
-		return fmt.Sprintf("%s uses %s.", targetName, def.Name)
-	}
 }
 
 // performDefend marks the current member defending and ends their turn. No timing
@@ -415,7 +384,7 @@ func nextLivingSwapTarget(g *core.GameState, from, dir int) (int, bool) {
 	}
 	actor := g.Battle.CurrentParty
 	for step := 1; step <= n; step++ {
-		i := ((from+dir*step)%n + n) % n
+		i := core.WrapIndex(from+dir*step, n)
 		if i != actor && g.Party[i].HP > 0 {
 			return i, true
 		}
@@ -472,16 +441,7 @@ func updateSwapTarget(g *core.GameState) {
 // Down/Right step forward, Up/Left step back (any slot; swap is no longer limited to
 // an orthogonal neighbour). ok=false if no direction was pressed.
 func swapTargetForDirection(g *core.GameState) (int, bool) {
-	dir := 0
-	switch {
-	case input.DownPressed():
-		dir = 1
-	case input.UpPressed():
-		dir = -1
-	default:
-		dir = input.CursorLeftRight()
-	}
-	return nextLivingSwapTarget(g, g.Battle.PartyTarget, dir)
+	return nextLivingSwapTarget(g, g.Battle.PartyTarget, input.CursorStep())
 }
 
 // performSwap exchanges the actor's formation slot with the cursored partner's and
