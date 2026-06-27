@@ -546,7 +546,7 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 	// Active member's name as the header, in class color, over a gilt divider rule.
 	drawEngravedText(assets.hudFont, member.Name, float32(contentX), float32(y+14), FontHeading, classCol)
 	ruleY := y + 48
-	drawPipCappedRule(x+18, ruleY, w-36, fadeColor(giltBright, 0.5), 2.4, fadeColor(giltDim, 0.85))
+	drawPipCappedRule(x+actionMenuRuleInsetX, ruleY, w-2*actionMenuRuleInsetX, fadeColor(giltBright, 0.5), 2.4, fadeColor(giltDim, 0.85))
 	contentY := y + 58
 	// subY: sub-prompt/list start, via bodyBelowHeading for a consistent heading→body gap.
 	subY := bodyBelowHeading(contentY, FontHeading)
@@ -585,7 +585,7 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 	// Confirm/Back hint footer over a gilt rule; skipped when the panel is shrunk short.
 	if h >= actionMenuHintMinH {
 		hintY := footerBaselineY(y+h, FontSmall)
-		drawGiltRule(x+18, hintY-12, w-36, 1, 0.3)
+		drawGiltRule(x+actionMenuRuleInsetX, hintY-12, w-2*actionMenuRuleInsetX, 1, 0.3)
 		DrawHintBarLeft(assets.hudFont, confirmBackHints, float32(contentX), float32(hintY), FontSmall)
 	}
 }
@@ -865,6 +865,10 @@ func drawGlassRowPlate(x, y, w int32, fillAlpha, outlineAlpha float32) {
 // first action row, so the list doesn't crowd the name above it.
 const actionMenuListTopGap = int32(10)
 
+// actionMenuRuleInsetX is the horizontal inset of the action-menu divider rules
+// from the panel edges (header rule + footer hint rule share it, width = w - 2x).
+const actionMenuRuleInsetX = int32(18)
+
 // drawActionRow paints one key-plate row (selected gets the gilt plate, else dark glass).
 // The plate spans x-actionRowPlateInsetX to rightX so the highlight reaches the content edge.
 // A disabled row keeps the selection plate (cursor must stay visible) but greys its text.
@@ -886,7 +890,7 @@ func drawActionRow(font rl.Font, x, y, rightX int32, label, suffix string, selec
 	}
 	drawTextWithShadow(font, label, float32(x), float32(y), FontBody, labelCol)
 	if suffix != "" {
-		drawTextRightAligned(font, suffix, float32(rightX)-12, float32(y)+5, FontSmall, suffixCol)
+		drawTextRightAligned(font, suffix, float32(rightX)-float32(modalValueInsetX), float32(y)+5, FontSmall, suffixCol)
 	}
 }
 

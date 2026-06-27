@@ -158,7 +158,7 @@ func updatePanels(g *core.GameState, dt float32) {
 			tryUseItem(g)
 			// Consuming the last unit shrinks the live list; re-clamp now (mirrors the
 			// shop/chest paths) so the highlight doesn't point past the new last stack.
-			g.PanelsRowCursor = clampCursorToLen(g.PanelsRowCursor, core.LiveStackCount(g.Inventory))
+			g.PanelsRowCursor = core.ClampIndex(g.PanelsRowCursor, core.LiveStackCount(g.Inventory))
 		}
 	case core.PanelTabQuests:
 		// Two sub-views: Left/Right toggles Quests ↔ Bestiary (resetting the row

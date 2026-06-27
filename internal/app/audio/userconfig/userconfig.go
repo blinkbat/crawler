@@ -150,10 +150,17 @@ func ListSounds() []string {
 		if !strings.HasSuffix(strings.ToLower(name), WavExt) {
 			continue
 		}
-		// Strip only the trailing .wav, not the last dot-segment: a dotted stem like
-		// "a.b.wav" must list as "a.b" so SoundPath round-trips it (filepath.Ext would
-		// drop ".b", yielding a name that resolves to a different/missing file).
-		out = append(out, name[:len(name)-len(WavExt)])
+		// Strip only the trailing .wav, not the last dot-segment (filepath.Ext would
+		// drop ".b" from "a.b.wav"). Then list only stems that survive SanitizeName
+		// unchanged: Save/LoadAssignments both canonicalize, so a non-canonical stem
+		// like "a.b" or "Mix" would persist as "ab"/"mix" and resolve to a missing
+		// file, silently dropping the assignment back to synth. Hiding it is honest —
+		// it can't be reliably assigned. App-written sounds are already canonical.
+		stem := name[:len(name)-len(WavExt)]
+		if SanitizeName(stem) != stem {
+			continue
+		}
+		out = append(out, stem)
 	}
 	sort.Strings(out)
 	return out

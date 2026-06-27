@@ -945,10 +945,11 @@ type HitAnim struct {
 	// over its duration via BumpOffset. Set on real damage.
 	HitKnockback float32
 	// Floating damage popup. Quality drives color + trailing "!"; Timer counts
-	// down from QualityResultDuration.
+	// down from QualityResultDuration. Crit prefixes the number with "Critical!".
 	DamagePopup        int
 	DamagePopupQuality int
 	DamagePopupTimer   float32
+	DamagePopupCrit    bool
 }
 
 type Enemy struct {
@@ -1159,8 +1160,8 @@ type Battle struct {
 	HitStop float32
 
 	// ShakeTimer / ShakePeak / ShakeDur drive the combat screen-shake (camera
-	// offset = ShakePeak·(ShakeTimer/ShakeDur)). Armed together by
-	// TriggerCombatShake. Wall-clock oscillation, so it shakes even during
+	// offset = ShakePeak·(ShakeTimer/ShakeDur)). Armed (and stacked) by
+	// AddCombatShake. Wall-clock oscillation, so it shakes even during
 	// HitStop. Reset at Start / clearBattleResidual.
 	ShakeTimer float32
 	ShakePeak  float32

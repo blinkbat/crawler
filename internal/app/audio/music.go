@@ -23,6 +23,9 @@ const (
 const (
 	musicSwellInPerSec   = float32(0.133) // 0→1 over ~7.5s — gentle first-explore intro
 	musicCrossfadePerSec = float32(0.367) // ~2.7s explore↔battle crossfade
+	// musicSilentGainEps: below this gain the battle track counts as silent, so the
+	// explore theme rising from it gets the slow swell rather than the crossfade rate.
+	musicSilentGainEps = float32(0.05)
 )
 
 // volumeChannel is one 0..1 slider level plus the shared effective/get/set logic.
@@ -150,7 +153,7 @@ func UpdateMusic(dt float32, wantMusic, inBattle bool) {
 	// slow swell; every other move — including the battle crossfades — uses the quicker
 	// equal crossfade rate so the two themes trade evenly.
 	exploreRate := musicCrossfadePerSec
-	if exploreTarget > exploreTrack.gain && battleTrack.gain < 0.05 {
+	if exploreTarget > exploreTrack.gain && battleTrack.gain < musicSilentGainEps {
 		exploreRate = musicSwellInPerSec
 	}
 	updateTrack(&exploreTrack, exploreTarget, exploreRate, dt)

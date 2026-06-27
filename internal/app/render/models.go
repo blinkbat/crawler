@@ -1,6 +1,7 @@
 package render
 
 import (
+	"fmt"
 	"image/color"
 	"math"
 
@@ -391,12 +392,11 @@ const (
 // speciesCanopyTint hue-shifts a leaf tint per species (green passes through),
 // preserving brightness so highlight/shadow lumps stay relatively bright/deep.
 func speciesCanopyTint(orig color.RGBA, species treeSpecies) color.RGBA {
-	if species == treeSpeciesGreen {
-		return orig
-	}
 	// Brightness key — green channel (most of the leaf luminance) plus a touch of R.
 	key := (int(orig.G)*2 + int(orig.R)) / 3
 	switch species {
+	case treeSpeciesGreen:
+		return orig
 	case treeSpeciesBlossom:
 		// Rose pink: R up, G down, B toward warm.
 		return color.RGBA{
@@ -413,8 +413,9 @@ func speciesCanopyTint(orig color.RGBA, species treeSpecies) color.RGBA {
 			B: core.ClampByte(key - 40),
 			A: orig.A,
 		}
+	default:
+		panic(fmt.Sprintf("speciesCanopyTint: unhandled treeSpecies %d", species))
 	}
-	return orig
 }
 
 // jitterTint shifts R/G/B by up to ±amp using bytes from bits; alpha preserved.

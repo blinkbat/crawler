@@ -187,22 +187,36 @@ const (
 
 	// Combat screen shake (camera punch on a well-timed hit). Each tier has a
 	// PEAK (world-unit offset) and DURATION; oscillation runs off the wall clock
-	// so it shakes through hit-stop. Armed via TriggerCombatShake. Big shake is
-	// reserved for crits/AoE (armed explicitly, overrides the grade base); peak 0 mutes a tier.
+	// so it shakes through hit-stop. Armed via AddCombatShake, which STACKS the
+	// grade base + the crit/AoE punch additively (a crit on a perfect press shakes
+	// harder than either alone); peak 0 mutes a tier.
+	CombatShakeGoodPeak      = float32(0.010) // a little shake on a Good press
+	CombatShakeGoodDur       = float32(0.08)
 	CombatShakeGreatPeak     = float32(0.016) // subtle normal Great
 	CombatShakeGreatDur      = float32(0.10)
 	CombatShakeExcellentPeak = float32(0.026) // a touch more for Excellent
 	CombatShakeExcellentDur  = float32(0.14)
-	CombatShakeBigPeak       = float32(0.055) // crits + AoE casts: the real punch
+	CombatShakeBigPeak       = float32(0.055) // crits + AoE casts: the real punch (stacks on the grade)
 	CombatShakeBigDur        = float32(0.30)
 
 	// Controller rumble — haptic half of impact feedback, armed with the shake.
 	// RumblePerShakePeak maps a shake's world-unit peak to motor strength [0,1],
 	// so rumble grades with the shake automatically.
 	RumblePerShakePeak = float32(15.0)
-	// Taking a hit buzzes too (no camera shake — armed directly in damagePartyMember).
+	// RumbleImpact: every damaging blow (foe or friend, dmg > 0) buzzes a little
+	// on its own — grade/crit shake rumble stacks ON TOP of this base.
+	RumbleImpact    = float32(0.18)
+	RumbleImpactDur = float32(0.12)
+	// Taking a hit buzzes a touch harder than a plain impact (no camera shake —
+	// armed directly in applyPartyDamage).
 	RumbleHurtStrength = float32(0.45)
 	RumbleHurtDur      = float32(0.18)
+	// Entering a battle gives a short anticipatory buzz.
+	RumbleBattleStart    = float32(0.30)
+	RumbleBattleStartDur = float32(0.30)
+	// Touching a healing crystal: a soft, longer shimmer.
+	RumbleCrystal    = float32(0.30)
+	RumbleCrystalDur = float32(0.50)
 	// Debug menu "Test Rumble" — strong + long enough to be unmistakable.
 	RumbleTestStrength = float32(0.8)
 	RumbleTestDur      = float32(0.5)
@@ -347,7 +361,7 @@ const (
 	//   FleetFootedSPDPerRank     — Thief Cutpurse: +SPD/rank.
 	//   FleetFootedDodgePerRank   — Thief Cutpurse: +dodge chance/rank.
 	//   KillingSpreeReadiness     — Thief Cutpurse capstone: ATB gauge granted on a kill (single rank).
-	//   OvderchargeFreeCastChance — (see Overcharge block) Wizard Storm capstone.
+	//   OverchargeFreeCastChance  — (see Overcharge block) Wizard Storm capstone.
 	LuckyStrikeCritPerRank    = 0.05
 	BloodthirstHealPerRank    = 0.10
 	RetributionReflectPerRank = 0.20
@@ -362,6 +376,13 @@ const (
 	// StatusShortenDivisor: each this-many WIS shaves one turn off a rolled
 	// enemy-applied status duration. Floor 1 (shortens, never skips).
 	StatusShortenDivisor = 3
+
+	// Status RESIST: WIS also grants a flat chance to shrug an inflicted timed
+	// status off entirely (DoTs + CC, either side). Stacks with the shorten above
+	// (resist first, then shorten what lands). A high-WIS foe (e.g. the Amoeba) is
+	// the intended tank answer to status-spam — pair it with crit, which punches armor.
+	StatusResistPerWIS = 0.05 // +5% full-resist chance per point of WIS
+	StatusResistCap    = 0.75 // never fully status-immune
 
 	// ATBReadyThreshold: readiness gate to take a turn. Each tick an alive actor's
 	// readiness gains its SPD; first to cross acts and keeps the overflow. Higher
@@ -545,7 +566,8 @@ var SwipeHitFracs = []float32{0.5, 0.78}
 // (Label, atk/def multipliers, accuracy & crit bonuses, impact knobs). Render
 // (color/throb) and battle (audio) keep their own tables for package layering.
 // Def < 1 (less incoming), Atk >= 1 (more outgoing); AccuracyBonus is added then
-// clamped at 1.0. Only Great/Excellent get a non-zero HitStop/ShakePeak/ShakeDur.
+// clamped at 1.0. Good/Great/Excellent get a non-zero ShakePeak/ShakeDur (Good a
+// faint one); only Great/Excellent freeze with a non-zero HitStop.
 var timingGrades = []struct {
 	Label         string
 	Atk           float32
@@ -558,7 +580,7 @@ var timingGrades = []struct {
 }{
 	TimingQualityMiss:      {Label: "Miss...", Atk: 1.0, Def: 1.0, AccuracyBonus: 0.0, CritBonus: 0.0},
 	TimingQualityNice:      {Label: "Nice!", Atk: 1.25, Def: 0.75, AccuracyBonus: 0.10, CritBonus: 0.02},
-	TimingQualityGood:      {Label: "Good!", Atk: 1.5, Def: 0.5, AccuracyBonus: 0.20, CritBonus: 0.05},
+	TimingQualityGood:      {Label: "Good!", Atk: 1.5, Def: 0.5, AccuracyBonus: 0.20, CritBonus: 0.05, ShakePeak: CombatShakeGoodPeak, ShakeDur: CombatShakeGoodDur},
 	TimingQualityGreat:     {Label: "Great!", Atk: 1.75, Def: 0.35, AccuracyBonus: 0.30, CritBonus: 0.12, HitStop: HitStopGreat, ShakePeak: CombatShakeGreatPeak, ShakeDur: CombatShakeGreatDur},
 	TimingQualityExcellent: {Label: "Excellent!", Atk: 2.0, Def: 0.25, AccuracyBonus: 0.45, CritBonus: 0.25, HitStop: HitStopExcellent, ShakePeak: CombatShakeExcellentPeak, ShakeDur: CombatShakeExcellentDur},
 }

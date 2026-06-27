@@ -66,7 +66,7 @@ func updateChestModal(g *core.GameState) {
 	}
 	// Took from an item row: clamp so emptying the bottom stack pulls the cursor
 	// back to the new last item instead of onto Take-All.
-	g.ChestMenuIndex = clampCursorToLen(g.ChestMenuIndex, len(remaining))
+	g.ChestMenuIndex = core.ClampIndex(g.ChestMenuIndex, len(remaining))
 }
 
 // closeChest dismisses the modal and marks the chest looted if empty (looted

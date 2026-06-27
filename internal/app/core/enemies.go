@@ -236,10 +236,11 @@ var enemyDefinitions = []EnemyDefinition{
 		PluralNoun:   "amoebae",
 		GroupName:    "Amoeba Cluster",
 		Item:         ItemNone,
-		// Low HP, very high armor: phys whiffs to 1, magic shreds.
+		// Low HP, very high armor: phys whiffs to 1, magic shreds. High WIS shrugs off
+		// most status-spam (DoTs/CC) — a crit (post-armor) is the reliable answer.
 		MaxHP:              8,
 		AttackDamage:       2,
-		Stats:              Stats{STR: 1, DEX: 0, INT: 0, WIS: 0, VIT: 2, SPD: 2},
+		Stats:              Stats{STR: 1, DEX: 0, INT: 0, WIS: 12, VIT: 2, SPD: 2},
 		Tier:               3,
 		XPValue:            16,
 		Armor:              8,

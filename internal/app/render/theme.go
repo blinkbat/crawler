@@ -1627,6 +1627,12 @@ func colorWithAlpha(col color.RGBA, byteAlpha uint8) color.RGBA {
 	return col
 }
 
+// HP-bar tier cutoffs (fraction of max): above high → green, above mid → amber, else red.
+const (
+	hpFracHigh = 0.6
+	hpFracMid  = 0.3
+)
+
 // hpFillColor selects a tier color based on remaining HP percent.
 func hpFillColor(value, maxValue int) color.RGBA {
 	if maxValue <= 0 {
@@ -1634,9 +1640,9 @@ func hpFillColor(value, maxValue int) color.RGBA {
 	}
 	p := float32(value) / float32(maxValue)
 	switch {
-	case p > 0.6:
+	case p > hpFracHigh:
 		return barHPHigh
-	case p > 0.3:
+	case p > hpFracMid:
 		return barHPMid
 	default:
 		return barHPLow

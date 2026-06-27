@@ -80,6 +80,9 @@ func Start(g *core.GameState, packIndex, fleeReturnX, fleeReturnZ int, engageSid
 	resetBattleAction(g)
 	setBattleMessage(g, core.BattleEncounterMessage(g))
 	beginNewRound(g)
+	// Short anticipatory buzz as the encounter slams in (after resetBattleTransients,
+	// which zeroes the rumble timer).
+	core.TriggerRumble(&g.Battle, core.RumbleBattleStart, core.RumbleBattleStartDur)
 }
 
 func Update(g *core.GameState, dt float32) {
@@ -783,14 +786,14 @@ func tickFlashHold(g *core.GameState, dt float32, onResolve func()) bool {
 	return true
 }
 
-// fireImpact runs the action's apply (onResolve) and THEN arms the base shake, so
+// fireImpact runs the action's apply (onResolve) and THEN arms the grade shake, so
 // the shake lands WITH the impact after the freeze, not during it. CombatShakeFor
-// returns 0 for Miss/Nice/Good; a stronger crit/AoE shake armed in onResolve
-// survives via TriggerCombatShake's keep-the-stronger rule.
+// returns 0 for Miss/Nice and a graded peak for Good/Great/Excellent; a crit/AoE
+// punch armed in onResolve STACKS on top of it via AddCombatShake.
 func fireImpact(g *core.GameState, onResolve func()) {
 	onResolve()
 	basePeak, baseDur := core.CombatShakeFor(g.Battle.Timing.Quality)
-	core.TriggerCombatShake(&g.Battle, basePeak, baseDur)
+	core.AddCombatShake(&g.Battle, basePeak, baseDur)
 }
 
 // driveSequenceInput reads one directional tap into the active sequence/recall bar

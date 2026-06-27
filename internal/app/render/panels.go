@@ -495,8 +495,8 @@ func drawFormationCard(font rl.Font, g *core.GameState, i int, quad rl.Rectangle
 	// --- Right: stat grid (2 cols × ceil(StatCount/2) rows) + armor/XP ---
 	statColW := (rightW - formationStatColGap) / 2
 	colPitch := statColW + formationStatColGap // column-1 starts a gutter past column-0
-	rowH := float32(28)
-	sy := quad.Y + 16
+	rowH := barHeightCompact
+	sy := quad.Y + cardTopInsetY
 	// Effective stats fold in gear, combat buffs, and the starving penalty; show the
 	// EFFECTIVE value and tint it vs base — green when raised, red when lowered.
 	effStats := core.EffectiveStats(m)

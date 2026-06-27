@@ -507,6 +507,9 @@ func fireHealingCrystal(g *core.GameState, idx int) {
 	g.Crystals[idx].Charged = false
 	g.Crystals[idx].Charge = 0
 	audio.Play(audio.SoundCrystal)
+	// Soft shimmer in the hands as the crystal discharges (TickRumble runs every
+	// frame on g.Battle, so this drives even outside combat).
+	core.TriggerRumble(&g.Battle, core.RumbleCrystal, core.RumbleCrystalDur)
 	if err := core.SaveGame(g); err != nil {
 		g.LogMessageCat("The crystal restores the party. (Autosave failed: "+err.Error()+")", core.LogHeal)
 		return

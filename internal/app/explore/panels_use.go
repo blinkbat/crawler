@@ -31,12 +31,6 @@ func stackAtCursor[T any](stacks []T, cursor int) (T, bool) {
 	return stacks[cursor], true
 }
 
-// clampCursorToLen keeps a cursor in range after the list shrank (last row, or 0
-// for empty). Shared by the shop-sell and chest-take paths.
-func clampCursorToLen(cursor, n int) int {
-	return core.ClampIndex(cursor, n)
-}
-
 // tryUseItem handles a use press on the Items tab: a restorative opens the
 // ally-target picker; equipment / no-effect rows ping miss.
 func tryUseItem(g *core.GameState) {

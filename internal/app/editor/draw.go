@@ -290,7 +290,7 @@ func doorEditLayoutFor() doorEditLayout {
 	nameField := fields[0]
 	mapField := fields[1]
 	doorField := fields[2]
-	y += 3*rowGap + 6
+	y += 3*rowGap + dialogStackTailGap
 	// Facing row: one equal-width button per Facing.
 	var facing [core.FacingCount]rl.Rectangle
 	copy(facing[:], equalButtonRow(x, y, fw, fieldH, int(core.FacingCount)))
@@ -298,9 +298,8 @@ func doorEditLayoutFor() doorEditLayout {
 	// Style row: one button per DoorStyle.
 	var style [core.DoorStyleCount]rl.Rectangle
 	copy(style[:], equalButtonRow(x, y, fw, fieldH, int(core.DoorStyleCount)))
-	y = modalFooterButtonY(r)
-	deleteBtn := rl.NewRectangle(x, y, modalWideBtnW, modalBtnH)
-	closeBtn := rl.NewRectangle(r.X+r.Width-modalWideBtnW-modalContentInset, y, modalWideBtnW, modalBtnH)
+	deleteBtn := bottomLeftBtn(r)
+	closeBtn := bottomRightBtn(r)
 	return doorEditLayout{
 		card:      r,
 		nameField: nameField,

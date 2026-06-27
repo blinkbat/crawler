@@ -803,6 +803,7 @@ const (
 	dialogActionRowGap = float32(56)  // row pitch in the action editor
 	dialogListRowH     = dropdownRowH // scrollable list rows share the dropdown's pitch
 	scrollMoreHintGap  = float32(16)  // gap above the first row for the ▲ "N more" hint
+	dialogStackTailGap = float32(6)   // extra gap below a stacked field group before the next content
 )
 
 // stackRows lays out n equal-height rows from (x,y) at pitch rowGap (shared with
@@ -873,7 +874,7 @@ func dialogNodeLayoutFor(cursor, choiceCount int) dialogNodeLayout {
 	continueField := fields[3]
 	menuToggle := fields[4]
 	actionBtn := fields[5]
-	y += 6*rowGap + 6
+	y += 6*rowGap + dialogStackTailGap
 	// Choice list rows (scroll window over the full list).
 	top, rows := scrollRows(x, y, fw, dialogListRowH, cursor, choiceCount, dialogChoiceVisible)
 	// Choice action buttons + Back along the bottom.

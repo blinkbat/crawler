@@ -1045,7 +1045,7 @@ func DrawDamagePopups(camera rl.Camera3D, g *core.GameState, assets Resources) {
 			pos = cameraRelativeOffset(camera, pos, v.popupXOffset, v.popupYOffset, 0)
 		}
 		drawFloatingDamage(camera, assets, pos, enemy.DamagePopup, enemy.DamagePopupQuality,
-			enemy.DamagePopupTimer, qualityColor(enemy.DamagePopupQuality, false))
+			enemy.DamagePopupCrit, enemy.DamagePopupTimer, qualityColor(enemy.DamagePopupQuality, false))
 	}
 	// Party side: every hit a member takes floats a number too. Incoming hits aren't graded,
 	// so they use the fixed hurt tone, not the timing-grade ramp.
@@ -1061,13 +1061,14 @@ func DrawDamagePopups(camera rl.Camera3D, g *core.GameState, assets Resources) {
 			worldPos = cameraRelativeOffset(camera, worldPos, v.popupXOffset, v.popupYOffset, 0)
 		}
 		drawFloatingDamage(camera, assets, worldPos,
-			m.DamagePopup, m.DamagePopupQuality, m.DamagePopupTimer, partyDamagePopupColor)
+			m.DamagePopup, m.DamagePopupQuality, m.DamagePopupCrit, m.DamagePopupTimer, partyDamagePopupColor)
 	}
 }
 
 // drawFloatingDamage renders one floating damage number above worldPos, shared by the enemy
 // and party loops. col is the base tint (grade ramp outgoing, hurt tone incoming); alpha applied here.
-func drawFloatingDamage(camera rl.Camera3D, assets Resources, worldPos rl.Vector3, value, quality int, timer float32, col rl.Color) {
+// A crit prefixes the number with "Critical!".
+func drawFloatingDamage(camera rl.Camera3D, assets Resources, worldPos rl.Vector3, value, quality int, crit bool, timer float32, col rl.Color) {
 	worldPos.Y += popupWorldRise
 	// A behind-camera anchor projects mirrored into view (raylib quirk); skip it.
 	if behindCamera(camera, worldPos) {
@@ -1082,7 +1083,7 @@ func drawFloatingDamage(camera rl.Camera3D, assets Resources, worldPos rl.Vector
 	t := timer / core.QualityResultDuration
 	scale, rise, alpha := popupAnimation(t)
 
-	label := damagePopupLabel(value, quality)
+	label := damagePopupLabel(value, quality, crit)
 	col.A = alpha
 
 	// FontHeading; Excellent's stronger throb comes from the scale factor, not a larger size.
@@ -1099,8 +1100,12 @@ func drawFloatingDamage(camera rl.Camera3D, assets Resources, worldPos rl.Vector
 }
 
 // damagePopupLabel formats the damage value (appending "!" on Excellent), from a 0..199
-// {plain,excellent} LUT; past that, strconv concat.
-func damagePopupLabel(damage, quality int) string {
+// {plain,excellent} LUT; past that, strconv concat. A crit prefixes "Critical! "
+// (and skips the LUT — crit popups are comparatively rare).
+func damagePopupLabel(damage, quality int, crit bool) string {
+	if crit {
+		return "Critical! " + strconv.Itoa(damage)
+	}
 	if damage >= 0 && damage < len(damagePopupLabelCache) {
 		if quality == core.TimingQualityExcellent {
 			return damagePopupLabelCache[damage].excellent

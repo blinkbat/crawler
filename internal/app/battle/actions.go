@@ -345,6 +345,12 @@ func handleEnemyStatusCast(ctx enemySpellCtx, cast enemyStatusCast) bool {
 		cast.already(ctx, m)
 		return true
 	}
+	// A high-WIS target can shrug a dedicated status cast off entirely — the enemy
+	// still spent its action (true). Procs resist silently; a focused cast narrates.
+	if core.RollStatusResist(g.Rand(), core.EffectiveStats(*m).WIS) {
+		enemySpellLog(ctx, "%s resists!", m.Name)
+		return true
+	}
 	if applyEnemyStatus(ctx, counter, cast.duration(ctx), cast.floor, cast.vfxSkill) {
 		cast.success(ctx, m)
 		return true
@@ -383,7 +389,7 @@ func handleEnemyWeb(ctx enemySpellCtx) bool {
 }
 
 // handleEnemyConfuse applies the Confused status; already-confused short-circuits.
-// WIS resistance is in ShortenStatusDuration (no separate per-cast roll).
+// WIS resistance (full-resist roll + duration shorten) is in handleEnemyStatusCast.
 func handleEnemyConfuse(ctx enemySpellCtx) bool {
 	return handleEnemyStatusCast(ctx, enemyStatusCast{
 		counter:  func(m *core.PartyMember) *int { return &m.ConfusedTurns },
@@ -539,17 +545,25 @@ func targetableEnemySlots(g *core.GameState, skill core.SkillID) []int {
 	return slots
 }
 
-// triggerBigShake arms the "costly hit" camera punch (AoE casts, Swipe, crits).
+// autoStrikeQuality is the popup grade for damage that ISN'T player-timed (DoT
+// ticks, ancestral shade, off-turn reflect, Meteor) — Good gives the orange popup
+// tone without implying the player nailed a press. One home for that convention.
+const autoStrikeQuality = core.TimingQualityGood
+
+// triggerBigShake stacks the "costly hit" camera punch (AoE casts, Swipe, crits)
+// onto any grade shake already armed this beat, so a crit on a perfect press
+// shakes harder than either alone.
 func triggerBigShake(g *core.GameState) {
-	core.TriggerCombatShake(&g.Battle, core.CombatShakeBigPeak, core.CombatShakeBigDur)
+	core.AddCombatShake(&g.Battle, core.CombatShakeBigPeak, core.CombatShakeBigDur)
 }
 
-// applyAoEDamageToSlots hits a FIXED slot set for `damage` via damageEnemy (SkillTag
-// armor rules apply). A slot whose foe an earlier pass already felled is skipped
-// (damageEnemy no-ops on the dead). Returns the count of foes actually struck this
-// pass. Swipe snapshots its front row ONCE and re-hits that same set every tally
-// pass, so a killed front row can't bleed the sweep into the back row.
-func applyAoEDamageToSlots(g *core.GameState, skill core.SkillID, slots []int, damage, quality int) int {
+// applyAoEDamageToSlots hits a FIXED slot set for `damage` via damageEnemyCrit
+// (SkillTag armor rules apply; the sweep's single crit roll multiplies post-armor
+// per target). A slot whose foe an earlier pass already felled is skipped (no-op on
+// the dead). Returns the count of foes actually struck this pass. Swipe snapshots its
+// front row ONCE and re-hits that same set every tally pass, so a killed front row
+// can't bleed the sweep into the back row.
+func applyAoEDamageToSlots(g *core.GameState, skill core.SkillID, slots []int, damage, quality int, crit bool) int {
 	hits := 0
 	tag := core.SkillTagFor(skill)
 	vfx := vfxKindFor(skill)
@@ -557,7 +571,7 @@ func applyAoEDamageToSlots(g *core.GameState, skill core.SkillID, slots []int, d
 		if _, ok := livingEnemyAt(g, slot); !ok {
 			continue
 		}
-		damageEnemy(g, slot, damage, quality, tag)
+		damageEnemyCrit(g, slot, damage, quality, tag, crit, false)
 		core.EnqueueEnemyVFX(g, vfx, slot)
 		hits++
 	}
@@ -646,9 +660,11 @@ func tryProcStatus(rng *rand.Rand, counter *int, defeated bool, baseChance float
 }
 
 // applyStatusRoll is the shared status-proc core: refuses on defeated /
-// non-positive chance / already-running counter (no-stack), else rolls and stamps
-// the WIS-shortened duration. Used by both tryProcStatus and the enemy basic-attack
-// proc. Returns true when just stamped.
+// non-positive chance / already-running counter (no-stack), else rolls the proc and
+// stamps the WIS-resisted duration. A high-WIS target may shrug it off entirely
+// (ResistStatusDuration → 0), which reads as a silent failed proc — the Amoeba's
+// answer to status-spam. Used by tryProcStatus and the enemy basic-attack proc.
+// Returns true when just stamped.
 func applyStatusRoll(rng *rand.Rand, counter *int, defeated bool, chance float64, durationFn func(*rand.Rand) int, resistWis int) bool {
 	if defeated || chance <= 0 || counter == nil || *counter > 0 {
 		return false
@@ -656,7 +672,7 @@ func applyStatusRoll(rng *rand.Rand, counter *int, defeated bool, chance float64
 	if rng.Float64() >= chance {
 		return false
 	}
-	*counter = core.ShortenStatusDuration(durationFn(rng), resistWis)
+	*counter = core.ResistStatusDuration(rng, durationFn(rng), resistWis)
 	return *counter > 0
 }
 
@@ -976,7 +992,7 @@ func applySwipe(g *core.GameState, quality int) bool {
 	// tallied hit; single-press fallback does one pass.
 	damage := scaleSkillDamage(actor, core.SkillSwipe, quality)
 	// One crit roll for the whole Swipe (the player can't react between sweeps).
-	damage, crit := sweepCritDamage(g, actor, core.SkillSwipe, damage, quality)
+	crit := sweepCrit(g, actor, core.SkillSwipe, quality)
 	passes := multiPressPasses(g.Battle.Timing, quality)
 	// Lock the reachable front row ONCE for the whole multi-pass sweep. Re-snapshotting
 	// per pass would let a pass that fells the front row promote the back row into the
@@ -987,7 +1003,7 @@ func applySwipe(g *core.GameState, quality int) bool {
 	enemiesHit := 0
 	anyHit := false
 	for p := 0; p < passes; p++ {
-		hit := applyAoEDamageToSlots(g, core.SkillSwipe, slots, damage, quality)
+		hit := applyAoEDamageToSlots(g, core.SkillSwipe, slots, damage, quality, crit)
 		if hit > 0 {
 			anyHit = true
 		}
@@ -1116,8 +1132,7 @@ func applySteal(g *core.GameState, quality int) bool {
 		if mod.StealBonusDamage > 0 {
 			rawBonus := core.EffectiveStats(*actor).STR * mod.StealBonusDamage
 			critBonus, _ = rollSkillCrit(g, actor, core.SkillSteal, quality)
-			rawBonus = applyCritMultiplier(rawBonus, critBonus, false)
-			bonus, defeated = damageEnemy(g, g.Battle.EnemyIndex, rawBonus, quality, core.SkillTagPhys)
+			bonus, defeated = damageEnemyCrit(g, g.Battle.EnemyIndex, rawBonus, quality, core.SkillTagPhys, critBonus, false)
 		}
 		enqueueSkillVFXAtEnemy(g, core.SkillSteal)
 		msg := stealMessage(actor.Name, kind, quality)
@@ -1358,8 +1373,8 @@ func applyBackstab(g *core.GameState, quality int) bool {
 	// T2's `double` adds a second ×2 (T2+ Excellent = x4). Non-Excellent gets the
 	// universal DEX+timing crit chance.
 	crit, double := rollSkillCrit(g, actor, core.SkillBackstab, quality)
-	rawDamage = applyCritMultiplier(rawDamage, crit, double)
-	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillBackstab))
+	// Crit (and T2's double) applied post-armor inside damageEnemyCrit.
+	damage, defeated := damageEnemyCrit(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillBackstab), crit, double)
 	core.EnqueueEnemyVFX(g, core.VFXSlash, g.Battle.EnemyIndex)
 	logFoeHit(g, backstabMessage(actor.Name, target, damage, quality, defeated, crit), defeated)
 	finishActorTurn(g)
@@ -1421,12 +1436,12 @@ func stunProc(arms procMessageArms, preStrike func(int, *core.PartyMember, core.
 	}
 }
 
-// strikeWithCrit rolls the crit, applies the multiplier (never Backstab's double —
-// that lives in applyBackstab), and deals the hit via damageEnemy. Returns
-// post-armor damage, defeated, crit. Callers pre-mutate rawDamage before calling.
+// strikeWithCrit rolls the crit and deals the hit via damageEnemyCrit, which
+// applies the crit multiplier POST-armor (never Backstab's double — that lives in
+// applyBackstab). Returns post-armor damage, defeated, crit. Callers pre-mutate
+// rawDamage before calling.
 func strikeWithCrit(g *core.GameState, actor *core.PartyMember, skill core.SkillID, rawDamage, quality int) (damage int, defeated, crit bool) {
 	crit, _ = rollSkillCrit(g, actor, skill, quality)
-	rawDamage = applyCritMultiplier(rawDamage, crit, false)
 	// The basic attack (SkillNone) has no registered tag; it's a physical swing, so
 	// fall back to Phys (armor-damped, feeds Bloodthirst). Every registered skill
 	// caller carries a real tag, so this only affects the basic-attack route.
@@ -1434,17 +1449,18 @@ func strikeWithCrit(g *core.GameState, actor *core.PartyMember, skill core.Skill
 	if tag == core.SkillTagNone {
 		tag = core.SkillTagPhys
 	}
-	damage, defeated = damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, tag)
+	// Crit is applied post-armor inside damageEnemyCrit.
+	damage, defeated = damageEnemyCrit(g, g.Battle.EnemyIndex, rawDamage, quality, tag, crit, false)
 	return damage, defeated, crit
 }
 
-// sweepCritDamage rolls ONE crit for an AoE sweep and applies the multiplier to
-// the shared per-target damage. The player can't react between sweep targets, so
-// the roll happens once (never per-target) — the AoE analogue of strikeWithCrit's
-// roll+multiply. Returns the crit-adjusted damage and whether it crit (for the log).
-func sweepCritDamage(g *core.GameState, actor *core.PartyMember, skill core.SkillID, damage, quality int) (int, bool) {
+// sweepCrit rolls ONE crit for an AoE sweep. The player can't react between sweep
+// targets, so the roll happens once (never per-target); the multiplier itself is
+// applied per-target POST-armor in damageEnemyCrit. Returns the crit verdict (for
+// the per-slot multiply + the log).
+func sweepCrit(g *core.GameState, actor *core.PartyMember, skill core.SkillID, quality int) bool {
 	crit, _ := rollSkillCrit(g, actor, skill, quality)
-	return applyCritMultiplier(damage, crit, false), crit
+	return crit
 }
 
 // applyProcStrike is the single body for every hit-plus-status-proc skill: a hit
@@ -1801,14 +1817,14 @@ func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, hitVerb, emptyVe
 	actor := beginPartyAction(g)
 	effect := core.EffectiveSkillEffect(actor, skill)
 	damage := scaleSkillDamage(actor, skill, quality)
-	damage, crit := sweepCritDamage(g, actor, skill, damage, quality)
+	crit := sweepCrit(g, actor, skill, quality)
 	tag := core.SkillTagFor(skill)
 	vfx := vfxKindFor(skill)
 	hits := 0
 	afflicted := 0
 	totalDealt := 0
 	forEachTargetableEnemy(g, skill, func(slot int, enemy *core.Enemy) {
-		dealt, defeated := damageEnemy(g, slot, damage, quality, tag)
+		dealt, defeated := damageEnemyCrit(g, slot, damage, quality, tag, crit, false)
 		totalDealt += dealt
 		core.EnqueueEnemyVFX(g, vfx, slot)
 		hits++
@@ -2220,11 +2236,20 @@ func damageEnemyUntallied(g *core.GameState, slot, rawDamage, quality int, tag c
 	return dealt, defeated
 }
 
-// damageEnemy applies rawDamage to the enemy at slot (mitigated per tag), drives
-// the popup color by quality, and returns (postArmorDamage, defeated) — callers log
-// the post-armor figure so it matches the HP delta. quality may be Miss for
-// non-action damage. Any damage > 0 wakes a sleeping enemy.
+// damageEnemy applies a non-crit rawDamage to the enemy at slot. Thin wrapper over
+// damageEnemyCrit for the many callers that never crit (DoTs, AoE status passes,
+// off-turn counters, tests).
 func damageEnemy(g *core.GameState, slot, rawDamage, quality int, tag core.SkillTag) (int, bool) {
+	return damageEnemyCrit(g, slot, rawDamage, quality, tag, false, false)
+}
+
+// damageEnemyCrit applies rawDamage to the enemy at slot (mitigated per tag), then
+// multiplies the POST-armor result on a crit (so crit punches through armor — the
+// anti-tank lever), drives the popup color by quality + the "Critical!" prefix, and
+// returns (final damage, defeated) — callers log the figure so it matches the HP
+// delta. `double` is Backstab T2's extra ×2. quality may be Miss for non-action
+// damage. Any damage > 0 wakes a sleeping enemy.
+func damageEnemyCrit(g *core.GameState, slot, rawDamage, quality int, tag core.SkillTag, crit, double bool) (int, bool) {
 	enemy, ok := livingEnemyAt(g, slot)
 	if !ok {
 		return 0, false
@@ -2233,6 +2258,9 @@ func damageEnemy(g *core.GameState, slot, rawDamage, quality int, tag core.Skill
 	// EffectiveDefenses), so an armor/MDef debuff actually softens mitigation.
 	effArmor, effMDef := core.EffectiveEnemyDefenses(enemy)
 	damage := mitigateDamage(rawDamage, tag, effArmor, effMDef)
+	// Crit multiplies the MITIGATED damage (post-armor), so a crit reliably beats a
+	// tank's armor floor instead of being swallowed by it.
+	damage = applyCritMultiplier(damage, crit, double)
 	// Tally phys output this turn for Bloodthirst (finishActorTurn banks it as
 	// lifesteal). Off-turn counters (tryRiposte) snapshot/restore around this so
 	// their damage stays out of the tally. Non-phys tags don't feed it.
@@ -2244,8 +2272,13 @@ func damageEnemy(g *core.GameState, slot, rawDamage, quality int, tag core.Skill
 	died := core.ApplyDamageWithPopup(core.HitTarget{
 		HP: &enemy.HP, Flash: &enemy.DamageFlash,
 		Popup: &enemy.DamagePopup, PopupQuality: &enemy.DamagePopupQuality, PopupTimer: &enemy.DamagePopupTimer,
+		PopupCrit: &enemy.DamagePopupCrit,
 		Knockback: &enemy.HitKnockback, Sleep: &enemy.SleepTurns,
-	}, damage, quality)
+	}, damage, quality, crit)
+	// Every landing blow buzzes a little; grade/crit shake rumble stacks on top.
+	if damage > 0 {
+		core.AddRumble(&g.Battle, core.RumbleImpact, core.RumbleImpactDur)
+	}
 	if !died {
 		// Audible thud only on scoring hits.
 		if damage > 0 {
@@ -2350,7 +2383,7 @@ func applyPartyPoisonTick(g *core.GameState, index int) bool {
 // the caller owns the up-front guard and formats its own line.
 func applyEnemyDoTTick(g *core.GameState, index int, counter *int, tickDamage int) (int, bool) {
 	*counter--
-	return damageEnemy(g, index, tickDamage, core.TimingQualityGood, core.SkillTagMagic)
+	return damageEnemy(g, index, tickDamage, autoStrikeQuality, core.SkillTagMagic)
 }
 
 // tickPoisonForIngestedParty ticks poison on every poisoned ingested member —
@@ -2555,10 +2588,17 @@ func healPartyMember(g *core.GameState, partyIndex, amount int) bool {
 	return true
 }
 
-// damagePartyMember applies rawAmount to a member (mitigated per tag); damage > 0
-// wakes from Sleep. Returns (dealt, fatal) — callers log the dealt figure so it
-// matches the HP delta. Out-of-range or amount<=0 returns (0, false).
+// damagePartyMember applies a non-crit rawAmount to a member. Thin wrapper over
+// damagePartyMemberCrit for the many non-crit callers (DoTs, spells, recoil, tests).
 func damagePartyMember(g *core.GameState, partyIndex, rawAmount int, tag core.SkillTag) (int, bool) {
+	return damagePartyMemberCrit(g, partyIndex, rawAmount, tag, false)
+}
+
+// damagePartyMemberCrit applies rawAmount to a member (mitigated per tag, crit
+// multiplied post-armor); damage > 0 wakes from Sleep. Returns (dealt, fatal) —
+// callers log the dealt figure so it matches the HP delta. Out-of-range or
+// amount<=0 returns (0, false).
+func damagePartyMemberCrit(g *core.GameState, partyIndex, rawAmount int, tag core.SkillTag, crit bool) (int, bool) {
 	if !partyIndexValid(g, partyIndex) || rawAmount <= 0 {
 		return 0, false
 	}
@@ -2571,17 +2611,20 @@ func damagePartyMember(g *core.GameState, partyIndex, rawAmount int, tag core.Sk
 	if member.Ingested {
 		return 0, false
 	}
-	return applyPartyDamage(g, member, rawAmount, tag)
+	return applyPartyDamage(g, member, rawAmount, tag, crit)
 }
 
 // applyPartyDamage mitigates + applies rawAmount to an ALREADY-validated living
 // member (caller owns the bounds/dead/lockout checks), running the shared
 // flash/recoil/wake/rumble/death bookkeeping. Split out so the poison DoT can
-// reach it without the ingest lockout.
-func applyPartyDamage(g *core.GameState, member *core.PartyMember, rawAmount int, tag core.SkillTag) (int, bool) {
+// reach it without the ingest lockout. crit multiplies the POST-armor amount (and
+// prefixes the popup) — only the enemy basic attack passes true today.
+func applyPartyDamage(g *core.GameState, member *core.PartyMember, rawAmount int, tag core.SkillTag, crit bool) (int, bool) {
 	// EffectiveDefenses folds equipped gear onto the base values.
 	armorVal, mdefVal := core.EffectiveDefenses(*member)
 	amount := mitigateDamage(rawAmount, tag, armorVal, mdefVal)
+	// Crit punches post-armor (mirror of the enemy path) before the shield soaks it.
+	amount = applyCritMultiplier(amount, crit, false)
 	// Aegis shield soaks post-mitigation BEFORE HP; only overflow reaches HP, and
 	// the bookkeeping below reads the post-shield amount.
 	if amount > 0 && member.ShieldHP > 0 {
@@ -2602,12 +2645,14 @@ func applyPartyDamage(g *core.GameState, member *core.PartyMember, rawAmount int
 	died := core.ApplyDamageWithPopup(core.HitTarget{
 		HP: &member.HP, Flash: &member.DamageFlash,
 		Popup: &member.DamagePopup, PopupQuality: &member.DamagePopupQuality, PopupTimer: &member.DamagePopupTimer,
+		PopupCrit: &member.DamagePopupCrit,
 		Knockback: &member.HitKnockback, Sleep: &member.SleepTurns,
-	}, amount, int(core.TimingQualityMiss))
+	}, amount, int(core.TimingQualityMiss), crit)
 	// Haptic buzz on a landing hit. Taking a hit doesn't shake the camera, so this
-	// arms rumble directly (TriggerCombatShake is for offensive impacts).
+	// arms rumble directly (AddCombatShake is for offensive impacts). Additive so
+	// back-to-back hits in one beat stack.
 	if amount > 0 {
-		core.TriggerRumble(&g.Battle, core.RumbleHurtStrength, core.RumbleHurtDur)
+		core.AddRumble(&g.Battle, core.RumbleHurtStrength, core.RumbleHurtDur)
 	}
 	if !died {
 		return amount, false
@@ -2631,18 +2676,25 @@ func damagePartyMemberPoison(g *core.GameState, partyIndex int) (int, bool) {
 	if member.HP <= 0 {
 		return 0, false
 	}
-	return applyPartyDamage(g, member, core.PoisonTickDamage, core.SkillTagMagic)
+	return applyPartyDamage(g, member, core.PoisonTickDamage, core.SkillTagMagic, false)
 }
 
-// damagePartyMemberDefendable applies an incoming HIT honoring the Defend brace
-// BEFORE mitigation (for enemy melee + damaging casts). DoT ticks call
-// damagePartyMember directly so the brace doesn't soak them. A positive soak floors at 1.
+// damagePartyMemberDefendable applies a non-crit incoming HIT honoring the Defend
+// brace. Thin wrapper; the enemy basic attack uses the Crit variant.
 func damagePartyMemberDefendable(g *core.GameState, partyIndex, rawAmount int, tag core.SkillTag) (int, bool) {
+	return damagePartyMemberDefendableCrit(g, partyIndex, rawAmount, tag, false)
+}
+
+// damagePartyMemberDefendableCrit applies an incoming HIT honoring the Defend brace
+// BEFORE mitigation (for enemy melee + damaging casts). DoT ticks call
+// damagePartyMember directly so the brace doesn't soak them. A positive soak floors
+// at 1. crit multiplies post-armor (enemy basic-attack crit).
+func damagePartyMemberDefendableCrit(g *core.GameState, partyIndex, rawAmount int, tag core.SkillTag, crit bool) (int, bool) {
 	if rawAmount > 0 && partyIndexValid(g, partyIndex) && g.Party[partyIndex].Defending {
 		// Floor a positive soak at 1 (a soak, not free immunity).
 		rawAmount = max(int(float32(rawAmount)*core.DefendingDamageMult), 1)
 	}
-	return damagePartyMember(g, partyIndex, rawAmount, tag)
+	return damagePartyMemberCrit(g, partyIndex, rawAmount, tag, crit)
 }
 
 // clearEnemyStatusesOnDeath / clearPartyStatusesOnDeath wipe transient timed
@@ -2962,7 +3014,7 @@ func tickAncestralSpirit(g *core.GameState, actor core.ActorRef) {
 	}
 	raw := max(int(float64(core.MemberAttackDamage(*m, 0))*core.AncestralSpiritDamageMult), 1)
 	noun := core.EnemySingularNoun(core.BattleMemberAt(g, target))
-	dealt, defeated := damageEnemyUntallied(g, target, raw, core.TimingQualityGood, core.SkillTagPhys)
+	dealt, defeated := damageEnemyUntallied(g, target, raw, autoStrikeQuality, core.SkillTagPhys)
 	core.EnqueueEnemyVFX(g, core.VFXSlash, target)
 	switch {
 	case defeated:
@@ -2989,7 +3041,7 @@ func resolveMeteorIfDue(g *core.GameState) {
 	g.Battle.MeteorDamage = 0
 	hits := 0
 	forEachLivingEnemy(g, func(slot int, _ *core.Enemy) {
-		damageEnemy(g, slot, dmg, core.TimingQualityGood, core.SkillTagMagic)
+		damageEnemy(g, slot, dmg, autoStrikeQuality, core.SkillTagMagic)
 		core.EnqueueEnemyVFX(g, core.VFXEmber, slot)
 		hits++
 	})
@@ -3024,7 +3076,7 @@ func offTurnReflect(g *core.GameState, enemySlot, raw int, tag core.SkillTag, vf
 		return 0, false
 	}
 	noun := core.EnemySingularNoun(enemy)
-	dealt, defeated = damageEnemyUntallied(g, enemySlot, raw, core.TimingQualityGood, tag)
+	dealt, defeated = damageEnemyUntallied(g, enemySlot, raw, autoStrikeQuality, tag)
 	core.EnqueueEnemyVFX(g, vfx, enemySlot)
 	if defeated {
 		setBattleMessageCat(g, defeatedMsg(noun, dealt), core.LogDeath)
@@ -3123,11 +3175,11 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	// Enemy crit: DEX-driven RollCrit at Miss grade (no timing bonus — enemies
 	// don't press a bar), keeping them on a flat crit floor.
 	enemyCrit := core.RollCrit(g.Rand(), core.EffectiveEnemyStats(enemy), core.TimingQualityMiss)
-	rawDamage = applyCritMultiplier(rawDamage, enemyCrit, false)
 	damage := core.ScaleIncomingDamage(rawDamage, defendQuality)
 	// Phys-tagged so party Armor damps it; the Defend brace (+floor-1 soak) lives in
-	// damagePartyMemberDefendable. dealt is the post-armor figure for the message.
-	dealt, _ := damagePartyMemberDefendable(g, target, damage, core.SkillTagPhys)
+	// damagePartyMemberDefendableCrit, which also multiplies the crit POST-armor. dealt
+	// is the final figure for the message.
+	dealt, _ := damagePartyMemberDefendableCrit(g, target, damage, core.SkillTagPhys, enemyCrit)
 	// Impact VFX only on landed damage — a perfect block clamps to 0, and sparks
 	// would undersell it.
 	if dealt > 0 {

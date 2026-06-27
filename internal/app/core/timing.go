@@ -943,33 +943,18 @@ func HitStopFor(quality int) float32 {
 }
 
 // CombatShakeFor returns the base screen-shake (peak + duration) for a graded
-// hit — only Great/Excellent shake. Big crit/AoE shake is armed separately.
+// hit — Good/Great/Excellent shake (Good faintly). The crit/AoE punch is armed
+// separately and stacks on top via AddCombatShake.
 func CombatShakeFor(quality int) (peak, dur float32) {
 	g := timingGrades[timingGradeAt(quality)]
 	return g.ShakePeak, g.ShakeDur
 }
 
-// TriggerCombatShake arms the camera shake (peak world units, dur seconds).
-// A stronger in-flight shake is not stomped by a weaker one. No-op for nil
-// battle or non-positive peak/dur.
-func TriggerCombatShake(b *Battle, peak, dur float32) {
-	if b == nil || peak <= 0 || dur <= 0 {
-		return
-	}
-	if b.ShakeTimer > 0 && b.ShakePeak > peak {
-		return
-	}
-	b.ShakePeak = peak
-	b.ShakeDur = dur
-	b.ShakeTimer = dur
-	// Buzz the pad proportionally so every shake site rumbles off one knob.
-	// (Taking a hit doesn't shake, so that path calls TriggerRumble directly.)
-	TriggerRumble(b, peak*RumblePerShakePeak, dur)
-}
-
 // TriggerRumble arms the rumble envelope (strength clamped [0,1], dur seconds,
-// decayed by TickRumble). Keep-the-stronger like TriggerCombatShake. No-op on
-// nil battle or non-positive args. Intent layer; input.ApplyRumble drives the motor.
+// decayed by TickRumble). Keep-the-stronger: a weaker buzz won't stomp a louder
+// one still in flight. Use for standalone buzzes with no shake (battle start,
+// crystal, hurt); impact sites that stack contributions use AddRumble instead.
+// No-op on nil battle or non-positive args. Intent layer; input.ApplyRumble drives the motor.
 func TriggerRumble(b *Battle, strength, dur float32) {
 	if b == nil || strength <= 0 || dur <= 0 {
 		return
@@ -979,6 +964,44 @@ func TriggerRumble(b *Battle, strength, dur float32) {
 		return
 	}
 	b.RumbleStrength = strength
+	b.RumbleDur = dur
+	b.RumbleTimer = dur
+}
+
+// AddCombatShake STACKS a shake contribution onto the in-flight envelope (peaks
+// sum atop the current residual, the longer tail wins) and arms a proportional
+// rumble for THIS contribution. Use this at impact sites so the grade base +
+// crit/AoE punch add up instead of one masking the other.
+// No-op for nil battle or non-positive peak/dur.
+func AddCombatShake(b *Battle, peak, dur float32) {
+	if b == nil || peak <= 0 || dur <= 0 {
+		return
+	}
+	// Rumble tracks this contribution's own peak (before merging), so stacked
+	// shakes don't double-count the residual into the haptics.
+	AddRumble(b, peak*RumblePerShakePeak, dur)
+	if b.ShakeTimer > 0 && b.ShakeDur > 0 {
+		peak += b.ShakePeak * (b.ShakeTimer / b.ShakeDur)
+		dur = max(dur, b.ShakeTimer)
+	}
+	b.ShakePeak = peak
+	b.ShakeDur = dur
+	b.ShakeTimer = dur
+}
+
+// AddRumble STACKS a rumble contribution onto the in-flight envelope (strength
+// sums atop the current residual level, clamped [0,1]; the longer tail wins) so
+// impact + grade + crit feedback accumulate in one beat. No-op for nil battle or
+// non-positive args. Intent layer; input.ApplyRumble drives the motor.
+func AddRumble(b *Battle, strength, dur float32) {
+	if b == nil || strength <= 0 || dur <= 0 {
+		return
+	}
+	if b.RumbleTimer > 0 && b.RumbleDur > 0 {
+		strength += b.RumbleStrength * (b.RumbleTimer / b.RumbleDur)
+		dur = max(dur, b.RumbleTimer)
+	}
+	b.RumbleStrength = Clamp(strength, 0, 1)
 	b.RumbleDur = dur
 	b.RumbleTimer = dur
 }

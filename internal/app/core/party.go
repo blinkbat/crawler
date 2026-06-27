@@ -855,19 +855,22 @@ type HitTarget struct {
 	Popup        *int
 	PopupQuality *int
 	PopupTimer   *float32
+	PopupCrit    *bool
 	Knockback    *float32
 	Sleep        *int
 }
 
 // ApplyDamageWithPopup runs the shared post-mitigation tail: ApplyFlatDamage, then a
-// damage popup (only on positive amount, tagged with quality), then ApplyHitRecoil.
+// damage popup (only on positive amount, tagged with quality + crit), then ApplyHitRecoil.
 // Returns true if the actor was dropped to 0. Death-side handling (statuses, VFX,
 // formation shunt, sounds) stays at the call site — only the common tail lives here.
-func ApplyDamageWithPopup(t HitTarget, amount, quality int) (died bool) {
+// amount is the FINAL post-mitigation, post-crit figure the caller already computed.
+func ApplyDamageWithPopup(t HitTarget, amount, quality int, crit bool) (died bool) {
 	died = ApplyFlatDamage(t.HP, t.Flash, amount)
 	if amount > 0 {
 		*t.Popup = amount
 		*t.PopupQuality = quality
+		*t.PopupCrit = crit
 		*t.PopupTimer = QualityResultDuration
 	}
 	ApplyHitRecoil(t.Knockback, t.Sleep, amount)
@@ -920,6 +923,32 @@ func EnemyHitChance(s Stats) float64 {
 // RollEnemyHit rolls whether an enemy's basic attack connects; false = a clean miss.
 func RollEnemyHit(rng *rand.Rand, s Stats) bool {
 	return RollChance(rng, EnemyHitChance(s))
+}
+
+// StatusResistChance is the [0,1] chance to FULLY resist an inflicted timed
+// status, WIS-linear (StatusResistPerWIS) and capped (StatusResistCap). The
+// flat-out-negate half of WIS status defense; ShortenStatusDuration handles what
+// still lands.
+func StatusResistChance(wis int) float64 {
+	if wis <= 0 {
+		return 0
+	}
+	return Clamp(StatusResistPerWIS*float64(wis), 0, StatusResistCap)
+}
+
+// RollStatusResist rolls a full status resist; true = the status is negated.
+func RollStatusResist(rng *rand.Rand, wis int) bool {
+	return RollChance(rng, StatusResistChance(wis))
+}
+
+// ResistStatusDuration is the combined WIS status defense: roll a full resist
+// first (→ 0, negated), else return the shortened duration. One call covers both
+// halves so every status-inflict site resists + shortens identically.
+func ResistStatusDuration(rng *rand.Rand, duration, wis int) int {
+	if RollStatusResist(rng, wis) {
+		return 0
+	}
+	return ShortenStatusDuration(duration, wis)
 }
 
 // ShortenStatusDuration shaves wis/StatusShortenDivisor turns off the rolled

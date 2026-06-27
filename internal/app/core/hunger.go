@@ -83,12 +83,16 @@ func SatietyStageLabel(s SatietyStage) string {
 // if the day length changes. Empty for a non-food (amount <= 0). Shared by the
 // item detail card (nominal SatietyGain) and the eat log line (actual restored),
 // so both read the same. Pair with "Heals " for a full sentence.
+// multiDayHungerThreshold: satiety covering this many days of crawling reads as
+// the plural "days' worth" band (the rest of the ladder uses fractions of a day).
+const multiDayHungerThreshold = 2
+
 func SatietyHungerPhrase(amount int) string {
 	day := StepsPerCycle
 	switch {
 	case amount <= 0:
 		return ""
-	case amount >= 2*day:
+	case amount >= multiDayHungerThreshold*day:
 		return "days' worth of hunger"
 	case amount >= day*7/8:
 		return "a day's worth of hunger"

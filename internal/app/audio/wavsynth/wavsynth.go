@@ -172,6 +172,11 @@ func wrap2Pi(phase float64) float64 {
 // samplesFor is duration×SampleRate, floored to at least 1 (a non-positive
 // duration must still produce one sample, not zero).
 func samplesFor(duration float64) int {
+	// NaN/±Inf make int(duration*SampleRate) unspecified (could land large-positive
+	// and skip the <=0 floor); treat them as the degenerate single sample.
+	if math.IsNaN(duration) || math.IsInf(duration, 0) {
+		return 1
+	}
 	samples := int(duration * SampleRate)
 	if samples <= 0 {
 		samples = 1
@@ -339,10 +344,10 @@ func SynthSweep(duration, startHz, endHz, volume, attack, release float64) []int
 // SynthChord sums sines at the given frequencies into one note under a bell
 // envelope.
 func SynthChord(duration float64, freqs []float64, volume float64) []int16 {
-	// NaN slips past `<= 0` (all NaN comparisons are false) and int(NaN) is
-	// unspecified — it can land large-positive and dodge the samples<=0 guard,
-	// blowing up the make below. Pin it first (mirrors SynthShapeParams).
-	if math.IsNaN(duration) {
+	// NaN/±Inf slip past `<= 0` (all NaN comparisons are false; int(±Inf) is
+	// unspecified) — either can land large-positive and dodge the samples<=0 guard,
+	// blowing up the make below. Pin them first (mirrors SynthShapeParams).
+	if math.IsNaN(duration) || math.IsInf(duration, 0) {
 		return nil
 	}
 	samples := int(duration * SampleRate)

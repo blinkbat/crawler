@@ -58,10 +58,10 @@ func TestTickRumble_DecaysToZero(t *testing.T) {
 	}
 }
 
-// TestTriggerCombatShake_AlsoArmsRumble: arming the shake also arms a rumble graded by the peak.
-func TestTriggerCombatShake_AlsoArmsRumble(t *testing.T) {
+// TestAddCombatShake_AlsoArmsRumble: arming the shake also arms a rumble graded by the peak.
+func TestAddCombatShake_AlsoArmsRumble(t *testing.T) {
 	var b Battle
-	TriggerCombatShake(&b, CombatShakeBigPeak, CombatShakeBigDur)
+	AddCombatShake(&b, CombatShakeBigPeak, CombatShakeBigDur)
 	if b.ShakeTimer <= 0 {
 		t.Fatal("shake not armed")
 	}
@@ -75,8 +75,26 @@ func TestTriggerCombatShake_AlsoArmsRumble(t *testing.T) {
 	// Great press buzzes lightly, not at the big level.
 	var g Battle
 	peak, dur := CombatShakeFor(TimingQualityGreat)
-	TriggerCombatShake(&g, peak, dur)
+	AddCombatShake(&g, peak, dur)
 	if g.RumbleStrength <= 0 || g.RumbleStrength >= b.RumbleStrength {
 		t.Errorf("Great-press rumble = %v, want positive but weaker than the crit/AoE %v", g.RumbleStrength, b.RumbleStrength)
+	}
+}
+
+// TestAddCombatShake_StacksGradeAndCrit: a crit (big) punch stacks ON TOP of a
+// grade shake armed the same beat — additive, not keep-the-stronger. Uses the
+// Good grade so the summed rumble (0.065*15 = 0.975) stays under the [0,1] clamp.
+func TestAddCombatShake_StacksGradeAndCrit(t *testing.T) {
+	var b Battle
+	gradePeak, gradeDur := CombatShakeFor(TimingQualityGood)
+	AddCombatShake(&b, gradePeak, gradeDur)                   // grade base
+	AddCombatShake(&b, CombatShakeBigPeak, CombatShakeBigDur) // crit punch on top
+	wantPeak := gradePeak + CombatShakeBigPeak
+	if b.ShakePeak < wantPeak-0.0001 || b.ShakePeak > wantPeak+0.0001 {
+		t.Errorf("stacked shake peak = %v, want %v (grade %v + crit %v)", b.ShakePeak, wantPeak, gradePeak, CombatShakeBigPeak)
+	}
+	// Rumble also stacked from both contributions.
+	if want := wantPeak * RumblePerShakePeak; b.RumbleStrength < want-0.001 || b.RumbleStrength > want+0.001 {
+		t.Errorf("stacked rumble = %v, want %v", b.RumbleStrength, want)
 	}
 }

@@ -89,5 +89,5 @@ func sellShopItem(g *core.GameState) {
 	g.Gold += core.ShopSellPrice(core.ItemInfo(kind).Price)
 	audio.Play(audio.SoundInputGreat)
 	// Selling the last unit shrinks the list; keep the cursor in range.
-	g.ShopCursor = clampCursorToLen(g.ShopCursor, len(core.SellableStacks(g.Inventory)))
+	g.ShopCursor = core.ClampIndex(g.ShopCursor, len(core.SellableStacks(g.Inventory)))
 }
