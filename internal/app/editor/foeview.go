@@ -83,7 +83,10 @@ type visualizerDrag struct{ slider, asset sliderDragState }
 // foeDrag holds the Foe Visualizer's in-flight drag.
 var foeDrag = visualizerDrag{slider: noSliderDrag, asset: noSliderDrag}
 
-// Modal geometry. Wide card: preview pane left, slider stack right.
+// Modal geometry. Wide card: preview pane left, slider stack right. Despite the
+// foe* prefix, these (and computeFoeViewLayout / drawFoeViewTabs below) are the
+// SHARED visualizer engine — the Party Visualizer routes through them via
+// drawVisualizerModal too. Only foeFields / foeViewCallbacks are foe-specific.
 const (
 	foeModalW     = float32(1040)
 	foeModalH     = float32(600)

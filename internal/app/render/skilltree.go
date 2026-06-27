@@ -20,6 +20,8 @@ const (
 	skillTreeHeaderGlyphX = float32(34)
 	skillTreeHeaderTitleX = float32(58)
 	skillNodeColHeaderH   = float32(32) // header reserved above the ladder
+	skillColInsetX        = float32(6)  // tree-column left text inset (header rule width derives as 2×)
+	skillColRuleY         = float32(24) // gilt rule Y below the column name header
 	skillNodeGap          = float32(12)
 	skillNodeMaxH         = float32(82) // height cap so short trees don't stretch
 	skillNodeMinH         = float32(8)  // height floor so many nodes can't go negative
@@ -27,6 +29,18 @@ const (
 	skillNodePipMinW     = float32(96)
 	skillNodePipMinH     = float32(40)
 	skillNodeFleuronMinW = float32(130)
+	// Node content insets (drawSkillTreeNode / drawSkillNodePlate): name+tier-pip left
+	// inset & name top inset, tier-pip + status-chip baselines up from the bottom edge,
+	// status-chip right inset, corner-ornament pip inset + radius, bottom-fleuron rise + radius.
+	skillNodeTextInsetX  = float32(10)
+	skillNodeTextInsetY  = float32(8)
+	skillNodePipsUp      = float32(14)
+	skillNodeChipInsetX  = float32(10)
+	skillNodeChipUp      = float32(16)
+	skillNodeCornerInset = float32(8)
+	skillNodeCornerPipR  = float32(1.8)
+	skillNodeFleuronUp   = float32(12)
+	skillNodeFleuronR    = float32(2.1)
 	// Card sized inline (custom column geometry); chrome routes through drawPickerCardEx
 	// with an opaque backdrop so the glass body composites over solid dark.
 	skillTreeMaxWidthFrac  = float32(0.92) // columns shrink to fit rather than overflow
@@ -76,9 +90,7 @@ func DrawSkillTreeModal(g *core.GameState, assets Resources) {
 	// Header: class crest left of the title, SkillPoint balance right.
 	classCol := classAccent(m.Class)
 	drawClassGlyph(card.X+skillTreeHeaderGlyphX, card.Y+skillTreeHeaderGlyphY, 12, m.Class, classCol)
-	spText := skillPointsLabel(m.SkillPoints)
-	spCol := accentIfPositive(m.SkillPoints, inkAccent)
-	drawTextRightAligned(font, spText, card.X+card.Width-skillTreeCardInset, card.Y+skillTreeHeaderSPY, FontBody, spCol)
+	drawSkillPointBalance(font, m.SkillPoints, card.X+card.Width-skillTreeCardInset, card.Y+skillTreeHeaderSPY, FontBody)
 
 	// Tree-column body above the detail strip; columns centered as a block.
 	bodyTop := card.Y + skillTreeBodyTopY
@@ -104,8 +116,8 @@ func DrawSkillTreeModal(g *core.GameState, assets Resources) {
 // connector lines (lit when the upper node holds a rank). treeIdx vs the cursor
 // column selects the focused node's frame.
 func drawSkillTreeColumn(font rl.Font, g *core.GameState, m *core.PartyMember, tr core.SkillTreeDef, treeIdx int, x, y, w, h float32) {
-	drawTextWithShadow(font, tr.Name, x+6, y, FontBody, textPrimary)
-	drawGiltRule(int32(x+6), int32(y+24), int32(w-12), 2, 0.8)
+	drawTextWithShadow(font, tr.Name, x+skillColInsetX, y, FontBody, textPrimary)
+	drawGiltRule(int32(x+skillColInsetX), int32(y+skillColRuleY), int32(w-skillColInsetX*2), 2, 0.8)
 
 	nodes := tr.Nodes
 	n := len(nodes)
@@ -165,8 +177,8 @@ func drawSkillTreeNode(font rl.Font, m *core.PartyMember, node core.SkillTreeNod
 	}
 
 	nameCol := rowTextColor(unlocked, !unlocked, textDim)
-	drawTextWithShadow(font, node.Name, rect.X+10, rect.Y+8, FontSmall, nameCol)
-	drawSkillTierPips(rect.X+10, rect.Y+rect.Height-14, rank, node.MaxRank)
+	drawTextWithShadow(font, node.Name, rect.X+skillNodeTextInsetX, rect.Y+skillNodeTextInsetY, FontSmall, nameCol)
+	drawSkillTierPips(rect.X+skillNodeTextInsetX, rect.Y+rect.Height-skillNodePipsUp, rank, node.MaxRank)
 
 	var chip string
 	chipCol := textDim
@@ -184,7 +196,7 @@ func drawSkillTreeNode(font rl.Font, m *core.PartyMember, node core.SkillTreeNod
 			chipCol = textMuted
 		}
 	}
-	drawTextRightAligned(font, chip, rect.X+rect.Width-10, rect.Y+rect.Height-16, FontTiny, chipCol)
+	drawTextRightAligned(font, chip, rect.X+rect.Width-skillNodeChipInsetX, rect.Y+rect.Height-skillNodeChipUp, FontTiny, chipCol)
 }
 
 // drawSkillTierPips paints `total` diamond pips at (x, y), the first `filled`
@@ -218,14 +230,10 @@ func drawSkillNodePlate(rect rl.Rectangle, bg rl.Color, rank int, unlocked, focu
 	// Rounded outline matching the glass body's corner radius (was square-cornered).
 	drawPanelOutline(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), outline)
 	if rect.Width >= skillNodePipMinW && rect.Height >= skillNodePipMinH {
-		pip := fadeColor(outline, 0.82)
-		drawDiamondPip(rect.X+8, rect.Y+8, 1.8, pip)
-		drawDiamondPip(rect.X+rect.Width-8, rect.Y+8, 1.8, pip)
-		drawDiamondPip(rect.X+8, rect.Y+rect.Height-8, 1.8, pip)
-		drawDiamondPip(rect.X+rect.Width-8, rect.Y+rect.Height-8, 1.8, pip)
+		cornerPips(rect, skillNodeCornerInset, skillNodeCornerPipR, fadeColor(outline, 0.82))
 	}
 	if rank > 0 && rect.Width >= skillNodeFleuronMinW {
-		drawFleuron(rect.X+rect.Width/2, rect.Y+rect.Height-12, 2.1, fadeColor(giltDim, 0.42))
+		drawFleuron(rect.X+rect.Width/2, rect.Y+rect.Height-skillNodeFleuronUp, skillNodeFleuronR, fadeColor(giltDim, 0.42))
 	}
 }
 

@@ -505,7 +505,7 @@ func startActorTurn(g *core.GameState) {
 // Returns true when the tick ended the battle (caller must stop); false after
 // advancing QueueCursor so the caller continues to the next slot.
 func advanceSkippedTurn(g *core.GameState, actor core.ActorRef) bool {
-	consumeDefendOnSkip(g, actor)
+	consumeDefendAndGuardOnSkip(g, actor)
 	drainNonDamagingPartyStatuses(g, actor)
 	drainNonDamagingEnemyStatuses(g, actor)
 	// No first-slot guard here (unlike startActorTurn): runs once per real turn end.
@@ -523,12 +523,16 @@ func advanceSkippedTurn(g *core.GameState, actor core.ActorRef) bool {
 	return false
 }
 
-// consumeDefendOnSkip clears a member's Defend brace on a Sleep/Stun-skipped turn
-// (beginPartyTurn clears it on a normal turn) so the reduction lasts one round, not
-// every round they're locked out. Enemies don't use Defending.
-func consumeDefendOnSkip(g *core.GameState, actor core.ActorRef) {
+// consumeDefendAndGuardOnSkip expires the one-round braces — Defend and Warrior's
+// Guard cover — on a Sleep/Stun-skipped (or covered-foe-passed) turn, mirroring
+// beginPartyTurn's normal-turn clear. Without the Guard clear a slept/stunned
+// guardian keeps redirecting allies' hits onto itself for extra rounds (it stays
+// MemberAvailable, so redirectToGuardian still routes to it). No-ops on enemies
+// (neither state).
+func consumeDefendAndGuardOnSkip(g *core.GameState, actor core.ActorRef) {
 	if actor.IsParty && actor.ValidPartyIndex(g.Party) {
 		g.Party[actor.Index].Defending = false
+		core.ClearGuardBy(g.Party, actor.Index)
 	}
 }
 

@@ -151,8 +151,15 @@ func DrawHintBarLeft(font rl.Font, segs []HintSeg, x, y, size float32) {
 
 // drawModalFooterGlyphs / ...Left paint a modal's footer hint bar, centred or left-anchored on the card.
 func drawModalFooterGlyphs(font rl.Font, card rl.Rectangle, segs []HintSeg) {
-	y := float32(footerBaselineY(int32(card.Y+card.Height), FontTiny))
-	DrawHintBar(font, segs, card.X+card.Width/2, y, FontTiny)
+	drawModalFooterGlyphsSized(font, card, segs, FontTiny)
+}
+
+// drawModalFooterGlyphsSized is the centred footer at a caller-chosen font size (the
+// shop runs its footer at FontSmall); the baseline still lands via the shared
+// footerBaselineY/uiFooterMargin math, not a hand-tuned per-surface offset.
+func drawModalFooterGlyphsSized(font rl.Font, card rl.Rectangle, segs []HintSeg, size float32) {
+	y := float32(footerBaselineY(int32(card.Y+card.Height), size))
+	DrawHintBar(font, segs, card.X+card.Width/2, y, size)
 }
 
 func drawModalFooterGlyphsLeft(font rl.Font, card rl.Rectangle, x float32, segs []HintSeg) {

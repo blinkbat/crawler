@@ -360,6 +360,22 @@ func init() {
 			panic("editor: dialog action picker missing a row for action kind " + string(k))
 		}
 	}
+	// Every quest op must likewise be reachable from a quest-kind picker row (a quest
+	// op added to core without a picker row would be uneditable + mislabeled).
+	for _, op := range core.DialogQuestOps() {
+		found := false
+		for _, set := range dialogActionSetters {
+			var probe core.DialogAction
+			set(&probe)
+			if probe.Kind == core.DialogActionQuest && probe.QuestOp == op {
+				found = true
+				break
+			}
+		}
+		if !found {
+			panic("editor: dialog action picker missing a row for quest op " + string(op))
+		}
+	}
 }
 
 // condSummary is the one-line row label for a choice's condition list.

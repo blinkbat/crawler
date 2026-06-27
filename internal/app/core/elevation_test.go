@@ -48,7 +48,7 @@ func TestStandGroundY(t *testing.T) {
 	if got, want := a.StandGroundY(1, 0), ElevationWorldY(1); got != want {
 		t.Errorf("StandGroundY flat L1 = %v, want %v", got, want)
 	}
-	if got, want := a.StandGroundY(1, 1), (float32(0-ElevationBaseline)+0.5)*LevelStep; got != want {
+	if got, want := a.StandGroundY(1, 1), ElevationWorldY(0)+0.5*LevelStep; got != want {
 		t.Errorf("StandGroundY ramp(low 0) = %v, want %v (mid-slope)", got, want)
 	}
 }

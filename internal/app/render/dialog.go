@@ -19,7 +19,6 @@ const (
 	dialogSpeakerBand = int32(40)
 	dialogBodyGap     = int32(16)     // gap between the body text block and the row list
 	dialogBottomPad   = int32(40)     // footer reserve below the row list (bespoke height budget; the hint baseline itself lands via footerBaselineY/uiFooterMargin). Tuning this shifts the footer — leave at 40.
-	dialogMinCardH    = modalMinCardH // floor so a short one-line node still reads as a card
 	// dialogMaxBodyLines caps wrapped lines so a long body can't grow the card past the screen.
 	dialogMaxBodyLines = 10
 )
@@ -103,10 +102,7 @@ func DrawDialogModal(g *core.GameState, assets Resources) {
 	}
 	rowsH := int32(rowCount) * dialogChoiceRowH
 
-	cardH := dialogSpeakerBand + bodyH + dialogBodyGap + rowsH + dialogBottomPad
-	if cardH < dialogMinCardH {
-		cardH = dialogMinCardH
-	}
+	cardH := modalCardHeight(dialogSpeakerBand + bodyH + dialogBodyGap + rowsH + dialogBottomPad)
 	card := drawModalScaffold(font, dialogCardWidth, cardH, "")
 	cardX, cardY := int32(card.X), int32(card.Y)
 	cardW := int32(card.Width)
@@ -127,6 +123,7 @@ func DrawDialogModal(g *core.GameState, assets Resources) {
 	rowX := cardX + dialogTextPadX
 	rowW := cardW - 2*dialogTextPadX
 
+	rows := make([]modalTextRow, 0, max(len(views), 1))
 	if len(views) == 0 {
 		// No-choice node: a single Continue row (always focused).
 		label := node.ContinueLabel
@@ -137,15 +134,18 @@ func DrawDialogModal(g *core.GameState, assets Resources) {
 				label = "Continue"
 			}
 		}
-		drawModalTextRow(font, rowX, y, rowW, dialogChoiceRowH, true, label, textPrimary)
+		rows = append(rows, modalTextRow{label: label, focused: true})
 	} else {
 		for i, v := range views {
-			focused := g.Dialog.ChoiceCursor == i
-			col := rowTextColor(focused, v.Disabled, textDim)
-			drawModalTextRow(font, rowX, y, rowW, dialogChoiceRowH, focused && !v.Disabled, labels[i], col)
-			y += dialogChoiceRowH
+			rows = append(rows, modalTextRow{
+				label:       labels[i],
+				focused:     g.Dialog.ChoiceCursor == i,
+				disabled:    v.Disabled,
+				disabledCol: textDim,
+			})
 		}
 	}
+	drawModalTextRowList(font, rowX, y, rowW, dialogChoiceRowH, rows)
 
 	hints := []HintSeg{}
 	if len(views) > 1 {

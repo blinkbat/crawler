@@ -275,7 +275,7 @@ var skillDefinitions = []skillDefinition{
 	// Judgment (Cleric): execute a foe at/under JudgmentExecuteFraction HP, else heavy magic. NoUpgrades.
 	{Skill: SkillJudgment, Name: "Judgment", Description: "Pass judgment — a foe near death is executed outright; otherwise it takes heavy radiant magic. Press.", Cost: 8, TargetMode: ActionEnemyTarget, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{Damage: JudgmentDamageBase}, PlayerCastable: true, NoUpgrades: true},
 	// Reckless Swing (Warrior): heavy STR phys hit that sheds the swinger's own Armor a turn. Charge.
-	{Skill: SkillRecklessSwing, Name: "Reckless Swing", Description: "A wild, heavy hit — big STR damage, but you drop your guard (Armor) for a turn. Charge.", Cost: 3, TargetMode: ActionEnemyTarget, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigameCharge, Effect: SkillEffect{Damage: RecklessSwingDamageBase}, PlayerCastable: true},
+	{Skill: SkillRecklessSwing, Name: "Reckless Swing", Description: "A wild, heavy hit — big STR damage, but you drop your guard (Armor) for a turn. Charge.", Cost: 3, TargetMode: ActionEnemyTarget, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigameCharge, Effect: SkillEffect{Damage: RecklessSwingDamageBase, BuffArmor: -RecklessSwingSelfArmor, BuffTurns: RecklessSwingSelfTurns}, PlayerCastable: true},
 	// Combust (Wizard): detonate the target's remaining Burn for a per-turn spike, consuming it. Press.
 	{Skill: SkillCombust, Name: "Combust", Description: "Detonate a burning foe — the more Burn left, the bigger the blast. Consumes the Burn. Press.", Cost: 4, TargetMode: ActionEnemyTarget, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{Damage: 1}, PlayerCastable: true},
 	// Bulwark of Faith (Cleric): party-wide Armor + MDef aura. NoUpgrades.
@@ -597,7 +597,10 @@ func HealWholeParty(g *GameState, amount int) {
 // dead — the healing crystal's full party reset. Sets HP/MP directly (HealMember
 // never revives). Returns the number restored. Crystal-use is out of combat, so
 // no member is Ingested here. STARVING members are skipped: crystals can't cure
-// starving (only food can), so a starving member gets nothing here.
+// starving (only food can), so a starving member gets nothing here. A revived
+// member also sheds leftover Poison: poison persists through death
+// (ClearMemberTransientStatuses spares it), so without this the corpse's DoT
+// resumes and bleeds the revived member out again next step. The living keep theirs.
 func RestorePartyFully(g *GameState) int {
 	if g == nil {
 		return 0
@@ -607,8 +610,12 @@ func RestorePartyFully(g *GameState) int {
 		if MemberStarving(g.Party[i]) {
 			continue
 		}
+		revived := g.Party[i].HP <= 0
 		g.Party[i].HP = g.Party[i].MaxHP
 		g.Party[i].MP = g.Party[i].MaxMP
+		if revived {
+			g.Party[i].PoisonTurns = 0
+		}
 		n++
 	}
 	return n

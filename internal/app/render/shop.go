@@ -18,9 +18,6 @@ const (
 	shopRowInsetX   = int32(40)
 	shopRowTextDY   = int32(4) // baseline drop shared by label/name/price columns
 	shopPriceInsetX = modalValueInsetX
-	// shopHintDrop seats the footer hint in the middle of the shopFootH band. Shop
-	// hand-centers at FontSmall rather than via drawModalFooterGlyphs (FontTiny).
-	shopHintDrop = int32(16)
 )
 
 // shopRow is one drawable shop row. affordable false (unaffordable Buy) renders muted.
@@ -64,7 +61,8 @@ func drawShopOverlay(g *core.GameState, assets Resources) {
 		rowY += stride
 	}
 
-	DrawHintBar(font, shopHints, float32(panelX)+float32(shopPanelW)/2, float32(panelY+panelH-shopFootH+shopHintDrop), FontSmall)
+	shopCard := rl.NewRectangle(float32(panelX), float32(panelY), float32(shopPanelW), float32(panelH))
+	drawModalFooterGlyphsSized(font, shopCard, shopHints, FontSmall)
 }
 
 // shopHints is the shop's "Buy/Sell · Confirm · Back" footer, built once (like

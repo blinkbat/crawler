@@ -105,7 +105,7 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 	SkillSmite: {
 		tier(1, "+2 damage", "+2 base damage on the press tap.", SkillEffectDelta{Damage: 2}),
 		tier(2, "+2 damage", "Another +2 base damage.", SkillEffectDelta{Damage: 2}),
-		tier(3, "+25% stun", "Lands a Stun roll with 25% chance on Great/Excellent timing.", SkillEffectDelta{StunChance: 0.25, StunMinTurns: StatusTurnStep, StunMaxTurns: StatusTurnStep}),
+		tier(3, "+25% stun", "Lands a Stun roll with 25% chance on Great/Excellent timing.", SkillEffectDelta{StunChance: SmiteTierStunChance, StunMinTurns: StatusTurnStep, StunMaxTurns: StatusTurnStep}),
 	},
 	SkillBless: {
 		tier(1, "+1 turn", "The blessing lingers one turn longer on the whole party.", SkillEffectDelta{BuffTurns: 1}),
@@ -119,8 +119,8 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 	},
 	// ── Thief ────────────────────────────────────────────────
 	SkillSteal: {
-		tier(1, "+15% chance", "Steal succeeds 15% more often.", SkillEffectDelta{StealChance: 0.15}),
-		tier(2, "+15% chance", "Another +15% steal chance.", SkillEffectDelta{StealChance: 0.15}),
+		tier(1, "+15% chance", "Steal succeeds 15% more often.", SkillEffectDelta{StealChance: StealTierChanceBump}),
+		tier(2, "+15% chance", "Another +15% steal chance.", SkillEffectDelta{StealChance: StealTierChanceBump}),
 		tier(3, "Cuts on lift", "A successful steal also deals STR damage.", SkillEffectDelta{StealBonusDamage: 1}),
 	},
 	SkillBackstab: {
@@ -129,7 +129,7 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 		tier(3, "+3 damage", "Another +3 base damage. Backstab carries.", SkillEffectDelta{Damage: 3}),
 	},
 	SkillVenomStrike: {
-		tier(1, "+15% Poison", "Poison-apply chance bumped by 15%.", SkillEffectDelta{PoisonChance: 0.15}),
+		tier(1, "+15% Poison", "Poison-apply chance bumped by 15%.", SkillEffectDelta{PoisonChance: VenomStrikeTierPoisonBump}),
 		tier(2, "+1 Poison turn", "Poison's max-roll duration extends by one turn.", SkillEffectDelta{PoisonMaxTurns: 1}),
 		tier(3, "+2 damage", "+2 base damage on the strike itself.", SkillEffectDelta{Damage: 2}),
 	},
@@ -144,19 +144,19 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 		tier(3, "+3 Armor break", "A maxed vial melts even a heavy carapace.", SkillEffectDelta{ArmorReduction: 3}),
 	},
 	SkillPoisonCloud: {
-		tier(1, "+15% Poison", "Every enemy in the cloud rolls a 15% higher Poison chance.", SkillEffectDelta{PoisonChance: 0.15}),
+		tier(1, "+15% Poison", "Every enemy in the cloud rolls a 15% higher Poison chance.", SkillEffectDelta{PoisonChance: PoisonCloudTierPoisonBump}),
 		tier(2, "+1 Poison turn", "The cloud's Poison lingers one extra turn on its max roll.", SkillEffectDelta{PoisonMaxTurns: 1}),
 		tier(3, "+1 damage", "+1 base damage to every enemy caught in the cloud.", SkillEffectDelta{Damage: 1}),
 	},
 	// ── Wizard ───────────────────────────────────────────────
 	SkillFirebolt: {
 		tier(1, "+2 damage", "+2 base damage on the bolt.", SkillEffectDelta{Damage: 2}),
-		tier(2, "+20% Burn", "Burn-apply chance bumped by 20%.", SkillEffectDelta{BurnChance: 0.20}),
+		tier(2, "+20% Burn", "Burn-apply chance bumped by 20%.", SkillEffectDelta{BurnChance: FireTierBurnChanceBump}),
 		tier(3, "+1 Burn turn", "Burn lasts one turn longer on min and max rolls.", SkillEffectDelta{BurnMinTurns: StatusTurnStep, BurnMaxTurns: StatusTurnStep}),
 	},
 	SkillFrostLance: {
 		tier(1, "+2 damage", "+2 base damage on the lance.", SkillEffectDelta{Damage: 2}),
-		tier(2, "+15% Stun", "Stun roll gets +15% chance on Great/Excellent.", SkillEffectDelta{StunChance: 0.15}),
+		tier(2, "+15% Stun", "Stun roll gets +15% chance on Great/Excellent.", SkillEffectDelta{StunChance: FrostLanceTierStunChance}),
 		tier(3, "+1 Stun turn", "Stun lasts an extra turn when it lands.", SkillEffectDelta{StunMinTurns: StatusTurnStep, StunMaxTurns: StatusTurnStep}),
 	},
 	SkillFrostbite: {
@@ -176,7 +176,7 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 	},
 	SkillFireball: {
 		tier(1, "+2 damage", "+2 base magic damage to every enemy in the blast.", SkillEffectDelta{Damage: 2}),
-		tier(2, "+20% Burn", "Per-target Burn-apply chance bumped by 20%.", SkillEffectDelta{BurnChance: 0.20}),
+		tier(2, "+20% Burn", "Per-target Burn-apply chance bumped by 20%.", SkillEffectDelta{BurnChance: FireTierBurnChanceBump}),
 		tier(3, "+1 Burn turn", "Burn lasts one turn longer on min and max rolls.", SkillEffectDelta{BurnMinTurns: StatusTurnStep, BurnMaxTurns: StatusTurnStep}),
 	},
 	// ── Warrior (tree-node skills) ───────────────────────────
@@ -222,18 +222,18 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 	SkillRend: {
 		tier(1, "+2 damage", "+2 base damage on the opening cut.", SkillEffectDelta{Damage: 2}),
 		tier(2, "+1 Bleed turn", "The wound bleeds one turn longer on min and max rolls.", SkillEffectDelta{BleedMinTurns: StatusTurnStep, BleedMaxTurns: StatusTurnStep}),
-		tier(3, "+15% Bleed", "Bleed-apply chance bumped by 15% — a maxed Rend almost always draws blood.", SkillEffectDelta{BleedChance: 0.15}),
+		tier(3, "+15% Bleed", "Bleed-apply chance bumped by 15% — a maxed Rend almost always draws blood.", SkillEffectDelta{BleedChance: BleedStrikeTierChanceBump}),
 	},
 	SkillLacerate: {
 		tier(1, "+1 damage", "+1 base damage on the cut.", SkillEffectDelta{Damage: 1}),
 		tier(2, "+1 Bleed turn", "The wound bleeds one turn longer on min and max rolls.", SkillEffectDelta{BleedMinTurns: StatusTurnStep, BleedMaxTurns: StatusTurnStep}),
-		tier(3, "+15% Bleed", "Bleed-apply chance bumped by 15%.", SkillEffectDelta{BleedChance: 0.15}),
+		tier(3, "+15% Bleed", "Bleed-apply chance bumped by 15%.", SkillEffectDelta{BleedChance: BleedStrikeTierChanceBump}),
 	},
 	// ── Radiance / Pyromancy / Storm / Cutpurse (tree-node skills) ───
 	SkillSearingLight: {
 		tier(1, "+2 damage", "+2 base radiant damage on the sear.", SkillEffectDelta{Damage: 2}),
 		tier(2, "+1 Burn turn", "The radiant Burn lingers one turn longer on min and max rolls.", SkillEffectDelta{BurnMinTurns: StatusTurnStep, BurnMaxTurns: StatusTurnStep}),
-		tier(3, "+15% Burn", "Burn-apply chance bumped by 15% — a maxed Searing Light almost always ignites.", SkillEffectDelta{BurnChance: 0.15}),
+		tier(3, "+15% Burn", "Burn-apply chance bumped by 15% — a maxed Searing Light almost always ignites.", SkillEffectDelta{BurnChance: SearingLightTierBurnBump}),
 	},
 	SkillImmolate: {
 		tier(1, "+2 damage", "+2 base fire damage to every enemy in the zone.", SkillEffectDelta{Damage: 2}),
@@ -242,13 +242,13 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 	},
 	SkillMug: {
 		tier(1, "+2 damage", "+2 base damage on the strike.", SkillEffectDelta{Damage: 2}),
-		tier(2, "+15% lift", "Mug's steal succeeds 15% more often.", SkillEffectDelta{StealChance: 0.15}),
+		tier(2, "+15% lift", "Mug's steal succeeds 15% more often.", SkillEffectDelta{StealChance: StealTierChanceBump}),
 		tier(3, "+2 damage", "Another +2 base damage. A maxed Mug hits and lifts.", SkillEffectDelta{Damage: 2}),
 	},
 	SkillChainLightning: {
 		tier(1, "+1 damage", "+1 base damage per arc target.", SkillEffectDelta{Damage: 1}),
 		tier(2, "+1 damage", "Another +1 damage per target.", SkillEffectDelta{Damage: 1}),
-		tier(3, "+15% Stun", "Every arc target rolls a 15% higher Stun chance.", SkillEffectDelta{StunChance: 0.15}),
+		tier(3, "+15% Stun", "Every arc target rolls a 15% higher Stun chance.", SkillEffectDelta{StunChance: ChainLightningTierStunBump}),
 	},
 	SkillStaticField: {
 		tier(1, "+6% HP", "Saps another 6% of the target's current HP.", SkillEffectDelta{PercentCurrentHP: StaticFieldPercentPerTier}),

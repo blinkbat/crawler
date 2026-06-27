@@ -445,13 +445,13 @@ func ItemUseMessage(targetName string, def ItemDefinition, res RestorativeResult
 	case res.HP > 0 && res.MP > 0:
 		return fmt.Sprintf("%s uses %s (+%d HP, +%d MP).", targetName, def.Name, res.HP, res.MP)
 	case res.HP > 0 && res.Satiety > 0:
-		return fmt.Sprintf("%s eats %s (+%d HP, belly fuller).", targetName, def.Name, res.HP)
+		return fmt.Sprintf("%s eats %s (+%d HP, heals %s).", targetName, def.Name, res.HP, SatietyHungerPhrase(res.Satiety))
 	case res.HP > 0:
 		return fmt.Sprintf("%s eats %s (+%d HP).", targetName, def.Name, res.HP)
 	case res.MP > 0:
 		return fmt.Sprintf("%s drinks %s (+%d MP).", targetName, def.Name, res.MP)
 	case res.Satiety > 0:
-		return fmt.Sprintf("%s eats %s — a little less hungry.", targetName, def.Name)
+		return fmt.Sprintf("%s eats %s — heals %s.", targetName, def.Name, SatietyHungerPhrase(res.Satiety))
 	default:
 		// Name the recipient like the +HP/+MP branches (the item lands on the target).
 		return fmt.Sprintf("%s uses %s.", targetName, def.Name)

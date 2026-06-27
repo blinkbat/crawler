@@ -144,6 +144,28 @@ func drawModalTextRow(font rl.Font, x, y, w, h int32, focused bool, label string
 	})
 }
 
+// modalTextRow is one entry for drawModalTextRowList: its label, whether the cursor
+// rests on it, whether it's disabled (greyed + non-focusable), and the disabled tint.
+type modalTextRow struct {
+	label       string
+	focused     bool
+	disabled    bool
+	disabledCol rl.Color
+}
+
+// drawModalTextRowList paints rows top-down from y at (rowX, rowW, rowH), each tinted
+// via rowTextColor and highlighted only when focused && !disabled; returns the y past
+// the last row. Shared by the dialog + chest modals so the per-row tint/draw idiom
+// lives in one place.
+func drawModalTextRowList(font rl.Font, rowX, y, rowW, rowH int32, rows []modalTextRow) int32 {
+	for _, r := range rows {
+		col := rowTextColor(r.focused, r.disabled, r.disabledCol)
+		drawModalTextRow(font, rowX, y, rowW, rowH, r.focused && !r.disabled, r.label, col)
+		y += rowH
+	}
+	return y
+}
+
 // DrawSelectedRow paints the standard cursor-on-row highlight per UI_STANDARDS.md
 // "Row > Selected": warm glass fill, 3px gilt left spine, thin gilt-dim underline.
 func DrawSelectedRow(r rl.Rectangle) {

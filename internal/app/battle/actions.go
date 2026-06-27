@@ -149,7 +149,7 @@ func init() {
 	// an enemySpellHandlers entry, and the reverse walk below catches stale handlers.
 	for _, s := range core.EnemyCastableSkills() {
 		if _, ok := enemySpellHandlers[s]; !ok {
-			panic("battle: EnemyCastable skill " + core.SkillName(s) + " has no enemySpellHandlers entry — register a handler in battle.go")
+			panic("battle: EnemyCastable skill " + core.SkillName(s) + " has no enemySpellHandlers entry — register a handler in actions.go")
 		}
 	}
 	for s := range enemySpellHandlers {
@@ -516,19 +516,27 @@ func forEachLivingEnemy(g *core.GameState, fn func(slot int, enemy *core.Enemy))
 // magic AoE (Fireball / Arc Bolt / Cone of Cold) sweeps the whole pack. One source so
 // every sweep respects reach.
 func forEachTargetableEnemy(g *core.GameState, skill core.SkillID, fn func(slot int, enemy *core.Enemy)) {
+	// Snapshot reachable slots BEFORE any callback runs (see targetableEnemySlots): a
+	// melee AoE that kills a front-row foe shunts a back-row foe up to RowFront
+	// mid-sweep; re-evaluating per slot would then strike a foe covered at cast start.
+	for _, slot := range targetableEnemySlots(g, skill) {
+		fn(slot, core.BattleMemberAt(g, slot))
+	}
+}
+
+// targetableEnemySlots returns the slots a sweep of `skill` reaches at the moment of
+// the call: a melee AoE (Swipe/Whirlwind) is front-gated and skips Flyers; ranged/
+// magic AoE sweeps the whole pack. Snapshot ONCE and reuse across a multi-pass attack
+// (Swipe) so felling the front row can't promote the back row into a later pass.
+func targetableEnemySlots(g *core.GameState, skill core.SkillID) []int {
 	members := core.BattleMembers(g)
-	// Snapshot reachable slots BEFORE any callback runs. A melee AoE that kills a
-	// front-row foe shunts a back-row foe up to RowFront mid-sweep; re-evaluating
-	// reachability per slot would then strike a foe that was covered at cast start.
 	var slots []int
 	for slot := range members {
 		if core.AoEReachesEnemy(members, skill, slot) {
 			slots = append(slots, slot)
 		}
 	}
-	for _, slot := range slots {
-		fn(slot, core.BattleMemberAt(g, slot))
-	}
+	return slots
 }
 
 // triggerBigShake arms the "costly hit" camera punch (AoE casts, Swipe, crits).
@@ -536,22 +544,22 @@ func triggerBigShake(g *core.GameState) {
 	core.TriggerCombatShake(&g.Battle, core.CombatShakeBigPeak, core.CombatShakeBigDur)
 }
 
-// applyAoEDamage hits every reachable enemy for `damage` via damageEnemy (SkillTag
-// armor rules apply; a melee AoE like Swipe reaches only the effective front row).
-// Returns the hit count.
-func applyAoEDamage(g *core.GameState, skill core.SkillID, damage, quality int, shake bool) int {
+// applyAoEDamageToSlots hits a FIXED slot set for `damage` via damageEnemy (SkillTag
+// armor rules apply). A slot whose foe an earlier pass already felled is skipped
+// (damageEnemy no-ops on the dead). Returns the count of foes actually struck this
+// pass. Swipe snapshots its front row ONCE and re-hits that same set every tally
+// pass, so a killed front row can't bleed the sweep into the back row.
+func applyAoEDamageToSlots(g *core.GameState, skill core.SkillID, slots []int, damage, quality int) int {
 	hits := 0
 	tag := core.SkillTagFor(skill)
 	vfx := vfxKindFor(skill)
-	forEachTargetableEnemy(g, skill, func(slot int, _ *core.Enemy) {
+	for _, slot := range slots {
+		if _, ok := livingEnemyAt(g, slot); !ok {
+			continue
+		}
 		damageEnemy(g, slot, damage, quality, tag)
 		core.EnqueueEnemyVFX(g, vfx, slot)
 		hits++
-	})
-	if hits > 0 && shake {
-		// Multi-pass callers (Swipe) pass shake=false and fire one shake after all
-		// passes so the punch arms once per attack.
-		triggerBigShake(g)
 	}
 	return hits
 }
@@ -970,12 +978,16 @@ func applySwipe(g *core.GameState, quality int) bool {
 	// One crit roll for the whole Swipe (the player can't react between sweeps).
 	damage, crit := sweepCritDamage(g, actor, core.SkillSwipe, damage, quality)
 	passes := multiPressPasses(g.Battle.Timing, quality)
+	// Lock the reachable front row ONCE for the whole multi-pass sweep. Re-snapshotting
+	// per pass would let a pass that fells the front row promote the back row into the
+	// next pass — Swipe is front-gated and must keep re-hitting the SAME foes.
+	slots := targetableEnemySlots(g, core.SkillSwipe)
 	// enemiesHit = distinct foes struck, captured from the FIRST pass (later passes
 	// hit fewer as kills accrue; the full set was struck at least once).
 	enemiesHit := 0
 	anyHit := false
 	for p := 0; p < passes; p++ {
-		hit := applyAoEDamage(g, core.SkillSwipe, damage, quality, false)
+		hit := applyAoEDamageToSlots(g, core.SkillSwipe, slots, damage, quality)
 		if hit > 0 {
 			anyHit = true
 		}
@@ -1059,6 +1071,26 @@ func applyPrayer(g *core.GameState, quality int) bool {
 	})
 }
 
+// rollSteal attempts a pickpocket on live using the timing-scaled steal chance from
+// effect (flat base, no DEX), transferring the looted item into the inventory on a
+// landed lift. Returns the kind lifted and whether it landed. Callers own the
+// narration + any bonus-damage rider; this is the one home for the chance roll and
+// the one-time item transfer, shared by Steal and Mug.
+func rollSteal(g *core.GameState, live *core.Enemy, effect core.SkillEffect, quality int) (core.ItemKind, bool) {
+	if live.Item == core.ItemNone {
+		return core.ItemNone, false
+	}
+	chance := core.QualityScaledChance(core.StealChance(effect.StealChance), quality)
+	if g.Rand().Float64() >= chance {
+		return core.ItemNone, false
+	}
+	kind := live.Item
+	// Clear the item off the enemy so it can't be looted twice.
+	live.Item = core.ItemNone
+	g.Inventory = core.AddItem(g.Inventory, kind, 1)
+	return kind, true
+}
+
 // --- Steal (Thief, base chance scales with quality) ---
 
 func applySteal(g *core.GameState, quality int) bool {
@@ -1075,13 +1107,7 @@ func applySteal(g *core.GameState, quality int) bool {
 		return true
 	}
 	effect := core.EffectiveSkillEffect(actor, core.SkillSteal)
-	// Flat base chance (no DEX) with the timing multiplier on top, capped at 1.0.
-	chance := core.QualityScaledChance(core.StealChance(effect.StealChance), quality)
-	if g.Rand().Float64() < chance {
-		kind := enemy.Item
-		// Clear the item off the enemy so it can't be looted twice.
-		enemy.Item = core.ItemNone
-		g.Inventory = core.AddItem(g.Inventory, kind, 1)
+	if kind, stole := rollSteal(g, enemy, effect, quality); stole {
 		// Steal T3 ("Cuts on lift") deals STR×StealBonusDamage on a landed steal.
 		mod := core.SkillTierMod(actor, core.SkillSteal)
 		var bonus int
@@ -1489,14 +1515,9 @@ func applyMug(g *core.GameState, quality int) bool {
 	enqueueSkillVFXAtEnemy(g, core.SkillMug)
 	stole := false
 	var kind core.ItemKind
-	if !defeated && live.Alive && live.Item != core.ItemNone {
-		chance := core.QualityScaledChance(core.StealChance(effect.StealChance), quality)
-		if g.Rand().Float64() < chance {
-			kind = live.Item
-			live.Item = core.ItemNone
-			g.Inventory = core.AddItem(g.Inventory, kind, 1)
-			stole = true
-		}
+	// No pickpocket off a corpse — only a surviving foe can be lifted from.
+	if !defeated && live.Alive {
+		kind, stole = rollSteal(g, live, effect, quality)
 	}
 	foe := core.EnemySingularNoun(&target)
 	var msg string
@@ -1602,13 +1623,15 @@ func applyJudgment(g *core.GameState, quality int) bool {
 // applyRecklessSwing lands a heavy STR hit and sheds the swinger's own Armor for a
 // turn (a negative self-buff via the buff bundle — net-negative, so no Blessed pill).
 func applyRecklessSwing(g *core.GameState, quality int) bool {
-	actor, _, target, rawDamage, _, _, ok := beginSingleTargetSkill(g, core.SkillRecklessSwing, quality)
+	actor, _, target, rawDamage, _, effect, ok := beginSingleTargetSkill(g, core.SkillRecklessSwing, quality)
 	if !ok {
 		return false
 	}
 	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillRecklessSwing, rawDamage, quality)
 	enqueueSkillVFXAtEnemy(g, core.SkillRecklessSwing)
-	core.StampPartyBuff(actor, core.SkillRecklessSwing, core.SkillEffect{BuffArmor: -core.RecklessSwingSelfArmor, BuffTurns: core.RecklessSwingSelfTurns})
+	// Self-debuff magnitudes live in the skill's registered Effect (net-negative
+	// BuffArmor, so no Blessed pill); stamp them straight off the resolved effect.
+	core.StampPartyBuff(actor, core.SkillRecklessSwing, effect)
 	foe := core.EnemySingularNoun(&target)
 	msg := qualityLine(quality, actor.Name, " swings wildly at the %s for %d — guard down.", foe, damage)
 	if defeated {
@@ -2766,6 +2789,15 @@ func procSkillMessage(arms procMessageArms, name string, target core.Enemy, dama
 		f = arms.proc
 	case alreadyActive && arms.alreadyActive != "":
 		f = arms.alreadyActive
+	}
+	if f == "" {
+		// A skill may intentionally omit the plain arm (Frostbite — its chill always
+		// procs on a survivor). Fall back to a non-empty arm rather than log a blank line.
+		if arms.proc != "" {
+			f = arms.proc
+		} else {
+			f = arms.defeated
+		}
 	}
 	return fmt.Sprintf(f, qualityTag(quality), name, core.EnemySingularNoun(&target), damage)
 }

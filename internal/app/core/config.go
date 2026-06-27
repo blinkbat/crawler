@@ -792,6 +792,18 @@ const (
 	ArcBoltBurnMaxTurns = 2
 	// PoisonCloudPoisonChance: per-target Poison for the AoE; lower than single-target VenomStrikePoisonChance.
 	PoisonCloudPoisonChance = 0.45
+	// Tier-upgrade proc-chance bumps — the "+N%" rows in skillTierTable. Named here
+	// (like the ArcBolt row above) so the tier table reads as data, not bare floats.
+	// Magnitudes differ by skill, so these are per-skill rather than one shared bump.
+	SmiteTierStunChance        = 0.25 // Smite T3 stun roll
+	FrostLanceTierStunChance   = 0.15 // Frost Lance T2 stun roll
+	StealTierChanceBump        = 0.15 // Steal T1/T2 / Mug T2 success bump
+	VenomStrikeTierPoisonBump  = 0.15 // Venom Strike T1 poison bump
+	PoisonCloudTierPoisonBump  = 0.15 // Poison Cloud T1 poison bump
+	FireTierBurnChanceBump     = 0.20 // Firebolt T2 / Fireball T2 (shared, like FireBurnMin/MaxTurns)
+	BleedStrikeTierChanceBump  = 0.15 // Rend T3 / Lacerate T3 bleed-apply bump (shared)
+	SearingLightTierBurnBump   = 0.15 // Searing Light T3 burn-apply bump
+	ChainLightningTierStunBump = 0.15 // Chain Lightning T3 stun bump
 )
 
 // Bless (Cleric) tuning — party-wide, always lands (timing cosmetic). Lifts

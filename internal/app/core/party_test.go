@@ -5,6 +5,26 @@ import (
 	"testing"
 )
 
+// TestRestorePartyFullyRevivesClean: a crystal full-restore revives a dead member
+// WITHOUT leftover poison (else the corpse's DoT resumes and re-kills them next
+// step); a living poisoned member keeps their poison (no free cleanse).
+func TestRestorePartyFullyRevivesClean(t *testing.T) {
+	g := &GameState{Party: []PartyMember{
+		{Class: ClassWarrior, MaxHP: 10, MaxMP: 4, HP: 0, PoisonTurns: 3}, // dead + poisoned
+		{Class: ClassThief, MaxHP: 8, MaxMP: 3, HP: 5, PoisonTurns: 2},    // alive + poisoned
+	}}
+	RestorePartyFully(g)
+	if g.Party[0].HP != g.Party[0].MaxHP {
+		t.Errorf("revived member HP = %d, want %d", g.Party[0].HP, g.Party[0].MaxHP)
+	}
+	if g.Party[0].PoisonTurns != 0 {
+		t.Errorf("revived member kept poison (%d turns); should return clean", g.Party[0].PoisonTurns)
+	}
+	if g.Party[1].PoisonTurns != 2 {
+		t.Errorf("living member's poison = %d, want 2 (no free cleanse)", g.Party[1].PoisonTurns)
+	}
+}
+
 func TestMaxHPFor_TwoPerVIT(t *testing.T) {
 	cases := []struct {
 		vit  int

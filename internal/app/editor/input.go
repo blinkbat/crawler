@@ -601,11 +601,7 @@ func updateMouse(s *State) {
 			// Ramp mode: right-click clears a ramp (floor → auto), keeping the
 			// elevation digit so the cliff stays. No-op on a non-ramp tile.
 			if s.rampMode {
-				if _, ok := s.area.RampAt(hx, hz); ok {
-					pushUndo(s)
-					setLayerCell(&s.area.Floor, hx, hz, core.FloorAuto)
-					s.dirty = true
-				}
+				isoClearRamp(s, hx, hz)
 				return
 			}
 			// Right-click opens the context menu (erasing is a selectable brush).

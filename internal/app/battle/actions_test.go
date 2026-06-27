@@ -69,6 +69,25 @@ func TestSkippedTurnTicksPoison(t *testing.T) {
 	}
 }
 
+// TestSkippedTurnClearsGuard: a guardian whose turn is skipped (Sleep/Stun) must
+// drop its Guard cover, exactly as beginPartyTurn would on a normal turn — else the
+// ward's incoming hits keep redirecting onto the incapacitated guardian for extra rounds.
+func TestSkippedTurnClearsGuard(t *testing.T) {
+	g := newTestState()
+	const guardian, ward = 2, 0 // distinct slots so GuardedBy != 0 proves the link existed
+	core.SetGuard(g.Party, guardian, ward)
+	if !g.Party[guardian].Guarding || !g.Party[ward].Guarded {
+		t.Fatalf("setup: guard not established (guarding=%v guarded=%v)", g.Party[guardian].Guarding, g.Party[ward].Guarded)
+	}
+	advanceSkippedTurn(g, core.ActorRef{IsParty: true, Index: guardian})
+	if g.Party[guardian].Guarding {
+		t.Errorf("skipped guardian still Guarding; cover must lapse on a skipped turn")
+	}
+	if g.Party[ward].Guarded || g.Party[ward].GuardedBy != 0 {
+		t.Errorf("ward still Guarded after guardian's skipped turn (guarded=%v by=%d)", g.Party[ward].Guarded, g.Party[ward].GuardedBy)
+	}
+}
+
 // TestBuildTurnQueue_SPDIncreasesTurnRate: SPD drives turn RATE over many rounds, not
 // just order within one. SPD-6 vs SPD-2 ≈ 3× turns, only because readiness persists across rounds.
 func TestBuildTurnQueue_SPDIncreasesTurnRate(t *testing.T) {

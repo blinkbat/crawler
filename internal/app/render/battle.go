@@ -227,23 +227,23 @@ func drawEnemyRosterCell(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targ
 	condition, condCol := enemyHealthStyle(enemy)
 	pad := rosterCellInsetX
 	nameX := float32(x + pad)
-	nameY := float32(y) + 6
+	nameY := float32(y) + rosterPillTopPad
 	drawEngravedText(font, core.EnemyName(enemy), nameX, nameY, FontBody, nameCol)
 
 	// Wound-state word always; real HP in claret only when known. No HP bar.
 	const condSize = FontTiny
-	condY := nameY + FontBody + 1
+	condY := nameY + FontBody + rosterCondLineGap
 	drawTextWithShadow(font, condition, nameX, condY, condSize, condCol)
 	if known {
 		condW := rosterCondMeasureCache.measure(font, condition, condSize, canonicalSpacing(condSize)).X
-		drawTextWithShadow(font, formatBarValue(enemy.HP, enemy.MaxHP), nameX+condW+8, condY, condSize, barEnemyHP)
+		drawTextWithShadow(font, formatBarValue(enemy.HP, enemy.MaxHP), nameX+condW+rosterHPGutter, condY, condSize, barEnemyHP)
 	}
 
 	// Status pills in the top-right corner, stacking left, walking the init-asserted visual table.
 	pillW := rosterStatusPillW
 	pillH := rosterStatusPillH
-	pillY := float32(y) + 6
-	pillRight := float32(x+w) - 8
+	pillY := float32(y) + rosterPillTopPad
+	pillRight := float32(x+w) - rosterPillRightPad
 	slot := 0
 	for _, p := range enemyStatusPillVisuals {
 		turns := p.turns(enemy)
@@ -254,7 +254,7 @@ func drawEnemyRosterCell(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targ
 		if p.flicker {
 			fill = fadeColor(fill, pulseFlicker())
 		}
-		pillX := pillRight - pillW - float32(slot)*(pillW+4)
+		pillX := pillRight - pillW - float32(slot)*(pillW+rosterPillGap)
 		drawEnemyStatusPill(font, pillX, pillY, pillW, pillH,
 			fill, p.outline, p.glyph, statusTurnsLabel(turns))
 		slot++
@@ -912,8 +912,6 @@ func enemyHealthStyle(enemy *core.Enemy) (string, color.RGBA) {
 	condition := core.EnemyConditionFor(enemy)
 	return core.EnemyConditionLabel(condition), enemyConditionColors[condition]
 }
-
-// splashBgColor / splashTitleColor now live in theme.go's palette block.
 
 // Splash ease windows (seconds, within core.BattleSplashDuration): enter lead-in, exit tail-out.
 const (

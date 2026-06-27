@@ -533,11 +533,6 @@ func removeSpawnsWhere[T core.TileXZ](spawns []T, pred func(x, z int) bool) []T 
 	})
 }
 
-// removeDoorAt drops the door at (x, z) from spawns (if any).
-func removeDoorAt(spawns []core.DoorSpawn, x, z int) []core.DoorSpawn {
-	return removeSpawnsAt(spawns, x, z)
-}
-
 // placeChestAt drops a chest with default starter loot at (x,z), refusing illegal
 // tiles (see chestPlaceBlockers).
 func placeChestAt(s *State, x, z int) {
@@ -559,11 +554,6 @@ func defaultChestItems() []core.ItemKind {
 	return []core.ItemKind{core.ItemCheese, core.ItemBatJerky}
 }
 
-// removeChestSpawnAt drops the chest at (x, z) from spawns (if any).
-func removeChestSpawnAt(spawns []core.ChestSpawn, x, z int) []core.ChestSpawn {
-	return removeSpawnsAt(spawns, x, z)
-}
-
 // placeCrystalAt drops a healing crystal at (x,z), refusing illegal tiles (see
 // crystalPlaceBlockers).
 func placeCrystalAt(s *State, x, z int) {
@@ -574,11 +564,6 @@ func placeCrystalAt(s *State, x, z int) {
 	}
 	s.area.CrystalSpawns = append(s.area.CrystalSpawns, core.CrystalSpawn{TileX: x, TileZ: z})
 	s.dirty = true
-}
-
-// removeCrystalSpawnAt drops the crystal at (x, z) from spawns (if any).
-func removeCrystalSpawnAt(spawns []core.CrystalSpawn, x, z int) []core.CrystalSpawn {
-	return removeSpawnsAt(spawns, x, z)
 }
 
 // eraseSentinel is the "empty" char a layer resets to when erased (shared by
@@ -717,9 +702,9 @@ func addPackMember(s *State, x, z int, kind core.EnemyKind) {
 // mutating the passed-in area's slices.
 func removeAllEntitiesAt(a *core.AreaDefinition, x, z int) {
 	a.PackSpawns = removePackAt(a.PackSpawns, x, z)
-	a.ChestSpawns = removeChestSpawnAt(a.ChestSpawns, x, z)
-	a.DoorSpawns = removeDoorAt(a.DoorSpawns, x, z)
-	a.CrystalSpawns = removeCrystalSpawnAt(a.CrystalSpawns, x, z)
+	a.ChestSpawns = removeSpawnsAt(a.ChestSpawns, x, z)
+	a.DoorSpawns = removeSpawnsAt(a.DoorSpawns, x, z)
+	a.CrystalSpawns = removeSpawnsAt(a.CrystalSpawns, x, z)
 }
 
 // totalEntityCount sums all spawn-list lengths. Single source for the clear-entity

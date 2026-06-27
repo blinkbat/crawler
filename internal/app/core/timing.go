@@ -171,11 +171,7 @@ func tallyWindowAt(center, winWidth, commitStart, duration float32) TallyWindow 
 	if hi < lo {
 		hi = lo
 	}
-	if center < lo {
-		center = lo
-	} else if center > hi {
-		center = hi
-	}
+	center = Clamp(center, lo, hi)
 	return TallyWindow{
 		Start: (center - winWidth*0.5) * duration,
 		End:   (center + winWidth*0.5) * duration,

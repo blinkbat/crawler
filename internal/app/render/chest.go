@@ -123,10 +123,7 @@ func DrawChestModal(g *core.GameState, assets Resources) {
 	if listRows < 1 {
 		listRows = 1
 	}
-	cardH := chestCardTopPad + rowH*(listRows+1) + chestCardBotPad
-	if cardH < modalMinCardH {
-		cardH = modalMinCardH
-	}
+	cardH := modalCardHeight(chestCardTopPad + rowH*(listRows+1) + chestCardBotPad)
 	card := drawModalScaffold(font, overlayCardWidthSmall, cardH, "")
 	cardX, cardY := int32(card.X), int32(card.Y)
 	cardW := int32(card.Width)
@@ -135,22 +132,25 @@ func DrawChestModal(g *core.GameState, assets Resources) {
 	rowX := cardX + chestRowInsetX
 	rowW := cardW - 2*chestRowInsetX
 	if len(stacks) == 0 {
+		// Plain "(empty)" line (not a selectable row), so it stays outside the row list.
 		drawTextWithShadow(font, "(empty)", float32(rowX), float32(rowY), FontBody, textMuted)
 		rowY += rowH
 	}
+	rows := make([]modalTextRow, 0, len(stacks)+1)
 	for i, st := range stacks {
-		focused := g.ChestMenuIndex == i
-		col := rowTextColor(focused, false, textMuted)
-		label := stackLabel(core.ItemInfo(st.Kind).Name, st.Count)
-		drawModalTextRow(font, rowX, rowY, rowW, rowH, focused, label, col)
-		rowY += rowH
+		rows = append(rows, modalTextRow{
+			label:       stackLabel(core.ItemInfo(st.Kind).Name, st.Count),
+			focused:     g.ChestMenuIndex == i,
+			disabledCol: textMuted,
+		})
 	}
 	// "Take All" row, always present so the cursor never lands on an unselectable row. ChestTakeAllRow keeps render + explore in sync.
-	{
-		focused := g.ChestMenuIndex == core.ChestTakeAllRow(len(stacks))
-		col := rowTextColor(focused, false, textMuted)
-		drawModalTextRow(font, rowX, rowY, rowW, rowH, focused, "Take All", col)
-	}
+	rows = append(rows, modalTextRow{
+		label:       "Take All",
+		focused:     g.ChestMenuIndex == core.ChestTakeAllRow(len(stacks)),
+		disabledCol: textMuted,
+	})
+	drawModalTextRowList(font, rowX, rowY, rowW, rowH, rows)
 	drawModalFooterGlyphs(font, card, chestHints)
 }
 

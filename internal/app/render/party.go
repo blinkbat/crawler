@@ -94,13 +94,6 @@ func partyStatusTurnLabel(kind core.PartyStatusKind, turns int) string {
 	return fmt.Sprintf("%s %d", base, turns)
 }
 
-// partyStatusLabelMeasureCache memoizes MeasureTextEx for party-status labels.
-var partyStatusLabelMeasureCache measureCache
-
-func measurePartyStatusLabel(font rl.Font, label string) rl.Vector2 {
-	return partyStatusLabelMeasureCache.measure(font, label, FontTiny, 1)
-}
-
 // statusTurnDigits caches the bare turns-remaining numerals (no per-frame alloc).
 // Shared by party card + enemy pill.
 var statusTurnDigits = func() [statusTurnCacheMax]string {

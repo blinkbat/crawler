@@ -88,9 +88,6 @@ var foePreviewRT previewRT
 // battle billboards use) so the preview matches an encounter.
 var foeAnchor = rl.NewVector3(0, battleFormationCenterY, 0)
 
-// foePreviewBG/foePreviewGround + gizmo* diorama tints now live in theme.go
-// (Visualizer diorama palette group).
-
 // foePreviewCamera is the diorama camera, derived from the DEFAULT battle tuning so
 // the preview reads at the SAME downward tilt + FOV combat does (back along +Z, the
 // look pitched down by |CamPitch|). Forward points into −Z, so a positive depthOffset

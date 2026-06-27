@@ -11,12 +11,22 @@ type QuestStatus int
 const (
 	QuestActive QuestStatus = iota
 	QuestComplete
+
+	questStatusCount // sentinel: QuestStatus cardinality (assertAppendOnly coverage)
 )
+
+// init pins each QuestStatus's serialized int value (saved as Quest.Status and as
+// the dialog "questStatus" condition field). A mid-enum insert renumbers saved
+// statuses; this panics at startup instead. APPEND a new status, then pin it here.
+func init() {
+	assertAppendOnly("QuestStatus (renumbers saved quest statuses)", int(questStatusCount),
+		QuestActive, QuestComplete)
+}
 
 // Valid reports whether s is a recognized QuestStatus — the single source for
 // the legal set, so adding a third status is a one-line edit here.
 func (s QuestStatus) Valid() bool {
-	return s == QuestActive || s == QuestComplete
+	return s >= 0 && s < questStatusCount
 }
 
 // Quest is one journal entry. ID is a stable string key for CompleteQuest /

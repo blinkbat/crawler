@@ -30,6 +30,15 @@ const (
 	satietyStageSpan = SatietyMax / int(SatietyStageCount)
 )
 
+// init guards the integer division above: if SatietyMax stops being a clean
+// multiple of SatietyStageCount (e.g. StepsPerCycle is retuned), the top band
+// silently widens and StageForHunger drifts. Fail loudly at startup instead.
+func init() {
+	if SatietyMax%int(SatietyStageCount) != 0 {
+		panic("core: SatietyMax must be a multiple of SatietyStageCount — stage bands would be uneven")
+	}
+}
+
 // StageForHunger maps a stored Hunger value to its SatietyStage band.
 func StageForHunger(hunger int) SatietyStage {
 	if hunger <= 0 {
@@ -67,6 +76,29 @@ func SatietyStageLabel(s SatietyStage) string {
 		return ""
 	}
 	return satietyStageLabels[s]
+}
+
+// SatietyHungerPhrase humanizes a satiety amount as the noun phrase of hunger it
+// covers, measured against a day of crawling (StepsPerCycle) so the ladder scales
+// if the day length changes. Empty for a non-food (amount <= 0). Shared by the
+// item detail card (nominal SatietyGain) and the eat log line (actual restored),
+// so both read the same. Pair with "Heals " for a full sentence.
+func SatietyHungerPhrase(amount int) string {
+	day := StepsPerCycle
+	switch {
+	case amount <= 0:
+		return ""
+	case amount >= 2*day:
+		return "days' worth of hunger"
+	case amount >= day*7/8:
+		return "a day's worth of hunger"
+	case amount >= day/2:
+		return "half a day's hunger"
+	case amount >= day/4:
+		return "a little hunger"
+	default:
+		return "a touch of hunger"
+	}
 }
 
 // TickHungerStep raises every CONSCIOUS member's Hunger one step toward SatietyMax.

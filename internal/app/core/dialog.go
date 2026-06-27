@@ -28,6 +28,13 @@ const (
 	DialogQuestComplete DialogQuestOp = "complete"
 )
 
+// DialogQuestOps returns the quest operations in canonical (editor display) order —
+// the single source the editor's quest-op picker reads and asserts coverage against,
+// mirroring DialogActionKinds / DialogCondKinds.
+func DialogQuestOps() []DialogQuestOp {
+	return []DialogQuestOp{DialogQuestStart, DialogQuestComplete}
+}
+
 // DialogActionKind tags the DialogAction union; empty means "no action".
 type DialogActionKind string
 

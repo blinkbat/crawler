@@ -455,6 +455,14 @@ const (
 	// Status-pill geometry (anchored to a cell's top-right corner, stacking left).
 	rosterStatusPillW = float32(28) // status pill width
 	rosterStatusPillH = float32(20) // status pill height
+	// Roster-cell content layout (drawEnemyRosterCell): top inset shared by the name
+	// baseline and the pill row, the pill row's right inset + inter-pill gap, and the
+	// name→condition line gap + the wound-word→HP gutter.
+	rosterPillTopPad   = float32(6)
+	rosterPillRightPad = float32(8)
+	rosterPillGap      = float32(4)
+	rosterCondLineGap  = float32(1)
+	rosterHPGutter     = float32(8)
 
 	// Combat HUD panes (battle.go) — bottom-left action log + bottom-right action
 	// menu. Both share the hudPanelMinH floor.
@@ -596,6 +604,16 @@ const modalHeadingInsetY = int32(14)
 // more breathing room from the wood frame than body content does.
 const modalHeadingGutterX = int32(28)
 
+// modalCardHeight floors a hand-summed modal content height at modalMinCardH so a
+// short card (a one-line dialog node, a near-empty chest) still reads as a card. The
+// per-band sums differ by modal, but the min-card floor is shared (dialog + chest).
+func modalCardHeight(contentH int32) int32 {
+	if contentH < modalMinCardH {
+		return modalMinCardH
+	}
+	return contentH
+}
+
 // drawModalScaffold paints the shared veil + centered card + heading band for
 // every modal overlay, returning the card rect. Empty heading skips the band.
 func drawModalScaffold(font rl.Font, cardW, cardH int32, heading string) rl.Rectangle {
@@ -680,7 +698,7 @@ func drawDustMotes(screenW, screenH int32, flick float32) {
 	fh := float32(screenH)
 	warm := rl.NewColor(255, 230, 184, 255)
 	for i := 0; i < motes; i++ {
-		hx := hash01(uint32(i*2654435761 + 1))
+		hx := hash01(uint32(i)*hashSalt + 1)
 		hy := hash01(uint32(i*40503 + 7))
 		fall := float32(math.Mod(t*9+float64(hy)*float64(fh), float64(fh)))
 		sway := float32(math.Sin(t*0.35+float64(i)*1.7)) * 22
@@ -990,6 +1008,15 @@ func drawDiamondPip(cx, cy, r float32, col color.RGBA) {
 	left := rl.NewVector2(cx-r, cy)
 	drawTriangleCCW(top, left, right, col)
 	drawTriangleCCW(right, left, bottom, col)
+}
+
+// cornerPips dots the four corners of rect with radius-r diamond pips in col, each
+// inset `inset` from both edges — the skill-node plate's corner ornament.
+func cornerPips(rect rl.Rectangle, inset, r float32, col color.RGBA) {
+	drawDiamondPip(rect.X+inset, rect.Y+inset, r, col)
+	drawDiamondPip(rect.X+rect.Width-inset, rect.Y+inset, r, col)
+	drawDiamondPip(rect.X+inset, rect.Y+rect.Height-inset, r, col)
+	drawDiamondPip(rect.X+rect.Width-inset, rect.Y+rect.Height-inset, r, col)
 }
 
 // drawFleuron paints a gilt fleuron — a centre diamond flanked by teardrop leaves
@@ -1870,6 +1897,13 @@ func formatBarValue(value, maxValue int) string {
 	return s
 }
 
+// arrowTransition renders a "before → after" change with the canonical single-space
+// arrow. Shared by the level-up stat preview and the victory level-up badge so the
+// separator can't drift between the two surfaces.
+func arrowTransition(before, after string) string {
+	return before + " → " + after
+}
+
 // drawTriangleCCW wraps rl.DrawTriangle with the "CCW in screen-Y-down" winding
 // contract: some drivers silently cull CW-wound 2D triangles. CCW here means the
 // (b-a)×(c-b) cross product is NEGATIVE (screen Y points down).
@@ -1936,6 +1970,15 @@ func accentIfPositive(n int, accent color.RGBA) color.RGBA {
 		return accent
 	}
 	return textMuted
+}
+
+// drawSkillPointBalance draws a member's skill-point balance right-aligned at
+// (rightX, y): the skillPointsLabel value tinted by accentIfPositive (bright when
+// there's something to spend, muted at zero). Shared by the tree-modal header and
+// the Skills-tab summary so the value's tone + format can't drift. The leading
+// "SKILL POINTS" label (panels only) stays at the call site.
+func drawSkillPointBalance(font rl.Font, points int, rightX, y, size float32) {
+	drawTextRightAligned(font, skillPointsLabel(points), rightX, y, size, accentIfPositive(points, inkAccent))
 }
 
 // tabLabelMeasurer returns the FontBody label-width closure drawTextTabStrip

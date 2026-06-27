@@ -550,11 +550,11 @@ func (a *AreaDefinition) StandGroundY(x, z int) float32 {
 // bridge deck and one on the ground beneath it sit at their own heights. A ramp
 // still reads +0.5 level. StandGroundY is the level==column-top special case.
 func (a *AreaDefinition) StandGroundYAt(x, level, z int) float32 {
-	y := float32(level - ElevationBaseline)
+	y := ElevationWorldY(level)
 	if _, ok := a.RampAt(x, z); ok {
-		y += 0.5
+		y += 0.5 * LevelStep
 	}
-	return y * LevelStep
+	return y
 }
 
 // NoRamp is the sentinel ramp facing for a flat tile, passed to EdgeLevelOf.

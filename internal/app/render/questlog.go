@@ -27,7 +27,7 @@ func drawJournalSubtabHeader(font rl.Font, active core.JournalSubtab, body rl.Re
 		func(i int) string { return core.JournalSubtabLabel(core.JournalSubtab(i)) },
 		tabLabelMeasurer(&journalMeasureCache, font),
 		textPrimary, journalSubtabStripGap, true)
-	return FontBody + 14
+	return journalSubtabHeaderH
 }
 
 // Journal list rhythm — ONE metric set shared by both sub-views so they page at the same stride and don't "jump" when flipping.
@@ -37,8 +37,9 @@ const (
 	journalTallyDY        = float32(4)  // tally-header baseline nudge below body top
 	journalRowTitleDY     = float32(2)  // row title baseline nudge (detail uses journalRowDetailDY)
 	journalRowDetailDY    = float32(26)
-	journalRowInsetX      = float32(8)  // shared left inset for header, tally, rows, selection plate
-	journalSubtabStripGap = float32(22) // inter-tab spacing for the Quests/Bestiary sub-tab strip
+	journalRowInsetX      = float32(8)    // shared left inset for header, tally, rows, selection plate
+	journalSubtabStripGap = float32(22)   // inter-tab spacing for the Quests/Bestiary sub-tab strip
+	journalSubtabHeaderH  = FontBody + 14 // vertical space the sub-tab strip consumes (FontBody glyph + gap below)
 )
 
 // Caches so the open Journal tab doesn't re-measure stable strings / re-Sprintf tally + row text every frame; all change only on quest/bestiary events.

@@ -468,14 +468,17 @@ func drawFormationCard(font rl.Font, g *core.GameState, i int, quad rl.Rectangle
 		nameCol = textMuted
 	}
 	y := drawCardIdentity(font, m, leftX, leftW, quad.Y+cardTopInsetY, nameCol, classCol, formationCardMetrics)
-	if kind, turns := core.PartyStatus(&g.Party[i]); kind != core.PartyStatusNone {
+	// Skip Starving here: the satiety chip below always shows it, so drawing it as a
+	// status pill too would double "STARVING" on this card. Any higher-priority status
+	// (Poisoned, Stunned, …) still outranks Starving in PartyStatus and shows normally.
+	if kind, turns := core.PartyStatus(&g.Party[i]); kind != core.PartyStatusNone && kind != core.PartyStatusStarving {
 		label := partyStatusTurnLabel(kind, turns)
 		chipW := measurePanelStatValue(font, label, FontSmall).X + 20
 		col, _ := partyStatusVisual(kind)
 		drawStatusPill(font, leftX, y, chipW, 26, fadeColor(col, 0.28), fadeColor(col, 0.85), label, col, false)
 	}
 	// Satiety stage chip below the status pill — always shown so the player can watch
-	// hunger climb the ladder before Starving bites (which also surfaces as a status).
+	// hunger climb the ladder before Starving bites (which is omitted from the pill above).
 	stage := core.MemberStage(m)
 	satLabel := core.SatietyStageLabel(stage)
 	satCol := satietyStageColors[stage]
@@ -1196,7 +1199,7 @@ func formatRatioSpaced(cur, total int) string {
 	return s
 }
 
-// panelsItemEffectLabel is the Items-tab detail line for a consumable: cached "+N HP", "+N MP", both, or a no-effect note.
+// panelsItemEffectLabel is the Items-tab detail line for a consumable: "+N HP", "+N MP", a humanized hunger clause for food, or a no-effect note.
 func panelsItemEffectLabel(info core.ItemDefinition) string {
 	effect := ""
 	if info.HealAmount > 0 {
@@ -1207,6 +1210,12 @@ func panelsItemEffectLabel(info core.ItemDefinition) string {
 			effect += "   "
 		}
 		effect += "+" + strconv.Itoa(info.MPAmount) + " MP"
+	}
+	if info.SatietyGain > 0 {
+		if effect != "" {
+			effect += "   "
+		}
+		effect += "Heals " + core.SatietyHungerPhrase(info.SatietyGain) + "."
 	}
 	if effect == "" {
 		return "No restorative effect"
@@ -1228,10 +1237,8 @@ func drawPanelsSkills(g *core.GameState, assets Resources, body rl.Rectangle) {
 		innerX, innerW := memberCardInner(cols[i])
 
 		// Skill-point balance — bright when there's something to spend, muted at zero.
-		spText := skillPointsLabel(m.SkillPoints)
-		spCol := accentIfPositive(m.SkillPoints, inkAccent)
 		drawTextWithShadow(font, "SKILL POINTS", innerX, contentY, FontSmall, textMuted)
-		drawTextRightAligned(font, spText, innerX+innerW, contentY, FontSmall, spCol)
+		drawSkillPointBalance(font, m.SkillPoints, innerX+innerW, contentY, FontSmall)
 		contentY += cardSubLineStep
 
 		// One summary panel per tree: name + invested/total + theme.

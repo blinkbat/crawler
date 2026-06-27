@@ -23,6 +23,8 @@ const (
 	isoFovy     = float32(46)
 	isoPitchDeg = 38.0          // camera tilt above the horizon
 	isoPanSpeed = float32(0.02) // middle-drag pan: screen px → world units
+	isoMinZoom  = float32(0.3)  // 3D-view zoom clamp (parallels minZoom/maxZoom for the canvas)
+	isoMaxZoom  = float32(6)
 )
 
 var (
@@ -282,8 +284,8 @@ func updateIsoCanvas(s *State, mp rl.Vector2) {
 		if s.isoZoom <= 0 {
 			s.isoZoom = 1
 		}
-		s.isoZoom *= 1 + 0.12*wheel
-		s.isoZoom = core.Clamp(s.isoZoom, float32(0.3), float32(6))
+		s.isoZoom *= 1 + canvasZoomWheelRate*wheel
+		s.isoZoom = core.Clamp(s.isoZoom, isoMinZoom, isoMaxZoom)
 	}
 	if rl.IsMouseButtonDown(rl.MouseMiddleButton) {
 		d := rl.GetMouseDelta()

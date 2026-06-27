@@ -94,7 +94,7 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 		var preview string
 		previewCol := col
 		if pending > 0 {
-			preview = strconv.Itoa(cur) + "  →  " + strconv.Itoa(cur+pending) + "   (+" + strconv.Itoa(pending) + ")"
+			preview = arrowTransition(strconv.Itoa(cur), strconv.Itoa(cur+pending)) + "   (+" + strconv.Itoa(pending) + ")"
 			previewCol = inkAccent
 		} else {
 			preview = strconv.Itoa(cur)
