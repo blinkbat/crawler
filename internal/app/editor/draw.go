@@ -23,12 +23,18 @@ var glyphStr = func() [256]string {
 	return t
 }()
 
-// tickLabels holds pre-formatted labels for every 5th grid coordinate. Built
-// once so the axis-tick draw indexes coord/5 instead of Sprintf'ing each frame.
+// gridTickStride is the grid-coordinate interval the axis ticks are labeled at
+// (every Nth cell). The label table, its index math, and the values all derive
+// from it, so retuning the tick density is one edit.
+const gridTickStride = 5
+
+// tickLabels holds pre-formatted labels for every gridTickStride'th grid coordinate.
+// Built once so the axis-tick draw indexes coord/gridTickStride instead of
+// Sprintf'ing each frame.
 var tickLabels = func() []string {
-	t := make([]string, core.MaxMapDimension/5+2)
+	t := make([]string, core.MaxMapDimension/gridTickStride+2)
 	for i := range t {
-		t[i] = strconv.Itoa(i * 5)
+		t[i] = strconv.Itoa(i * gridTickStride)
 	}
 	return t
 }()
@@ -36,7 +42,7 @@ var tickLabels = func() []string {
 // tickLabel returns the pre-formatted label for coordinate c, formatting fresh
 // if c lands past the table.
 func tickLabel(c int) string {
-	if i := c / 5; i >= 0 && i < len(tickLabels) {
+	if i := c / gridTickStride; i >= 0 && i < len(tickLabels) {
 		return tickLabels[i]
 	}
 	return strconv.Itoa(c)
@@ -987,6 +993,10 @@ func stepperButtonPair(x, y, btnW, btnH, gap float32) (minus, plus rl.Rectangle)
 	return minus, plus
 }
 
+// dimStepperValueW is the value-cell width of the width/height dimension steppers,
+// shared by the Map panel and the New Map modal so the two read identically.
+const dimStepperValueW = float32(96)
+
 // stepperRow lays out a numeric stepper at (x,y): a value cell of width valueW,
 // then two square "−"/"+" buttons each preceded by gap.
 func stepperRow(x, y, valueW, gap float32) (value, minus, plus rl.Rectangle) {
@@ -1041,7 +1051,7 @@ func drawDoorLinks(s *State, cell float32) {
 // overlayGutterPad insets grid-corner overlays (minimap, brush recents) far
 // enough to clear the canvas scrollbar gutters: scrollbarThickness + slack.
 // Derived so a future scrollbar bump can't silently break the clearance.
-const overlayGutterPad = scrollbarThickness + 5 // = 16
+const overlayGutterPad = scrollbarThickness + 5
 
 // overlayMinGridDim is the minimum grid (canvas) dimension below which the
 // grid-corner overlays hide — the shared width gate for the minimap and the
@@ -1706,9 +1716,9 @@ func metadataRects(s *State) metaRect {
 
 	r.dimsLabel = rl.NewRectangle(x, y, w, metaLabelH)
 	y += metaLabelGap
-	r.widthValue, r.widthMinus, r.widthPlus = stepperRow(x, y, 96, 6)
+	r.widthValue, r.widthMinus, r.widthPlus = stepperRow(x, y, dimStepperValueW, tightBtnGap)
 	y += metaStepperGap
-	r.heightValue, r.heightMinus, r.heightPlus = stepperRow(x, y, 96, 6)
+	r.heightValue, r.heightMinus, r.heightPlus = stepperRow(x, y, dimStepperValueW, tightBtnGap)
 	y += metaRowGap
 
 	// On-disk path readout (area-wide; player start + door facing are per-entity now).

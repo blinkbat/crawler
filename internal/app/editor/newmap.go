@@ -45,9 +45,9 @@ func newMapModalLayout() newMapLayout {
 	// Dimensions: value field + −/+ for width, then the same for height.
 	y := card.Y + newMapDimsTop
 	xLeft := card.X + 20
-	l.widthValue, l.widthMinus, l.widthPlus = stepperRow(xLeft+62, y, 96, 6)
+	l.widthValue, l.widthMinus, l.widthPlus = stepperRow(xLeft+62, y, dimStepperValueW, tightBtnGap)
 	y += newMapDimsRowGap
-	l.heightValue, l.heightMinus, l.heightPlus = stepperRow(xLeft+62, y, 96, 6)
+	l.heightValue, l.heightMinus, l.heightPlus = stepperRow(xLeft+62, y, dimStepperValueW, tightBtnGap)
 
 	// Floor swatch grid: newMapSwatchW × modalBtnH cells, modalBtnGap gutters.
 	swatchY := card.Y + newMapSwatchTop

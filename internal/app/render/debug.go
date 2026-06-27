@@ -22,6 +22,16 @@ const (
 	debugLabelSlackY = float32(80)
 )
 
+// Debug-overlay rhythm: the top-left readout's gutter + top inset + header line
+// pitch, and the in-world label stack's line pitch. Bare offsets named so the two
+// text rhythms read as deliberate (hudEdgePad/hudContentInsetX don't match 14).
+const (
+	debugGutterX        = float32(14)
+	debugHeaderTopInset = float32(12)
+	debugHeaderPitch    = 22
+	debugLabelLinePitch = float32(19)
+)
+
 // debugLabelsBuf reuses the per-tile label slice across frames (renderer is single-threaded).
 var debugLabelsBuf = make([]labelStack, 0, (2*debugLabelRange+1)*(2*debugLabelRange+1))
 
@@ -46,7 +56,7 @@ func DrawDebugOverlay(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		fmt.Sprintf("step %d  %s", g.StepCount, m.Name),
 	}
 	for i, line := range header {
-		x, y := float32(14), float32(12+i*22)
+		x, y := debugGutterX, debugHeaderTopInset+float32(i*debugHeaderPitch)
 		drawTextWithShadowStyle(assets.hudFont, line, x, y, FontBody, FontSpacingBody, debugHeadingColor, shadowHeavy, 1, 1)
 	}
 
@@ -101,7 +111,7 @@ func DrawDebugOverlay(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		y := lbl.screen.Y
 		for _, line := range lbl.lines {
 			drawDebugLabel(assets.hudFont, line, lbl.screen.X, y)
-			y += 19
+			y += debugLabelLinePitch
 		}
 	}
 	debugLabelsBuf = labels
@@ -139,10 +149,6 @@ func drawDebugLabel(font rl.Font, text string, x, y float32) {
 	}
 	const size = FontSmall
 	const spacing = float32(1)
-	measure := rl.MeasureTextEx(font, text, size, spacing)
-	rx := x - measure.X/2
-	ry := y - measure.Y/2
 	const pad = float32(4)
-	rl.DrawRectangle(int32(rx-pad), int32(ry-pad/2), int32(measure.X+pad*2), int32(measure.Y+pad), shadowMid)
-	drawTextWithShadowStyle(font, text, rx, ry, size, spacing, debugLabelColor, shadowHeavy, 1, 1)
+	drawTextChip(font, text, x, y, size, spacing, pad, shadowMid, debugLabelColor)
 }

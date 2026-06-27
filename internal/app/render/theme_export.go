@@ -170,8 +170,7 @@ func drawModalTextRowList(font rl.Font, rowX, y, rowW, rowH int32, rows []modalT
 // "Row > Selected": warm glass fill, 3px gilt left spine, thin gilt-dim underline.
 func DrawSelectedRow(r rl.Rectangle) {
 	flick := candleFlicker()
-	drawPaneDropShadow(r)
-	drawGlassPaneRect(r, glassWarm)
+	drawShadowedGlassPane(r, glassWarm)
 	rl.DrawRectangleLinesEx(r, 1, fadeColor(giltDim, 0.75*flick))
 	if r.Width > 24 && r.Height > 10 {
 		rl.DrawRectangleGradientV(

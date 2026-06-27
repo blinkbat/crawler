@@ -2,7 +2,6 @@ package render
 
 import (
 	"image/color"
-	"unsafe"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 
@@ -12,8 +11,6 @@ import (
 // Voxel-stack rendering — draw path for a map with an explicit Solids stack (gapped columns: floating cubes/decks over air). Pure heightfield (Solids nil) never reaches here. Draws what the heightfield can't: multiple floors per column, per-run side faces, and floating-cube undersides.
 //
 // Cube convention (matches the heightfield face math): a cube with top at level L occupies world Y ∈ [ElevationWorldY(L-1), ElevationWorldY(L)].
-
-var underQuadPins [][]float32
 
 // buildUnderQuadModel builds a TileSize×TileSize XZ quad at model y=0, normal facing -Y (a floating cube's underside). drawVoxelColumn translates it to (cx, bottomY, cz).
 func buildUnderQuadModel(pixels []color.RGBA, shader rl.Shader) rl.Model {
@@ -34,19 +31,7 @@ func buildUnderQuadModel(pixels []color.RGBA, shader rl.Shader) rl.Model {
 		0, 0, 1, 0, 1, 1,
 		0, 0, 1, 1, 0, 1,
 	}
-	underQuadPins = append(underQuadPins, verts, normals, uvs)
-	mesh := rl.Mesh{
-		VertexCount:   int32(len(verts) / 3),
-		TriangleCount: int32(len(verts) / 9),
-	}
-	mesh.Vertices = (*float32)(unsafe.Pointer(&verts[0]))
-	mesh.Normals = (*float32)(unsafe.Pointer(&normals[0]))
-	mesh.Texcoords = (*float32)(unsafe.Pointer(&uvs[0]))
-	rl.UploadMesh(&mesh, false)
-	model := rl.LoadModelFromMesh(mesh)
-	setModelTexture(&model, loadTiledTexture(pixels))
-	attachShader(&model, shader)
-	return model
+	return uploadCustomMesh(verts, normals, uvs, pixels, shader)
 }
 
 // voxelNeighborSolid reports whether the neighbour column is solid at level L. Off-map reads solid up to the baseline (clean 1-high lip at map edges), matching the heightfield's off-map==baseline rule.

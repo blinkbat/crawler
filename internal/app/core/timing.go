@@ -777,13 +777,7 @@ func (t *TimingState) resolveSequence() {
 	if t.Kind == TimingKindSequence && wrongCount == 0 && t.Elapsed >= SequenceFastThreshold {
 		grade = TimingQualityGreat // flawless but slow
 	}
-	if grade < TimingQualityMiss {
-		grade = TimingQualityMiss
-	}
-	if grade > TimingQualityExcellent {
-		grade = TimingQualityExcellent
-	}
-	t.Quality = grade
+	t.Quality = Clamp(grade, TimingQualityMiss, TimingQualityExcellent)
 }
 
 // resolveCharge grades a charge release by ticks crossed (visual position via

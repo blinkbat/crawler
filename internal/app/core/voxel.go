@@ -103,6 +103,16 @@ func (a *AreaDefinition) elevationLayerHash() uint64 {
 	return h
 }
 
+// forEachCell invokes fn for every (x,z) column in row-major order. Shared by the
+// full-grid walks that fit a plain visit (no early exit / per-row assembly).
+func (a *AreaDefinition) forEachCell(fn func(x, z int)) {
+	for z := 0; z < a.Height; z++ {
+		for x := 0; x < a.Width; x++ {
+			fn(x, z)
+		}
+	}
+}
+
 // maxElevationTop returns the tallest ElevationLevelAt across all columns (0 if flat).
 // Only reached on the heightfield (nil-Solids) path, so the Elevation-layer hash fully
 // fingerprints its inputs.
@@ -113,13 +123,11 @@ func (a *AreaDefinition) maxElevationTop() int {
 		return c.top
 	}
 	top := 0
-	for z := 0; z < a.Height; z++ {
-		for x := 0; x < a.Width; x++ {
-			if t := a.ElevationLevelAt(x, z); t > top {
-				top = t
-			}
+	a.forEachCell(func(x, z int) {
+		if t := a.ElevationLevelAt(x, z); t > top {
+			top = t
 		}
-	}
+	})
 	c.name, c.width, c.height, c.hash, c.top, c.primed = a.Name, a.Width, a.Height, hash, top, true
 	return top
 }

@@ -587,6 +587,10 @@ func MapZoomAxis() float32 {
 // MapZoomWheel is the mouse-wheel zoom notch (+ = scroll up = zoom in).
 func MapZoomWheel() float32 { return rl.GetMouseWheelMove() }
 
+// FrameTime is the seconds elapsed since the last frame, funneled through here so
+// gameplay packages don't import raylib just to read the clock.
+func FrameTime() float32 { return rl.GetFrameTime() }
+
 // --- Mouse / pointer (secondary input) ---------------------------------------
 // Drives only Equipment slot-picker clicks and right-drag free-look, funneled
 // through here so no call site touches raylib directly.

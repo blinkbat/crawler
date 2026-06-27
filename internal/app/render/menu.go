@@ -44,6 +44,10 @@ type debugMenuRow struct {
 	Label func(g *core.GameState) string
 }
 
+// boostStatsLabel is the static "Boost Stats (+N)" caption — N is a build-time const,
+// so it's built once (like shopHints) rather than Sprintf'd per frame.
+var boostStatsLabel = fmt.Sprintf("Boost Stats (+%d)", core.DebugStatBoost)
+
 var debugMenuRows = []debugMenuRow{
 	{Item: core.DebugMenuToggle, Label: func(g *core.GameState) string {
 		return "Debug Mode: " + onOff(g.DebugOverlay)
@@ -70,7 +74,7 @@ var debugMenuRows = []debugMenuRow{
 		return "All Skills: " + onOff(g.DebugAllSkills)
 	}},
 	{Item: core.DebugMenuBoostStats, Label: func(*core.GameState) string {
-		return fmt.Sprintf("Boost Stats (+%d)", core.DebugStatBoost)
+		return boostStatsLabel
 	}},
 	{Item: core.DebugMenuSkipBattles, Label: func(g *core.GameState) string {
 		return "Skip Battles: " + onOff(g.DebugSkipBattles)
@@ -211,10 +215,10 @@ func drawMenuSliderRows(panelX, panelY, panelW int32, n, cursor int, value func(
 		if v > 0 {
 			fillW = int32(float32(retroBarW-2) * v)
 		}
-		drawIntensityGauge(barX, barY, retroBarW, retroBarH, fillW, fadeColor(giltBright, 0.55+0.45*v))
+		drawIntensityGauge(barX, barY, retroBarW, retroBarH, fillW, giltFlickerAlpha(0.55, 0.45, v))
 		if cursor == i {
 			cy := float32(barY + retroBarH/2)
-			col := fadeColor(giltBright, 0.65+0.35*flick)
+			col := giltFlickerAlpha(0.65, 0.35, flick)
 			drawArrowMarker(rl.NewVector2(float32(barX)-retroArrowGap, cy), -7, 0, 6, col)
 			drawArrowMarker(rl.NewVector2(float32(barX+retroBarW)+retroArrowGap, cy), 7, 0, 6, col)
 		}

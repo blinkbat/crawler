@@ -81,12 +81,11 @@ type EnemySlot struct {
 	Count int
 }
 
-// enemyRankIndex maps a Row to its [front,back] table index.
+// enemyRankIndex maps a Row to its rank-table index. Rows are declared front-first
+// (RowFront=0, RowBack=1), so the enum value IS the index; the rank arrays below are
+// sized [RowCount] so bumping the grid widens them in lockstep (init asserts RowCount).
 func enemyRankIndex(r Row) int {
-	if r == RowBack {
-		return 1
-	}
-	return 0
+	return int(r)
 }
 
 // enemyVisible reports whether a foe occupies a slot: alive, or still death-fading
@@ -103,13 +102,13 @@ func ResolveEnemySlots(members []Enemy, out []EnemySlot) []EnemySlot {
 		out = make([]EnemySlot, n)
 	}
 	out = out[:n]
-	var counts [2]int
+	var counts [RowCount]int
 	for i := range members {
 		if enemyVisible(&members[i]) {
 			counts[enemyRankIndex(members[i].Row)]++
 		}
 	}
-	var running [2]int
+	var running [RowCount]int
 	for i := range members {
 		ri := enemyRankIndex(members[i].Row)
 		cnt := counts[ri]

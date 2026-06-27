@@ -560,7 +560,11 @@ func woodenPhaseColor(c rl.Color) rl.Color {
 	return out
 }
 
-// phaseColors mirrors each lighting phase's sky tint, indexed by TimeOfDay.
+// phaseColors is the sextant strip's per-phase accent, indexed by TimeOfDay.
+// Hand-tuned for legibility on the wood strip (brighter/more saturated than the
+// raw timeProfiles SkyTint, then muted 64% toward wood by woodenPhaseColor) — it
+// PARALLELS the lighting phases by feel, it is NOT derived from SkyTint, so a sky
+// retint does not require (or auto-propagate to) a change here.
 var phaseColors = [core.TimeOfDayCount]rl.Color{
 	core.Dawn:      rl.NewColor(232, 168, 152, 255), // dawn — rose
 	core.Morning:   rl.NewColor(220, 224, 200, 255), // morning — pale gold

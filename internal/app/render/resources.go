@@ -104,28 +104,28 @@ func LoadResources() (r Resources) {
 	r.billboardFog = loadBillboardFogShader()
 
 	// Commit each material the instant it's built so the recover-path Unload finds earlier models on a later panic.
-	dungeonMat := loadWorldMaterial(makeStoneBrickPixels(128, 128), makeStoneFloorPixels(128, 128), r.lighting.shader)
+	dungeonMat := loadWorldMaterial(makeStoneBrickPixels(tileTexDim, tileTexDim), makeStoneFloorPixels(tileTexDim, tileTexDim), r.lighting.shader)
 	r.materials = map[core.MaterialSet]worldMaterialResources{
 		core.MaterialDungeon: dungeonMat,
 	}
-	fieldMat := loadWorldMaterial(makeRockWallPixels(128, 128), makeGrassPixels(128, 128), r.lighting.shader)
+	fieldMat := loadWorldMaterial(makeRockWallPixels(tileTexDim, tileTexDim), makeGrassPixels(tileTexDim, tileTexDim), r.lighting.shader)
 	r.materials[core.MaterialField] = fieldMat
 	// Field's two extra floor variants (dirt + dark grass), per-tile by hash. Commit after EACH for Unload.
-	fieldMat.floorDirtModel = loadFloorModel(makeDirtPixels(128, 128), r.lighting.shader)
+	fieldMat.floorDirtModel = loadFloorModel(makeDirtPixels(tileTexDim, tileTexDim), r.lighting.shader)
 	r.materials[core.MaterialField] = fieldMat
-	fieldMat.floorDarkModel = loadFloorModel(makeDarkGrassPixels(128, 128), r.lighting.shader)
+	fieldMat.floorDarkModel = loadFloorModel(makeDarkGrassPixels(tileTexDim, tileTexDim), r.lighting.shader)
 	fieldMat.hasFloorVariant = true
 	r.materials[core.MaterialField] = fieldMat
 	// Every core.MaterialSet must have a loaded worldMaterial, else worldMaterial() falls back to Field.
 	assertMaterialCoverage(r.materials)
 
-	r.skyTexture = loadTexture(makeSkyPixels(1024, 512), 1024, 512, rl.FilterTrilinear)
+	r.skyTexture = loadTexture(makeSkyPixels(skyTexW, skyTexH), skyTexW, skyTexH, rl.FilterTrilinear)
 	rl.GenTextureMipmaps(&r.skyTexture)
 	rl.SetTextureFilter(r.skyTexture, rl.FilterTrilinear)
 	rl.SetTextureWrap(r.skyTexture, rl.WrapClamp)
 
 	// Star overlay: same dims as the sky (shared source-rect math); point-filtered so stars don't blur.
-	r.starTexture = loadTexture(makeStarPixels(1024, 512), 1024, 512, rl.FilterPoint)
+	r.starTexture = loadTexture(makeStarPixels(skyTexW, skyTexH), skyTexW, skyTexH, rl.FilterPoint)
 	rl.SetTextureWrap(r.starTexture, rl.WrapClamp)
 
 	enemyVis, enemyTex := loadEnemyVisuals()
@@ -138,21 +138,21 @@ func LoadResources() (r Resources) {
 
 	// Bark/leaf are non-tile sizes → loadRepeatTexture. The model takes ownership (UnloadModel frees them),
 	// so they're NOT in an owned list (would double-free). A panic before ownership orphans them — accepted.
-	barkTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
-	leafTex := loadRepeatTexture(makeLeafPixels(96, 96), 96, 96)
+	barkTex := mintBarkTex()
+	leafTex := loadRepeatTexture(makeLeafPixels(leafTexDim, leafTexDim), leafTexDim, leafTexDim)
 	r.tree = loadTreeModel(r.lighting.shader, barkTex, leafTex)
 
 	// Each field prop gets its OWN texture instance. UnloadModel frees meshes but NOT bound GL textures
 	// (held until process exit; Unload runs once). Per-prop instancing avoids a shared-texture double-free.
-	rockTex := loadTiledTexture(makeRockWallPixels(128, 128))
-	bushTex := loadRepeatTexture(makeLeafPixels(96, 96), 96, 96)
+	rockTex := mintRockTex()
+	bushTex := loadRepeatTexture(makeLeafPixels(leafTexDim, leafTexDim), leafTexDim, leafTexDim)
 
 	r.rockProp = loadRockProp(r.lighting.shader, rockTex)
 	r.bushProp = loadBushProp(r.lighting.shader, bushTex)
 	r.mushroomProp = loadMushroomProp(r.lighting.shader)
 	// Chest body + lid mint distinct bark instances so each model owns its texture.
-	chestBodyWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
-	chestLidWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
+	chestBodyWoodTex := mintBarkTex()
+	chestLidWoodTex := mintBarkTex()
 	r.chestBody = loadChestBodyProp(r.lighting.shader, chestBodyWoodTex)
 	r.chestLid = loadChestLidProp(r.lighting.shader, chestLidWoodTex)
 
@@ -170,24 +170,24 @@ func LoadResources() (r Resources) {
 
 	// Universal floor variants, shared across material sets. Init the map first for the panic path.
 	r.specialFloors = make(map[byte]rl.Model)
-	r.specialFloors[core.FloorCobble] = loadFloorModel(makeCobblePixels(128, 128), r.lighting.shader)
-	r.specialFloors[core.FloorPlank] = loadFloorModel(makePlankPixels(128, 128), r.lighting.shader)
-	r.specialFloors[core.FloorWater] = loadFloorModel(makeWaterPixels(128, 128), r.lighting.shader)
-	r.specialFloors[core.FloorDeepWater] = loadFloorModel(makeDeepWaterPixels(128, 128), r.lighting.shader)
-	r.specialFloors[core.FloorSand] = loadFloorModel(makeSandPixels(128, 128), r.lighting.shader)
-	r.specialFloors[core.FloorSnow] = loadFloorModel(makeSnowPixels(128, 128), r.lighting.shader)
+	r.specialFloors[core.FloorCobble] = loadFloorModel(makeCobblePixels(tileTexDim, tileTexDim), r.lighting.shader)
+	r.specialFloors[core.FloorPlank] = loadFloorModel(makePlankPixels(tileTexDim, tileTexDim), r.lighting.shader)
+	r.specialFloors[core.FloorWater] = loadFloorModel(makeWaterPixels(tileTexDim, tileTexDim), r.lighting.shader)
+	r.specialFloors[core.FloorDeepWater] = loadFloorModel(makeDeepWaterPixels(tileTexDim, tileTexDim), r.lighting.shader)
+	r.specialFloors[core.FloorSand] = loadFloorModel(makeSandPixels(tileTexDim, tileTexDim), r.lighting.shader)
+	r.specialFloors[core.FloorSnow] = loadFloorModel(makeSnowPixels(tileTexDim, tileTexDim), r.lighting.shader)
 	// Grass/dirt/dark grass/stone are also universal — without these, painting them in a dungeon
 	// reuses the base floorModel (per-material variant switch only fires on hasFloorVariant, field-only).
-	r.specialFloors[core.FloorGrass] = loadFloorModel(makeGrassPixels(128, 128), r.lighting.shader)
-	r.specialFloors[core.FloorDirt] = loadFloorModel(makeDirtPixels(128, 128), r.lighting.shader)
-	r.specialFloors[core.FloorDarkGrass] = loadFloorModel(makeDarkGrassPixels(128, 128), r.lighting.shader)
-	r.specialFloors[core.FloorStone] = loadFloorModel(makeStoneFloorPixels(128, 128), r.lighting.shader)
+	r.specialFloors[core.FloorGrass] = loadFloorModel(makeGrassPixels(tileTexDim, tileTexDim), r.lighting.shader)
+	r.specialFloors[core.FloorDirt] = loadFloorModel(makeDirtPixels(tileTexDim, tileTexDim), r.lighting.shader)
+	r.specialFloors[core.FloorDarkGrass] = loadFloorModel(makeDarkGrassPixels(tileTexDim, tileTexDim), r.lighting.shader)
+	r.specialFloors[core.FloorStone] = loadFloorModel(makeStoneFloorPixels(tileTexDim, tileTexDim), r.lighting.shader)
 	// Face variants — cliff-face quads with per-char rock skins (ivy / cracked / crumbling). Init first for panic cleanup.
 	r.faceVariants = make(map[byte]rl.Model)
-	r.faceVariants[core.TileWallRockIvyLight] = buildFaceQuadModel(makeRockIvyPixels(128, 128, false), r.lighting.shader)
-	r.faceVariants[core.TileWallRockIvyHeavy] = buildFaceQuadModel(makeRockIvyPixels(128, 128, true), r.lighting.shader)
-	r.faceVariants[core.TileWallRockCracked] = buildFaceQuadModel(makeRockCrackedPixels(128, 128), r.lighting.shader)
-	r.faceVariants[core.TileWallRockCrumbling] = buildFaceQuadModel(makeRockCrumblingPixels(128, 128), r.lighting.shader)
+	r.faceVariants[core.TileWallRockIvyLight] = buildFaceQuadModel(makeRockIvyPixels(tileTexDim, tileTexDim, false), r.lighting.shader)
+	r.faceVariants[core.TileWallRockIvyHeavy] = buildFaceQuadModel(makeRockIvyPixels(tileTexDim, tileTexDim, true), r.lighting.shader)
+	r.faceVariants[core.TileWallRockCracked] = buildFaceQuadModel(makeRockCrackedPixels(tileTexDim, tileTexDim), r.lighting.shader)
+	r.faceVariants[core.TileWallRockCrumbling] = buildFaceQuadModel(makeRockCrumblingPixels(tileTexDim, tileTexDim), r.lighting.shader)
 	// Coverage: every non-rock skin in core.FaceSkins needs a variant here (plain Rock uses faceModel).
 	for _, s := range core.FaceSkins {
 		if s.Char == core.TileRock {
@@ -199,21 +199,21 @@ func LoadResources() (r Resources) {
 	}
 
 	// Earth-textured solid ramp wedge, shared by every ramp floor tile.
-	r.rampModel = buildRampWedgeModel(makeDirtPixels(128, 128), r.lighting.shader)
+	r.rampModel = buildRampWedgeModel(makeDirtPixels(tileTexDim, tileTexDim), r.lighting.shader)
 	// Earth-textured downward quad for floating-cube undersides (voxel maps).
-	r.underModel = buildUnderQuadModel(makeDirtPixels(128, 128), r.lighting.shader)
+	r.underModel = buildUnderQuadModel(makeDirtPixels(tileTexDim, tileTexDim), r.lighting.shader)
 
 	// Stone family textures; each loader owns its handle via setModelTexture.
-	marbleTex := loadTiledTexture(makeMarblePixels(128, 128))
-	graniteTex := loadTiledTexture(makeGranitePixels(128, 128))
-	terracottaTex := loadTiledTexture(makeTerracottaPixels(128, 128))
+	marbleTex := mintMarbleTex()
+	graniteTex := loadTiledTexture(makeGranitePixels(tileTexDim, tileTexDim))
+	terracottaTex := loadTiledTexture(makeTerracottaPixels(tileTexDim, tileTexDim))
 	// Wood/leaf props mint fresh texture instances per loader (sharing would double-unload).
-	crateWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
-	barrelWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
-	stumpBarkTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
-	logBarkTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
-	logMossTex := loadRepeatTexture(makeLeafPixels(96, 96), 96, 96)
-	leafPileTex := loadRepeatTexture(makeLeafPixels(96, 96), 96, 96)
+	crateWoodTex := mintBarkTex()
+	barrelWoodTex := mintBarkTex()
+	stumpBarkTex := mintBarkTex()
+	logBarkTex := mintBarkTex()
+	logMossTex := loadRepeatTexture(makeLeafPixels(leafTexDim, leafTexDim), leafTexDim, leafTexDim)
+	leafPileTex := loadRepeatTexture(makeLeafPixels(leafTexDim, leafTexDim), leafTexDim, leafTexDim)
 
 	// Commit propModels incrementally so each is owned by r before the next loads.
 	r.propModels = make(map[byte]propModel)
@@ -228,16 +228,16 @@ func LoadResources() (r Resources) {
 	r.propModels[core.TileFountain] = loadFountainProp(r.lighting.shader, marbleTex)
 
 	// Larger rock formations, each with its own rock texture instance.
-	cairnRockTex := loadTiledTexture(makeRockWallPixels(128, 128))
-	formationRockTex := loadTiledTexture(makeRockWallPixels(128, 128))
+	cairnRockTex := mintRockTex()
+	formationRockTex := mintRockTex()
 	r.propModels[core.TileRockCairn] = loadRockCairnProp(r.lighting.shader, cairnRockTex)
 	r.propModels[core.TileRockFormation] = loadRockFormationProp(r.lighting.shader, formationRockTex)
 
 	// Turn B outdoor batch — well/gravestone use rock, signpost/scarecrow bark.
-	wellRockTex := loadTiledTexture(makeRockWallPixels(128, 128))
-	graveRockTex := loadTiledTexture(makeRockWallPixels(128, 128))
-	signWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
-	scarecrowWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
+	wellRockTex := mintRockTex()
+	graveRockTex := mintRockTex()
+	signWoodTex := mintBarkTex()
+	scarecrowWoodTex := mintBarkTex()
 	r.propModels[core.TileWell] = loadWellProp(r.lighting.shader, wellRockTex)
 	r.propModels[core.TileGravestone] = loadGravestoneProp(r.lighting.shader, graveRockTex)
 	r.propModels[core.TileSignPost] = loadSignPostProp(r.lighting.shader, signWoodTex)
@@ -246,10 +246,10 @@ func LoadResources() (r Resources) {
 
 	// Turn B dungeon-interior batch — bookshelf/table/bed wood, brazier shader-
 	// only, sarcophagus marble.
-	bookshelfWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
-	tableWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
-	bedWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
-	sarcoMarbleTex := loadTiledTexture(makeMarblePixels(128, 128))
+	bookshelfWoodTex := mintBarkTex()
+	tableWoodTex := mintBarkTex()
+	bedWoodTex := mintBarkTex()
+	sarcoMarbleTex := mintMarbleTex()
 	r.propModels[core.TileBookshelf] = loadBookshelfProp(r.lighting.shader, bookshelfWoodTex)
 	r.propModels[core.TileTable] = loadTableProp(r.lighting.shader, tableWoodTex)
 	r.propModels[core.TileBed] = loadBedProp(r.lighting.shader, bedWoodTex)
@@ -275,11 +275,11 @@ func LoadResources() (r Resources) {
 	r.decorModels[core.DecorLeafPile] = loadLeafPileProp(r.lighting.shader, leafPileTex)
 	r.decorModels[core.DecorLilypad] = loadLilypadProp(r.lighting.shader)
 	// Archway uses marble to match the pillars/statues.
-	archMarbleTex := loadTiledTexture(makeMarblePixels(128, 128))
+	archMarbleTex := mintMarbleTex()
 	r.decorModels[core.DecorArchway] = loadArchwayDecor(r.lighting.shader, archMarbleTex)
 
 	// Turn B atmospheric decor — most are shader-only; rootCluster uses bark.
-	rootBarkTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
+	rootBarkTex := mintBarkTex()
 	r.decorModels[core.DecorRug] = loadRugProp(r.lighting.shader)
 	r.decorModels[core.DecorCandle] = loadCandleProp(r.lighting.shader)
 	r.decorModels[core.DecorBootprints] = loadBootprintsProp(r.lighting.shader)
@@ -288,8 +288,9 @@ func LoadResources() (r Resources) {
 	r.decorModels[core.DecorRootCluster] = loadRootClusterProp(r.lighting.shader, rootBarkTex)
 
 	// Door props — one per style, rotated by authored facing. Each owns its texture.
-	doorWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
-	doorStoneTex := loadRepeatTexture(makeRockWallPixels(64, 64), 64, 64)
+	doorWoodTex := mintBarkTex()
+	// Cave door uses a smaller 64² rock skin (not the tile-class mintRockTex) for a tighter grain.
+	doorStoneTex := loadRepeatTexture(makeRockWallPixels(barkTexW, barkTexW), barkTexW, barkTexW)
 	r.doorProps[core.DoorStyleBuilding] = loadDoorProp(r.lighting.shader, doorWoodTex)
 	r.doorProps[core.DoorStyleCave] = loadCaveDoorProp(r.lighting.shader, doorStoneTex)
 	r.doorProps[core.DoorStyleField] = loadFieldDoorProp(r.lighting.shader, doorWoodTex)
@@ -529,9 +530,34 @@ func (r Resources) Unload() {
 	}
 }
 
-// loadTiledTexture: 128x128 RGBA → mipmapped, trilinear, repeat-wrapped. Shared by every tile-class texture.
+// Procedural-texture dimensions: gen size and upload size must agree, so the pairs
+// are named once here and reused at every gen+upload site. tile = square wall/floor
+// class; bark = tall timber strip; leaf = square foliage; sky/star share one size.
+const (
+	tileTexDim = 128
+	barkTexW   = 64
+	barkTexH   = 128
+	leafTexDim = 96
+	skyTexW    = 1024
+	skyTexH    = 512
+)
+
+// mintBarkTex / mintRockTex / mintMarbleTex each mint a FRESH texture instance for
+// one prop (gen fn + matching dims + load). Distinct instances on purpose: props
+// own their textures via setModelTexture, so sharing one would double-free on Unload.
+func mintBarkTex() rl.Texture2D {
+	return loadRepeatTexture(makeBarkPixels(barkTexW, barkTexH), barkTexW, barkTexH)
+}
+func mintRockTex() rl.Texture2D {
+	return loadTiledTexture(makeRockWallPixels(tileTexDim, tileTexDim))
+}
+func mintMarbleTex() rl.Texture2D {
+	return loadTiledTexture(makeMarblePixels(tileTexDim, tileTexDim))
+}
+
+// loadTiledTexture: tileTexDim² RGBA → mipmapped, trilinear, repeat-wrapped. Shared by every tile-class texture.
 func loadTiledTexture(pixels []color.RGBA) rl.Texture2D {
-	tex := loadTexture(pixels, 128, 128, rl.FilterBilinear)
+	tex := loadTexture(pixels, tileTexDim, tileTexDim, rl.FilterBilinear)
 	rl.GenTextureMipmaps(&tex)
 	rl.SetTextureFilter(tex, rl.FilterTrilinear)
 	rl.SetTextureWrap(tex, rl.WrapRepeat)
@@ -559,9 +585,31 @@ func loadFloorModel(pixels []color.RGBA, shader rl.Shader) rl.Model {
 	return loadTileModel(pixels, 0.06, shader)
 }
 
-// rampWedgePins keeps each ramp-wedge mesh's CPU arrays alive for the process lifetime so the Mesh's
-// *float32 pointers can't dangle. APPEND (not overwrite) so a second call can't orphan the first's slices.
-var rampWedgePins [][]float32
+// customMeshPins keeps every hand-built mesh's CPU arrays alive for the process
+// lifetime so the Mesh's *float32 pointers can't dangle. APPEND-only (never
+// overwrite) so a later build can't orphan an earlier mesh's still-referenced
+// slices. Shared by uploadCustomMesh across the ramp/face/under builders.
+var customMeshPins [][]float32
+
+// uploadCustomMesh finalizes a hand-built mesh: pins the CPU arrays, wires the three
+// vertex-attribute pointers, uploads to GPU, then skins it (tiled texture from pixels)
+// and attaches the lighting shader. The shared tail for buildRampWedgeModel /
+// buildFaceQuadModel / buildUnderQuadModel — each owns only its vertex generation.
+func uploadCustomMesh(verts, normals, uvs []float32, pixels []color.RGBA, shader rl.Shader) rl.Model {
+	customMeshPins = append(customMeshPins, verts, normals, uvs)
+	mesh := rl.Mesh{
+		VertexCount:   int32(len(verts) / 3),
+		TriangleCount: int32(len(verts) / 9),
+	}
+	mesh.Vertices = (*float32)(unsafe.Pointer(&verts[0]))
+	mesh.Normals = (*float32)(unsafe.Pointer(&normals[0]))
+	mesh.Texcoords = (*float32)(unsafe.Pointer(&uvs[0]))
+	rl.UploadMesh(&mesh, false)
+	model := rl.LoadModelFromMesh(mesh)
+	setModelTexture(&model, loadTiledTexture(pixels))
+	attachShader(&model, shader)
+	return model
+}
 
 // buildRampWedgeModel builds a SOLID wedge (right triangular prism) sized one tile (TileSize × LevelStep),
 // ascending toward -Z: low edge (south,+Z) at y=0, high edge (north,-Z) at y=LevelStep, filled solid + opaque.
@@ -599,23 +647,8 @@ func buildRampWedgeModel(pixels []color.RGBA, shader rl.Shader) rl.Model {
 	addTri(lowSL, hiNL, botNL)          // west side
 	addTri(lowSR, hiNR, botNR)          // east side
 
-	rampWedgePins = append(rampWedgePins, verts, normals, uvs)
-	mesh := rl.Mesh{
-		VertexCount:   int32(len(verts) / 3),
-		TriangleCount: int32(len(verts) / 9),
-	}
-	mesh.Vertices = (*float32)(unsafe.Pointer(&verts[0]))
-	mesh.Normals = (*float32)(unsafe.Pointer(&normals[0]))
-	mesh.Texcoords = (*float32)(unsafe.Pointer(&uvs[0]))
-	rl.UploadMesh(&mesh, false)
-	model := rl.LoadModelFromMesh(mesh)
-	setModelTexture(&model, loadTiledTexture(pixels))
-	attachShader(&model, shader)
-	return model
+	return uploadCustomMesh(verts, normals, uvs, pixels, shader)
 }
-
-// facePins keeps each cliff-face quad's CPU mesh arrays alive for the process lifetime (see rampWedgePins).
-var facePins [][]float32
 
 // buildFaceQuadModel builds ONE vertical cliff-face quad (TileSize × LevelStep) on the +Z tile edge, normal +Z.
 // drawCliffFace translates/yaw-rotates it and scales Y by level delta, so one model skins every cliff.
@@ -641,19 +674,7 @@ func buildFaceQuadModel(pixels []color.RGBA, shader rl.Shader) rl.Model {
 		0, 1, 1, 0, 0, 0, // bl, tr, tl
 	}
 
-	facePins = append(facePins, verts, normals, uvs)
-	mesh := rl.Mesh{
-		VertexCount:   int32(len(verts) / 3),
-		TriangleCount: int32(len(verts) / 9),
-	}
-	mesh.Vertices = (*float32)(unsafe.Pointer(&verts[0]))
-	mesh.Normals = (*float32)(unsafe.Pointer(&normals[0]))
-	mesh.Texcoords = (*float32)(unsafe.Pointer(&uvs[0]))
-	rl.UploadMesh(&mesh, false)
-	model := rl.LoadModelFromMesh(mesh)
-	setModelTexture(&model, loadTiledTexture(pixels))
-	attachShader(&model, shader)
-	return model
+	return uploadCustomMesh(verts, normals, uvs, pixels, shader)
 }
 
 // loadGroundShadowModel builds the soft contact-shadow plane: a 1×1 XZ quad with the radial-gradient sprite,

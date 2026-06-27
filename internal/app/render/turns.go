@@ -31,6 +31,11 @@ const (
 	turnPanelTopPad    = int32(10)
 	turnPanelBottomPad = int32(10)
 	turnPanelRowH      = int32(28)
+	// Title band layout: title text top inset, and the divider rule's lift above the
+	// header band's bottom edge. Bare offsets named here so the title/rule can't drift
+	// (the spacing helpers don't land the same pixels at this compact FontSmall band).
+	turnPanelTitleInsetY = int32(5)
+	turnPanelRuleLift    = int32(4)
 )
 
 // Per-row layout offsets: inset margin, active-row marker X, inactive-row spine tick, label left edge.
@@ -77,8 +82,8 @@ func drawTurnPanel(g *core.GameState, assets Resources) {
 	drawPanelCard(x, y, w, h)
 
 	// Title band.
-	drawTextWithShadow(assets.hudFont, "Turn Order", float32(x+turnRowInset), float32(y+5), FontSmall, textDim)
-	drawGiltRule(x+turnRowInset, y+turnPanelHeaderH-4, w-2*turnRowInset, 1, 0.4)
+	drawTextWithShadow(assets.hudFont, "Turn Order", float32(x+turnRowInset), float32(y+turnPanelTitleInsetY), FontSmall, textDim)
+	drawGiltRule(x+turnRowInset, y+turnPanelHeaderH-turnPanelRuleLift, w-2*turnRowInset, 1, 0.4)
 
 	rowsTop := y + turnPanelHeaderH + turnPanelTopPad
 

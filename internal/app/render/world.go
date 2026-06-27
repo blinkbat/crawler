@@ -1125,19 +1125,6 @@ func areaIsEnclosed(m *core.AreaDefinition) bool {
 	return enclosed
 }
 
-// Shared iron-fixture + flame palette for every torch/brazier. Iron is lit by the
-// world shader; flame tints (hot core → mid → tip) are applied to unlit models so
-// they glow. Shared by drawWallTorch and the brazier prop so they don't drift.
-var (
-	torchIron       = rl.NewColor(54, 50, 46, 255)
-	torchIronLight  = rl.NewColor(92, 84, 76, 255)
-	torchFlameTints = [3]rl.Color{
-		rl.NewColor(255, 226, 150, 255), // hot core — pale gold
-		rl.NewColor(252, 162, 70, 255),  // mid — orange
-		rl.NewColor(228, 110, 52, 255),  // tip — deep ember
-	}
-)
-
 // torchFlameModel is the unlit emissive sphere for flame blobs (default shader so
 // it glows at full tint against the dark dungeon). Set by LoadResources.
 var (
@@ -1148,10 +1135,6 @@ var (
 // torchFlameHeight is the world Y a brazier's point light sits at — up at the
 // fire bowl so the pool radiates outward and down.
 const torchFlameHeight = float32(1.05)
-
-// torchBaseColor is the warm flame tint at full brightness, before flicker.
-// Deliberately bright (R > 1) so a torch-lit wall reads as a strong pool.
-var torchBaseColor = rl.NewVector3(2.3, 1.35, 0.7)
 
 type torchCandidate struct {
 	pos     rl.Vector3

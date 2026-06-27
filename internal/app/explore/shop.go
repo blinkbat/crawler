@@ -32,8 +32,7 @@ func updateShop(g *core.GameState) {
 		g.ShopTab = next
 		g.ShopCursor = 0
 	}
-	rows := shopRowCount(g)
-	g.ShopCursor = input.CursorUpDown(g.ShopCursor, rows)
+	g.ShopCursor = input.CursorUpDown(g.ShopCursor, core.ShopRowCount(g))
 	if input.ConfirmPressed() {
 		switch g.ShopTab {
 		case core.ShopTabBuy:
@@ -45,11 +44,6 @@ func updateShop(g *core.GameState) {
 			panic(fmt.Sprintf("explore: updateShop missing confirm case for ShopTab %d", g.ShopTab))
 		}
 	}
-}
-
-// shopRowCount is the selectable-row count on the active tab, driving the wrap.
-func shopRowCount(g *core.GameState) int {
-	return core.ShopRowCount(g)
 }
 
 // buyShopItem purchases one unit of the cursored item if affordable (miss ping

@@ -28,9 +28,9 @@ func drawCombatTuneOverlay(g *core.GameState, assets Resources) {
 	font := assets.hudFont
 	rows := core.BattleTuneMenuCount()
 	h := tuneHeaderH + tuneRowH*float32(rows) + tuneFootH
-	panel := rl.NewRectangle(tunePanelX, tunePanelTop, tunePanelW, h)
-	rl.DrawRectangleRec(panel, fadeColor(rl.Black, 0.74))
-	rl.DrawRectangleLinesEx(panel, 1, fadeColor(giltBright, 0.5))
+	px, py, pw := int32(tunePanelX), int32(tunePanelTop), int32(tunePanelW)
+	drawPanel(px, py, pw, int32(h), fadeColor(rl.Black, 0.74))
+	drawPanelOutline(px, py, pw, int32(h), fadeColor(giltBright, 0.5))
 
 	drawTextWithShadow(font, "COMBAT TUNING", tunePanelX+12, tunePanelTop+7, FontSmall, giltBright)
 
@@ -39,6 +39,8 @@ func drawCombatTuneOverlay(g *core.GameState, assets Resources) {
 		y := tunePanelTop + tuneHeaderH + tuneRowH*float32(i)
 		sel := g.CombatTuneIndex == i
 		if sel {
+			// Faint gilt wash, not drawFocusableRow/drawGlassRowPlate: this dev overlay's
+			// dense rows want a flat highlight, not the heavier glass plate + gilt frame.
 			rl.DrawRectangleRec(rl.NewRectangle(tunePanelX+3, y-1, tunePanelW-6, tuneRowH-1), fadeColor(giltBright, 0.18))
 		}
 		textCol := fadeColor(textPrimary, 0.62)

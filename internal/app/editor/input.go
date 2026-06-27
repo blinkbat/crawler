@@ -27,13 +27,14 @@ func editorTabPressed() bool {
 	return input.EditorTabPressed()
 }
 
-// editorAddPressed / editorDeletePressed are the editor's list-modal verb keys
-// (A add, X delete), in one place so the list modals (packs, chests, doors, dialog
-// nodes/choices/conditions, locations, sounds) can't drift on the mnemonic. (M is
-// NOT centralized — it's a per-modal toggle, not a uniform verb.) Editor is
-// keyboard-exempt, so raw rl reads are allowed here.
+// editorAddPressed / editorDeletePressed / editorEditPressed are the editor's
+// list-modal verb keys (A add, X delete, E edit), in one place so the list modals
+// (packs, chests, doors, dialog nodes/choices/conditions, locations, sounds) can't
+// drift on the mnemonic. (M is NOT centralized — it's a per-modal toggle, not a
+// uniform verb.) Editor is keyboard-exempt, so raw rl reads are allowed here.
 func editorAddPressed() bool    { return rl.IsKeyPressed(rl.KeyA) }
 func editorDeletePressed() bool { return rl.IsKeyPressed(rl.KeyX) }
+func editorEditPressed() bool   { return rl.IsKeyPressed(rl.KeyE) }
 
 // runCardCmdsNav is runCardCmds plus keyboard navigation: Up/Down walk s.modalCursor
 // over the buttons and Enter fires the selected one. Mouse clicks + the per-cmd hot

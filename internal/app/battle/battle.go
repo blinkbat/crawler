@@ -211,7 +211,7 @@ func beginNewRound(g *core.GameState) {
 	}
 	// Reset the enemy-attack round-robin cursor (PartyTarget is the player's
 	// ally selection and stays untouched).
-	g.Battle.EnemyAttackCursor = -1
+	g.Battle.EnemyAttackCursor = core.NoIndex
 	g.Battle.Queue = buildTurnQueue(g)
 	g.Battle.QueueCursor = 0
 	// Pre-bake the next round's projection for TurnForecast. Non-persisting
@@ -373,25 +373,21 @@ func actorSpeed(g *core.GameState, actor core.ActorRef) int {
 		if g.Party[actor.Index].WebbedTurns > 0 {
 			spd /= core.WebbedSpeedDivisor
 		}
-		// Floor at 1: a 0-SPD actor never crosses the ATB threshold and drops out
-		// of the queue entirely (see enemy branch below).
-		if spd < 1 {
-			spd = 1
-		}
-		return spd
+		return floorSPD(spd)
 	}
 	m := core.BattleMemberAt(g, actor.Index)
 	if m == nil {
 		return 0
 	}
-	// Effective SPD folds any debuff (Cripple). Floor at 1: a 0-SPD enemy never
-	// crosses the threshold, never acts, never ticks the debuff down (it drains at
-	// end-of-turn) — a permanent self-sustaining lockout. Crippled foes still act, rarely.
-	spd := core.EffectiveEnemyStats(m).SPD
-	if spd < 1 {
-		spd = 1
-	}
-	return spd
+	// Effective SPD folds any debuff (Cripple).
+	return floorSPD(core.EffectiveEnemyStats(m).SPD)
+}
+
+// floorSPD clamps SPD to >=1: a 0-SPD actor never crosses the ATB threshold, so it
+// would drop out of the queue (and never tick its own debuff down) — the floor opts
+// it back in. Crippled foes still act, just rarely.
+func floorSPD(spd int) int {
+	return max(spd, 1)
 }
 
 // pushEnemyReadiness shoves an enemy's carry-over ATB gauge back by `amount`
@@ -700,7 +696,7 @@ func beginPartyTurn(g *core.GameState, partyIndex int) {
 	g.Battle.Phase = core.BattlePlayer
 	g.Battle.ClearTiming()
 	g.Battle.TimingIntro = 0
-	g.Battle.EnemyAttacker = -1
+	g.Battle.EnemyAttacker = core.NoIndex
 	g.Battle.CurrentParty = partyIndex
 	resetBattleAction(g)
 	if core.PartyIndexInRange(g.Party, partyIndex) {
@@ -1105,7 +1101,7 @@ func resolveAndFinishEnemyAttack(g *core.GameState) {
 		resolveEnemyAttacker(g, g.Battle.EnemyAttacker, g.Battle.Timing.Quality)
 	}
 	g.Battle.ClearTiming()
-	g.Battle.EnemyAttacker = -1
+	g.Battle.EnemyAttacker = core.NoIndex
 	g.Battle.EnemyPendingSkill = core.SkillNone
 	g.Battle.EnemyAttackMisses = false
 	finishActorTurn(g)
@@ -1350,7 +1346,7 @@ func DebugSkipWin(g *core.GameState, packIndex int) {
 		return
 	}
 	g.Battle.ActivePack = packIndex
-	g.Battle.EnemyIndex = -1
+	g.Battle.EnemyIndex = core.NoIndex
 	// Fell the whole pack so the win bookkeeping tallies it as a fought win.
 	for i := range g.Packs[packIndex].Members {
 		g.Packs[packIndex].Members[i].HP = 0
@@ -1376,7 +1372,7 @@ func fleeBattle(g *core.GameState) {
 	dropPackAt(g, g.Battle.ActivePack)
 	// Clear ActivePack BEFORE leaveBattle so clearBattleResidual's pack-defeated
 	// drop can't re-remove whatever pack shifted into the now-stale slot.
-	g.Battle.ActivePack = -1
+	g.Battle.ActivePack = core.NoIndex
 	leaveBattle(g, g.Area.QuietMessage)
 }
 
@@ -1412,8 +1408,8 @@ func clearBattleResidual(g *core.GameState) {
 	if packDefeated {
 		dropPackAt(g, g.Battle.ActivePack)
 	}
-	g.Battle.ActivePack = -1
-	g.Battle.EnemyIndex = -1
+	g.Battle.ActivePack = core.NoIndex
+	g.Battle.EnemyIndex = core.NoIndex
 	// resetBattleTransients drops the queue, timing/charge state, clocks, pending
 	// cast, and spoils snapshot so the next fight starts clean.
 	resetBattleTransients(&g.Battle)
@@ -1451,8 +1447,8 @@ func resetBattleTransients(b *core.Battle) {
 	b.SequencePulseTimer = 0
 	b.SequencePulseIndex = -1
 	b.LastQualityTimer = 0
-	b.EnemyAttacker = -1
-	b.EnemyAttackCursor = -1
+	b.EnemyAttacker = core.NoIndex
+	b.EnemyAttackCursor = core.NoIndex
 	b.EnemyPendingSkill = core.SkillNone
 	b.EnemyAttackMisses = false
 	b.PhysDamageThisTurn = 0

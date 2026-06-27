@@ -19,11 +19,16 @@ type BestiaryEntry struct {
 // saved entries). Custom enemies fold into their base Kind's entry for now.
 type Bestiary map[EnemyKind]BestiaryEntry
 
-// RecordKill credits one defeat of kind, creating the entry if absent. Pointer receiver lazy-inits a nil map.
-func (b *Bestiary) RecordKill(kind EnemyKind) {
+// ensure lazy-inits a nil map so the mutators can index it. Pointer receiver.
+func (b *Bestiary) ensure() {
 	if *b == nil {
 		*b = make(Bestiary)
 	}
+}
+
+// RecordKill credits one defeat of kind, creating the entry if absent. Pointer receiver lazy-inits a nil map.
+func (b *Bestiary) RecordKill(kind EnemyKind) {
+	b.ensure()
 	e := (*b)[kind]
 	e.Kills++
 	(*b)[kind] = e
@@ -31,9 +36,7 @@ func (b *Bestiary) RecordKill(kind EnemyKind) {
 
 // MarkScanned flags a kind as identified-by-scan, creating the entry if absent. Idempotent.
 func (b *Bestiary) MarkScanned(kind EnemyKind) {
-	if *b == nil {
-		*b = make(Bestiary)
-	}
+	b.ensure()
 	e := (*b)[kind]
 	e.Scanned = true
 	(*b)[kind] = e

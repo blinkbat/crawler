@@ -83,6 +83,12 @@ func init() {
 	if !strings.Contains(src, ramp.String()) {
 		panic("render: retro shader gbRamp[] disagrees with gbGreenRamp (spriteedit.go) — mirror the change to both")
 	}
+
+	// The shader's dither quantize level count mirrors spriteedit.go's ditherQuantLevels;
+	// GLSL can't share the const, so string-match it like bayer[]/gbRamp[] above.
+	if !strings.Contains(src, fmt.Sprintf("floatlevels=%.1f;", ditherQuantLevels)) {
+		panic("render: retro shader dither levels disagrees with ditherQuantLevels (spriteedit.go) — mirror the change to both")
+	}
 }
 
 // retroFilterFragmentShader is the combined pipeline. Order matters: sampling

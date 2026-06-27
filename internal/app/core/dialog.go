@@ -126,12 +126,7 @@ type DialogDefinition struct {
 
 // NodeByID returns the node with the given id, or (zero, false) if absent.
 func (d DialogDefinition) NodeByID(id string) (DialogNode, bool) {
-	for _, n := range d.Nodes {
-		if n.ID == id {
-			return n, true
-		}
-	}
-	return DialogNode{}, false
+	return findByID(d.Nodes, id, func(n DialogNode) string { return n.ID })
 }
 
 // DialogState is the live conversation; Def is a copy of the area's definition (self-contained).
@@ -198,12 +193,7 @@ func DialogsFromLines(lines []string) ([]DialogDefinition, error) {
 
 // DialogDefByID returns the area's dialog with the given id, or (zero, false).
 func DialogDefByID(a AreaDefinition, id string) (DialogDefinition, bool) {
-	for _, d := range a.Dialogs {
-		if d.ID == id {
-			return d, true
-		}
-	}
-	return DialogDefinition{}, false
+	return findByID(a.Dialogs, id, func(d DialogDefinition) string { return d.ID })
 }
 
 // StartDialog opens the dialog with the given id at its start node (false if
@@ -259,6 +249,18 @@ func dialogChoiceSelectable(g *GameState, c DialogChoice) (bool, string) {
 	return true, ""
 }
 
+// dialogCondFailReasons holds the default greyed-out reason per condition kind
+// (overridable by a choice's DisabledMessage). FoeKilled's reason is dynamic
+// (names the foe), so it's built inline rather than stored here; the default
+// (unknown kind) falls back to dialogCondFailUnknown.
+var dialogCondFailReasons = map[DialogCondKind]string{
+	DialogCondGold:        "Not enough gold",
+	DialogCondQuest:       "Quest requirement not met",
+	DialogCondTileVisited: "You haven't been there yet",
+}
+
+const dialogCondFailUnknown = "Unavailable"
+
 // evalDialogCondition checks one condition; on failure returns a reason (DisabledMessage, else default).
 func evalDialogCondition(g *GameState, cond DialogChoiceCondition) (bool, string) {
 	switch cond.Kind {
@@ -266,13 +268,13 @@ func evalDialogCondition(g *GameState, cond DialogChoiceCondition) (bool, string
 		if g.Gold >= cond.Gold {
 			return true, ""
 		}
-		return false, dialogCondReason(cond, "Not enough gold")
+		return false, dialogCondReason(cond, dialogCondFailReasons[cond.Kind])
 	case DialogCondQuest:
 		idx := QuestIndexByID(g.Quests, cond.QuestID)
 		if idx >= 0 && g.Quests[idx].Status == cond.QuestStatus {
 			return true, ""
 		}
-		return false, dialogCondReason(cond, "Quest requirement not met")
+		return false, dialogCondReason(cond, dialogCondFailReasons[cond.Kind])
 	case DialogCondFoeKilled:
 		if foeKillCountMet(g, cond.FoeKind, cond.FoeKills) {
 			return true, ""
@@ -282,10 +284,10 @@ func evalDialogCondition(g *GameState, cond DialogChoiceCondition) (bool, string
 		if tileVisited(g, cond.TileX, cond.TileZ) {
 			return true, ""
 		}
-		return false, dialogCondReason(cond, "You haven't been there yet")
+		return false, dialogCondReason(cond, dialogCondFailReasons[cond.Kind])
 	default:
 		// Unknown kind — not selectable, so an authoring typo fails visibly.
-		return false, dialogCondReason(cond, "Unavailable")
+		return false, dialogCondReason(cond, dialogCondFailUnknown)
 	}
 }
 

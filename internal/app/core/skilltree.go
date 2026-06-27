@@ -11,6 +11,9 @@ import "reflect"
 // MaxSkillTier is the maximum purchasable tier per skill. Every system reads this constant.
 const MaxSkillTier = 3
 
+// SkillTierUpgradeCost is the SkillPoint price of every tier-upgrade rung (flat per tier).
+const SkillTierUpgradeCost = 1
+
 // SkillTierUpgrade is one purchasable rung of a skill's tree. Cost is in SkillPoints;
 // Effect is the additive delta applied to the base SkillEffect on purchase.
 type SkillTierUpgrade struct {
@@ -62,9 +65,9 @@ type SkillEffectDelta struct {
 	PercentCurrentHP float64 // Static Field %-current-HP delta
 }
 
-// tier builds one SkillTierUpgrade row with Cost defaulting to 1 SkillPoint.
+// tier builds one SkillTierUpgrade row at the flat SkillTierUpgradeCost.
 func tier(t int, label, description string, effect SkillEffectDelta) SkillTierUpgrade {
-	return SkillTierUpgrade{Tier: t, Label: label, Description: description, Cost: 1, Effect: effect}
+	return SkillTierUpgrade{Tier: t, Label: label, Description: description, Cost: SkillTierUpgradeCost, Effect: effect}
 }
 
 // skillTierTable is the source of truth for every player-castable skill's upgrade ladder

@@ -211,6 +211,11 @@ const (
 	soundColBottomMargin = float32(12)  // gap below the column body
 	soundColTop          = float32(56)  // columns' top Y below the card top
 	soundColHeightInset  = float32(110) // total height removed from the card for columns
+	// Per-row action-button widths, shared by the saved-sounds list and the
+	// assignments column so the two right-anchored button groups size identically.
+	soundRowEditBtnW  = float32(38) // wider "Edit" label button
+	soundRowCueBtnW   = float32(32) // square Play / Delete cue button
+	soundRowCycleBtnW = float32(24) // narrow cycle-left/right arrow button
 )
 
 // soundSliderMetrics is the sound creator's slider-row geometry — an implicit layout↔draw
@@ -391,9 +396,9 @@ func computeSoundLayout(savedSounds []string, listCursor, assignCursor int, para
 	for i := l.listTopRow; i < l.listEnd; i++ {
 		row := listBaseRows[i]
 		btns := rightButtonRow(row, 2, row.Height-4, 8,
-			rowButtonSpec{38, 2}, // Edit
-			rowButtonSpec{32, 6}, // Play
-			rowButtonSpec{32, 0}, // Delete
+			rowButtonSpec{soundRowEditBtnW, 2}, // Edit
+			rowButtonSpec{soundRowCueBtnW, 6},  // Play
+			rowButtonSpec{soundRowCueBtnW, 0},  // Delete
 		)
 		l.listRows[i] = soundListRowRect{
 			Row:    row,
@@ -414,9 +419,9 @@ func computeSoundLayout(savedSounds []string, listCursor, assignCursor int, para
 	for i := l.assignTopRow; i < l.assignEnd; i++ {
 		row := assignBaseRows[i]
 		btns := rightButtonRow(row, 12, 24, 34,
-			rowButtonSpec{32, 4}, // Play
-			rowButtonSpec{24, 8}, // CycleLeft
-			rowButtonSpec{24, 0}, // CycleRight
+			rowButtonSpec{soundRowCueBtnW, 4},   // Play
+			rowButtonSpec{soundRowCycleBtnW, 8}, // CycleLeft
+			rowButtonSpec{soundRowCycleBtnW, 0}, // CycleRight
 		)
 		l.assignRows[i] = soundAssignRowRect{
 			Row:        row,
@@ -661,7 +666,7 @@ func updateSoundsListKeys(s *State, names []string) {
 	if editorCommitPressed() || rl.IsKeyPressed(rl.KeySpace) {
 		audio.PreviewFile(names[s.soundCursor])
 	}
-	if rl.IsKeyPressed(rl.KeyE) {
+	if editorEditPressed() {
 		loadSoundForEdit(s, names[s.soundCursor])
 	}
 	if editorDeletePressed() {

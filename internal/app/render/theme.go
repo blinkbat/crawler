@@ -409,6 +409,33 @@ var (
 	woodPaletteWarm = rl.NewColor(110, 78, 50, 255) // warm timber brown
 	woodPaletteDark = rl.NewColor(72, 52, 32, 255)  // dark grain / bark
 
+	// mossPaletteBright/Deep are the moss-cushion tints shared by every mossy rock
+	// prop (models.go). Bright sits on sun-side caps, deep in crevice patches.
+	mossPaletteBright = rl.NewColor(122, 160, 100, 255)
+	mossPaletteDeep   = rl.NewColor(96, 138, 90, 255)
+
+	// stonePalette* are the shared faceted-rock tints (boulder, cairn, formation;
+	// models.go): close-grouped greys with warm/cool variation so multi-lump rocks
+	// read as one stone broken at fault lines.
+	stonePaletteWarm  = rl.NewColor(214, 204, 188, 255)
+	stonePaletteCool  = rl.NewColor(196, 198, 202, 255)
+	stonePaletteDark  = rl.NewColor(176, 172, 164, 255)
+	stonePaletteLight = rl.NewColor(232, 224, 210, 255)
+
+	// Shared iron-fixture + flame palette for every torch/brazier (world.go). Iron is
+	// lit by the world shader; flame tints (hot core → mid → tip) are applied to unlit
+	// models so they glow. Shared by drawWallTorch + the brazier/candle props.
+	torchIron       = rl.NewColor(54, 50, 46, 255)
+	torchIronLight  = rl.NewColor(92, 84, 76, 255)
+	torchFlameTints = [3]rl.Color{
+		rl.NewColor(255, 226, 150, 255), // hot core — pale gold
+		rl.NewColor(252, 162, 70, 255),  // mid — orange
+		rl.NewColor(228, 110, 52, 255),  // tip — deep ember
+	}
+	// torchBaseColor is the warm flame light tint at full brightness, before flicker.
+	// Deliberately bright (R > 1) so a torch-lit wall reads as a strong pool.
+	torchBaseColor = rl.NewVector3(2.3, 1.35, 0.7)
+
 	// Per-class accent ("slot color") — single source for every HUD/UI/log tint
 	// keyed to a class (classes.go turnColor + classAccent). Tuned distinct on dark glass.
 	classAccentWarrior = rl.NewColor(232, 184, 82, 255)  // gold
@@ -585,6 +612,10 @@ const (
 	// Panels-overlay tab strip geometry.
 	overlayTabHeight  = int32(46)
 	overlayTabPadding = int32(12)
+	// overlayTabGutter is the tab strip's side inset (each edge). Narrower than the
+	// info strip's panelsStripGutter(24) by design — the tabs sit closer to the card
+	// edge than the header chrome below them.
+	overlayTabGutter = int32(12)
 
 	// overlayFooterReserve is the bottom band reserved for the hint footer
 	// (DrawHintBar / drawModalFooterGlyphs). Body = card minus this band minus the heading band.
@@ -1462,7 +1493,7 @@ func drawFocusableRow(rect rl.Rectangle, focused bool) {
 	ih := int32(rect.Height)
 	flick := candleFlicker()
 	// Gilt selection frame, breathing with the flame, plus a leading gilt spine.
-	rl.DrawRectangleLinesEx(rect, 2, fadeColor(giltBright, 0.72+0.28*flick))
+	rl.DrawRectangleLinesEx(rect, 2, giltFlickerAlpha(0.72, 0.28, flick))
 	if ih > 8 {
 		rl.DrawRectangle(ix+2, iy+3, 2, ih-6, fadeColor(giltBright, 0.8*flick))
 	}
@@ -1483,6 +1514,13 @@ func drawSelectionHalo(x, y, w, h int32, tint color.RGBA, pulseV float32, small 
 // drawPaneDropShadow stamps the cheap offset drop shadow under a selectable pane.
 func drawPaneDropShadow(r rl.Rectangle) {
 	rl.DrawRectangle(int32(r.X+2), int32(r.Y+3), int32(r.Width), int32(r.Height), fadeColor(shadowHeavy, 0.20))
+}
+
+// drawShadowedGlassPane stamps the shared "lifted glass pane" prefix — drop shadow
+// then the glass body — that selectable plates layer their own outline over.
+func drawShadowedGlassPane(r rl.Rectangle, fill color.RGBA) {
+	drawPaneDropShadow(r)
+	drawGlassPaneRect(r, fill)
 }
 
 // drawPanelHeading paints a FontHeading title (engraved) with the wood-accent
@@ -1625,6 +1663,20 @@ func fadeColor(col color.RGBA, alpha float32) color.RGBA {
 func colorWithAlpha(col color.RGBA, byteAlpha uint8) color.RGBA {
 	col.A = byteAlpha
 	return col
+}
+
+// scaleAlpha multiplies col's existing alpha by factor (no 0..1 clamp — callers
+// pass an envelope/fixed-point factor). The "multiply existing alpha by a runtime
+// factor" form, vs fadeColor (clamped 0..1 fade) and colorWithAlpha (exact set).
+func scaleAlpha(col color.RGBA, factor float32) color.RGBA {
+	col.A = uint8(float32(col.A) * factor)
+	return col
+}
+
+// giltFlickerAlpha returns giltBright faded to base+rng*flick — the recurring
+// "breathing gilt" alpha curve (a candle flick or a slider fill drives flick).
+func giltFlickerAlpha(base, rng, flick float32) color.RGBA {
+	return fadeColor(giltBright, base+rng*flick)
 }
 
 // HP-bar tier cutoffs (fraction of max): above high → green, above mid → amber, else red.
@@ -2059,6 +2111,17 @@ func drawTextWithShadowStyle(font rl.Font, text string, x, y, size, spacing floa
 	hasSym := containsSymGlyph(text)
 	drawRichTextKnown(font, text, hasSym, x+offX, y+offY, size, spacing, shadowCol)
 	drawRichTextKnown(font, text, hasSym, x, y, size, spacing, col)
+}
+
+// drawTextChip paints a shadowed text line on a translucent scrim chip centered on
+// (cx,cy): a fill rect padded `pad` (half above, full below the text box) under a
+// two-pass shadowed label. The "readable text over a busy 3D scene" stamp.
+func drawTextChip(font rl.Font, text string, cx, cy, size, spacing, pad float32, fill, textCol color.RGBA) {
+	measure := rl.MeasureTextEx(font, text, size, spacing)
+	rx := cx - measure.X/2
+	ry := cy - measure.Y/2
+	rl.DrawRectangle(int32(rx-pad), int32(ry-pad/2), int32(measure.X+pad*2), int32(measure.Y+pad), fill)
+	drawTextWithShadowStyle(font, text, rx, ry, size, spacing, textCol, shadowHeavy, 1, 1)
 }
 
 // drawHeading is the legacy int32-coord alias for drawPanelHeading.

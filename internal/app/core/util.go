@@ -18,6 +18,26 @@ func BuildRegistry[K comparable, V any](defs []V, key func(V) K) map[K]V {
 	return m
 }
 
+// indexByID returns the index of the first element whose key matches id, or -1.
+// The shared "linear scan for a struct by string ID" walk.
+func indexByID[T any](slice []T, id string, key func(T) string) int {
+	for i := range slice {
+		if key(slice[i]) == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// findByID returns the first element whose key matches id, or (zero, false).
+func findByID[T any](slice []T, id string, key func(T) string) (T, bool) {
+	if i := indexByID(slice, id, key); i >= 0 {
+		return slice[i], true
+	}
+	var zero T
+	return zero, false
+}
+
 func FlashTint(base color.RGBA, timer float32) color.RGBA {
 	if timer <= 0 {
 		return base

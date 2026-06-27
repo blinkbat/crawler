@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"reflect"
+	"strings"
 )
 
 // setupKind selects the pre-bar validation/cost flow a skill runs at confirm time
@@ -1567,10 +1568,7 @@ func applyStaticField(g *core.GameState, quality int) bool {
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, raw, quality, core.SkillTagNone)
 	enqueueSkillVFXAtEnemy(g, core.SkillStaticField)
 	foe := core.EnemySingularNoun(&target)
-	msg := qualityLine(quality, actor.Name, " jolts the %s for %d.", foe, damage)
-	if defeated {
-		msg = qualityLine(quality, actor.Name, " jolts the %s for %d — it drops.", foe, damage)
-	}
+	msg := killOrPlainLine(quality, actor.Name, " jolts the %s for %d.", " jolts the %s for %d — it drops.", defeated, foe, damage)
 	logFoeHit(g, msg, defeated)
 	finishActorTurn(g)
 	return true
@@ -1649,10 +1647,7 @@ func applyRecklessSwing(g *core.GameState, quality int) bool {
 	// BuffArmor, so no Blessed pill); stamp them straight off the resolved effect.
 	core.StampPartyBuff(actor, core.SkillRecklessSwing, effect)
 	foe := core.EnemySingularNoun(&target)
-	msg := qualityLine(quality, actor.Name, " swings wildly at the %s for %d — guard down.", foe, damage)
-	if defeated {
-		msg = qualityLine(quality, actor.Name, " caves the %s in for %d — guard down.", foe, damage)
-	}
+	msg := killOrPlainLine(quality, actor.Name, " swings wildly at the %s for %d — guard down.", " caves the %s in for %d — guard down.", defeated, foe, damage)
 	logFoeHit(g, appendCrit(msg, crit), defeated)
 	finishActorTurn(g)
 	return true
@@ -1893,11 +1888,8 @@ func applySunder(g *core.GameState, quality int) bool {
 	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillSunder, rawDamage, quality)
 	enqueueSkillVFXAtEnemy(g, core.SkillSunder)
 	shoved := !defeated && pushEnemyReadiness(g, g.Battle.EnemyIndex, effect.ATBPush)
-	msg := qualityLine(quality, actor.Name, " sunders %s for %d.", core.TheFoe(&target), damage)
-	switch {
-	case defeated:
-		msg = qualityLine(quality, actor.Name, " sunders %s for %d — it falls.", core.TheFoe(&target), damage)
-	case shoved:
+	msg := killOrPlainLine(quality, actor.Name, " sunders %s for %d.", " sunders %s for %d — it falls.", defeated, core.TheFoe(&target), damage)
+	if shoved { // shoved implies !defeated, so it can't collide with the kill line
 		msg = fmt.Sprintf("%s Its turn is shoved back.", msg)
 	}
 	logFoeHit(g, appendCrit(msg, crit), defeated)
@@ -2190,6 +2182,13 @@ func targetActsLater(g *core.GameState, enemySlot int) bool {
 // The shared rank-multiplier math behind Shadow Step / Bloodthirst / Retribution.
 func scaleByRank(base, rank int, perRank float64) int {
 	return int(float64(base) * float64(rank) * perRank)
+}
+
+// scaleFloorOne scales base by a float multiplier, floored at 1 so a derived hit
+// always lands for at least 1. One home for the floor rule (Ancestral Spirit /
+// Riposte off-turn strikes) so a future floor change is a single edit.
+func scaleFloorOne(base int, mult float64) int {
+	return max(int(float64(base)*mult), 1)
 }
 
 // applyShadowStep folds the Thief's Shadow Step into an outgoing single-target hit:
@@ -2748,7 +2747,7 @@ func init() {
 		t := reflect.TypeOf(sample)
 		for i := 0; i < t.NumField(); i++ {
 			f := t.Field(i)
-			if f.Type.Kind() != reflect.Int || len(f.Name) < len("Turns") || f.Name[len(f.Name)-len("Turns"):] != "Turns" {
+			if f.Type.Kind() != reflect.Int || !strings.HasSuffix(f.Name, "Turns") {
 				continue
 			}
 			if !classified[f.Name] {
@@ -2925,6 +2924,18 @@ func qualityLine(quality int, name, rest string, args ...any) string {
 	return qualityTag(quality) + name + fmt.Sprintf(rest, args...)
 }
 
+// killOrPlainLine is the 2-arm (plain / kill) analogue of procSkillMessage for the
+// bespoke single-target damagers that format via qualityLine with the SAME args in
+// both arms: it picks the defeated wording over the plain one. One home for "the
+// kill line beats the plain line" so those sites stop re-spelling the qualityLine call.
+func killOrPlainLine(quality int, name, plain, defeated string, killed bool, args ...any) string {
+	rest := plain
+	if killed {
+		rest = defeated
+	}
+	return qualityLine(quality, name, rest, args...)
+}
+
 // qualityTag returns the leading "Grade! " log prefix on a hit. Miss/Nice return
 // "" (Miss has its own whiff copy; Nice reads as baseline). Log text only — the
 // popup still shows the full label via TimingQualityLabel.
@@ -3012,7 +3023,7 @@ func tickAncestralSpirit(g *core.GameState, actor core.ActorRef) {
 	if target < 0 {
 		return
 	}
-	raw := max(int(float64(core.MemberAttackDamage(*m, 0))*core.AncestralSpiritDamageMult), 1)
+	raw := scaleFloorOne(core.MemberAttackDamage(*m, 0), core.AncestralSpiritDamageMult)
 	noun := core.EnemySingularNoun(core.BattleMemberAt(g, target))
 	dealt, defeated := damageEnemyUntallied(g, target, raw, autoStrikeQuality, core.SkillTagPhys)
 	core.EnqueueEnemyVFX(g, core.VFXSlash, target)
@@ -3097,7 +3108,7 @@ func tryRiposte(g *core.GameState, dodger, enemySlot int) {
 	if core.PassiveRank(member, core.PassiveRiposte) <= 0 {
 		return
 	}
-	raw := max(int(float64(core.MemberAttackDamage(*member, 0))*core.RiposteDamageMult), 1)
+	raw := scaleFloorOne(core.MemberAttackDamage(*member, 0), core.RiposteDamageMult)
 	name := member.Name
 	dealt, _ := offTurnReflect(g, enemySlot, raw, core.SkillTagPhys, core.WeaponHitVFX(core.EquippedWeapon(*member)),
 		func(noun string, _ int) string { return fmt.Sprintf("%s ripostes — the %s drops!", name, noun) },

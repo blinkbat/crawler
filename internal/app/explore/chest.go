@@ -11,7 +11,7 @@ import (
 // chest flips its Looted flag so the lid renders open.
 func updateChestModal(g *core.GameState) {
 	if g.ChestOpen < 0 || g.ChestOpen >= len(g.Chests) {
-		g.ChestOpen = -1
+		g.ChestOpen = core.NoIndex
 		return
 	}
 	chest := &g.Chests[g.ChestOpen]
@@ -73,6 +73,6 @@ func updateChestModal(g *core.GameState) {
 // rule delegated to core.MarkChestLootedIfEmpty).
 func closeChest(g *core.GameState, chest *core.Chest) {
 	core.MarkChestLootedIfEmpty(chest)
-	g.ChestOpen = -1
+	g.ChestOpen = core.NoIndex
 	g.ChestMenuIndex = 0
 }

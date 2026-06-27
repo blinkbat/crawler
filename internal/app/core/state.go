@@ -112,8 +112,8 @@ func NewGameState(area AreaDefinition) GameState {
 		Doors:      placeDoors(area),
 		Crystals:   crystals,
 		Visited:    visited,
-		ChestOpen:  -1,
-		DoorPrompt: -1,
+		ChestOpen:  NoIndex,
+		DoorPrompt: NoIndex,
 		// Runtime preference (not in SaveData); mutable in the Options menu.
 		RumbleEnabled: true,
 		// Runtime preferences (not in SaveData), preserved across Restart.
@@ -172,8 +172,8 @@ func CloseTransitionOverlays(g *GameState) {
 	g.SkillTreeOpen = false
 	g.DialogOpen = false
 	CloseEquipPicker(g)
-	g.ChestOpen = -1
-	g.DoorPrompt = -1
+	g.ChestOpen = NoIndex
+	g.DoorPrompt = NoIndex
 }
 
 // spawnLevel picks the standing level for a unit at (x,z): the lowest standable

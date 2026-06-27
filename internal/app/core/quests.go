@@ -74,12 +74,7 @@ func QuestTitleFromID(id string) string {
 // QuestIndexByID returns the index of the quest with the given ID, or -1. The
 // lookup seam every quest mutation goes through.
 func QuestIndexByID(quests []Quest, id string) int {
-	for i := range quests {
-		if quests[i].ID == id {
-			return i
-		}
-	}
-	return -1
+	return indexByID(quests, id, func(q Quest) string { return q.ID })
 }
 
 // AddQuest appends a quest if its ID isn't already present and returns the

@@ -20,25 +20,27 @@ const (
 	ShopTabCount
 )
 
-// ShopTabLabel is the on-screen header for a shop tab.
-func ShopTabLabel(t ShopTab) string {
-	switch t {
-	case ShopTabBuy:
-		return "Buy"
-	case ShopTabSell:
-		return "Sell"
-	default:
-		// A new tab without a label fails loudly instead of rendering "?".
-		panic("core: ShopTabLabel missing case for ShopTab")
+// shopTabLabels is the on-screen header per shop tab, indexed by ShopTab; a
+// missing label leaves a "" entry the init() below catches at startup.
+var shopTabLabels = [ShopTabCount]string{
+	ShopTabBuy:  "Buy",
+	ShopTabSell: "Sell",
+}
+
+func init() {
+	for t := ShopTab(0); t < ShopTabCount; t++ {
+		if shopTabLabels[t] == "" {
+			panic("core: shopTabLabels has an empty entry — label every ShopTab")
+		}
 	}
 }
 
-// init forces every ShopTab through ShopTabLabel so a missing label panics at
-// startup, not first render.
-func init() {
-	for t := ShopTab(0); t < ShopTabCount; t++ {
-		_ = ShopTabLabel(t)
+// ShopTabLabel is the on-screen header for a shop tab.
+func ShopTabLabel(t ShopTab) string {
+	if t < 0 || int(t) >= len(shopTabLabels) {
+		return ""
 	}
+	return shopTabLabels[t]
 }
 
 // ShopSellPrice is the gold for selling one unit: Price / ShopSellDivisor,
@@ -99,7 +101,7 @@ func SellableCount(inv []ItemStack) int {
 }
 
 // ShopRowCount is the selectable-row count on the active shop tab — the single
-// source the input wrap (explore.shopRowCount) and the renderer's row list both
+// source the explore input wrap (updateShop) and the renderer's row list both
 // agree on (the latter guarded by TestBuildShopRowsMatchesCatalogOrder).
 func ShopRowCount(g *GameState) int {
 	switch g.ShopTab {

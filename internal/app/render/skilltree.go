@@ -215,8 +215,7 @@ func drawSkillTierPips(x, y float32, filled, total int) {
 }
 
 func drawSkillNodePlate(rect rl.Rectangle, bg rl.Color, rank int, unlocked, focused bool) {
-	drawPaneDropShadow(rect)
-	drawGlassPaneRect(rect, bg)
+	drawShadowedGlassPane(rect, bg)
 	outline := woodAccentOutline
 	if !unlocked {
 		outline = fadeColor(borderDim, 0.62)

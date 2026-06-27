@@ -384,6 +384,12 @@ const (
 	ModalCount
 )
 
+// NoIndex is the shared "nothing selected" sentinel for the explore index-or-none
+// fields (ChestOpen, DoorPrompt, PanelSwapSource): a real selection is a valid slice
+// index (>= 0), so these init to NoIndex and reset to it on close. One named value
+// so the reset sites stop spelling a bare -1.
+const NoIndex = -1
+
 // ActiveModal returns the highest-priority open explore-scene modal, or ModalNone
 // if movement/battle should process input. Battle phase is NOT a modal.
 func ActiveModal(g *GameState) ModalKind {

@@ -126,14 +126,33 @@ func drawLocationEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawLabel(font, "Name", labelAbove(l.nameField))
 	drawTextField(font, l.nameField, loc.Name, s.focus == focusLocationName)
 
-	drawLocStepper(font, l.x, "Tile X", loc.X)
-	drawLocStepper(font, l.z, "Tile Z", loc.Z)
-	drawLocStepper(font, l.w, "Width", loc.W)
-	drawLocStepper(font, l.h, "Height", loc.H)
-	drawLocStepper(font, l.level, "Level (elevation)", loc.Level)
+	for _, row := range locStepperRows(l, loc) {
+		drawLocStepper(font, row.st, row.label, row.get())
+	}
 
 	drawButton(font, l.deleteBtn, "Delete (X)", false)
 	drawButton(font, l.backBtn, "Back (Esc)", false)
+}
+
+// locStepperRow binds a numeric region field to its stepper hit rects + label,
+// the single source both the draw loop and the click loop iterate.
+type locStepperRow struct {
+	st    locStepper
+	label string
+	get   func() int
+	set   func(int)
+}
+
+// locStepperRows lists the region's numeric fields once, in display order, so
+// adding/reordering a field is a one-place edit.
+func locStepperRows(l locEditLayout, loc *core.Location) []locStepperRow {
+	return []locStepperRow{
+		{l.x, "Tile X", func() int { return loc.X }, func(v int) { loc.X = v }},
+		{l.z, "Tile Z", func() int { return loc.Z }, func(v int) { loc.Z = v }},
+		{l.w, "Width", func() int { return loc.W }, func(v int) { loc.W = v }},
+		{l.h, "Height", func() int { return loc.H }, func(v int) { loc.H = v }},
+		{l.level, "Level (elevation)", func() int { return loc.Level }, func(v int) { loc.Level = v }},
+	}
 }
 
 // drawLocStepper renders a "label   value  [−][+]" row.
@@ -165,23 +184,13 @@ func updateLocationEditModal(s *State) Action {
 			return ActionNone
 		}
 		// Steppers: each adjusts its field by ±1, clamped. A click banks one undo.
-		for _, st := range []struct {
-			s   locStepper
-			get func() int
-			set func(int)
-		}{
-			{l.x, func() int { return loc.X }, func(v int) { loc.X = v }},
-			{l.z, func() int { return loc.Z }, func(v int) { loc.Z = v }},
-			{l.w, func() int { return loc.W }, func(v int) { loc.W = v }},
-			{l.h, func() int { return loc.H }, func(v int) { loc.H = v }},
-			{l.level, func() int { return loc.Level }, func(v int) { loc.Level = v }},
-		} {
-			if pointIn(mp, st.s.minus) {
-				adjustLocationField(s, st.get, st.set, -1)
+		for _, row := range locStepperRows(l, loc) {
+			if pointIn(mp, row.st.minus) {
+				adjustLocationField(s, row.get, row.set, -1)
 				return ActionNone
 			}
-			if pointIn(mp, st.s.plus) {
-				adjustLocationField(s, st.get, st.set, +1)
+			if pointIn(mp, row.st.plus) {
+				adjustLocationField(s, row.get, row.set, +1)
 				return ActionNone
 			}
 		}

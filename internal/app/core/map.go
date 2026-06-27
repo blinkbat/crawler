@@ -707,7 +707,10 @@ var propBlockHeights = func() map[byte]int {
 
 // PropLevelAuto is the "no explicit level — rest on the column's lowest
 // standable surface" sentinel, disjoint from the base-36 level chars. Absent
-// PropLevels grid reads as all-auto.
+// PropLevels grid reads as all-auto. Serves the DecorLevels grid too (no separate
+// DecorLevelAuto). Shares the '.' byte with FloorAuto/TileOpen/TileCeilingOpen —
+// same "default/blank" contract per layer, intentionally NOT one named constant
+// so each layer's sentinel stays renamable on its own.
 const PropLevelAuto = '.'
 
 // levelGridAt reads a per-tile level grid (PropLevels / DecorLevels): the

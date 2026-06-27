@@ -29,7 +29,7 @@ func resetPanelSubmodals(g *core.GameState) {
 	closeUseTarget(g)
 	closeSkillTree(g)
 	closeHealPick(g)
-	g.PanelSwapSource = -1 // clear any half-started Character-tab formation swap
+	g.PanelSwapSource = core.NoIndex // clear any half-started Character-tab formation swap
 }
 
 // closePanels takes the overlay down (tab/zoom/cursor persist so reopening lands
@@ -69,7 +69,7 @@ func updatePanels(g *core.GameState, dt float32) {
 	// it just cancels the pickup. The toggle button always closes outright (below).
 	if input.BackPressed() {
 		if g.PanelsTab == core.PanelTabCharacter && g.PanelSwapSource >= 0 {
-			g.PanelSwapSource = -1
+			g.PanelSwapSource = core.NoIndex
 			return
 		}
 		closePanels(g)
@@ -128,12 +128,12 @@ func updatePanels(g *core.GameState, dt float32) {
 				g.PanelSwapSource = g.PanelsRowCursor
 				g.SetStatusMessage("Swap " + g.Party[g.PanelsRowCursor].Name + " with whom?")
 			case g.PanelSwapSource == g.PanelsRowCursor:
-				g.PanelSwapSource = -1 // re-picked held member → cancel
+				g.PanelSwapSource = core.NoIndex // re-picked held member → cancel
 			default:
 				a, b := g.PanelSwapSource, g.PanelsRowCursor
 				nameA, nameB := g.Party[a].Name, g.Party[b].Name
 				core.SwapFormationSlots(g.Party, a, b)
-				g.PanelSwapSource = -1
+				g.PanelSwapSource = core.NoIndex
 				g.SetStatusMessage(core.SwapPlacesMessage(nameA, nameB))
 			}
 		}

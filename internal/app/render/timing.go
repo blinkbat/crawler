@@ -52,6 +52,7 @@ const (
 	iconShadowAlpha       = uint8(180)    // arrow drop-shadow alpha
 	reelRimAlpha          = uint8(150)    // dark rim behind a reel symbol (definition over glass)
 	flashHaloAlpha        = uint8(180)    // frozen-cursor halo peak alpha during the flash hold
+	heldHaloAlpha         = uint8(90)     // soft halo behind the held (charging) cursor
 	timingStrongFillAlpha = uint8(220)    // strong fill alpha (track flood, shockwave ring, charge/decay slices, tick flash)
 )
 
@@ -67,7 +68,7 @@ const (
 // fadeForFlash scales col's alpha by the flash-hold envelope when flashing, else unchanged.
 func fadeForFlash(col rl.Color, flashing bool, flashTimer float32) rl.Color {
 	if flashing {
-		col.A = uint8(float32(col.A) * flashAlpha(flashTimer))
+		col = scaleAlpha(col, flashAlpha(flashTimer))
 	}
 	return col
 }
@@ -349,10 +350,8 @@ func measureTimingHeading(font rl.Font, text string, size float32) rl.Vector2 {
 // (width, color) overrides for the caller's cursor draw. Shared by press + charge bars.
 func applyTimingFlashCursor(curX, y, barH, flashTimer float32, base rl.Color) (float32, rl.Color) {
 	cursorW := timingCursorWidthFlash
-	flashCol := base
-	flashCol.A = 255
-	halo := flashCol
-	halo.A = uint8(float32(flashHaloAlpha) * flashAlpha(flashTimer))
+	flashCol := colorWithAlpha(base, 255)
+	halo := colorWithAlpha(flashCol, uint8(float32(flashHaloAlpha)*flashAlpha(flashTimer)))
 	rl.DrawRectangle(int32(curX-cursorW*2), int32(y)-8, int32(cursorW*4), int32(barH)+16, halo)
 	return cursorW, flashCol
 }
@@ -556,8 +555,7 @@ func drawChargeBar(timing core.TimingState, g *core.GameState, assets Resources,
 		// Held: punchier cursor + halo.
 		cursorW = timingCursorWidthHeld
 		cursorCol = timingHeldColor
-		halo := cursorCol
-		halo.A = 90
+		halo := colorWithAlpha(cursorCol, heldHaloAlpha)
 		drawTimingCursor(curX, drawY, drawnH, cursorW*2, halo)
 	}
 	if flashing {
@@ -706,8 +704,8 @@ func drawReelBar(timing core.TimingState, g *core.GameState, assets Resources, x
 // drawReelSymbol paints one slot symbol: a dark rim under the colored fill. The rim alpha
 // tracks the fill's so faded scrolling symbols don't carry a full-strength halo.
 func drawReelSymbol(sx, sy, r float32, col rl.Color, flashing bool, flash float32) {
-	rimA := uint8(int(col.A) * int(reelRimAlpha) / 255)
-	rl.DrawCircleV(rl.NewVector2(sx, sy), r+2, fadeForFlash(colorWithAlpha(shadowBase, rimA), flashing, flash))
+	rim := scaleAlpha(col, float32(reelRimAlpha)/255)
+	rl.DrawCircleV(rl.NewVector2(sx, sy), r+2, fadeForFlash(colorWithAlpha(shadowBase, rim.A), flashing, flash))
 	rl.DrawCircleV(rl.NewVector2(sx, sy), r, fadeForFlash(col, flashing, flash))
 }
 

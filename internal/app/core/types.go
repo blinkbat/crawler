@@ -156,26 +156,32 @@ const (
 // PanelTabCharacter aliases PanelTabStats (the tab now reads "Character").
 const PanelTabCharacter = PanelTabStats
 
+// panelTabLabels is the short tab-strip header per tab, indexed by PanelTab. A
+// missing label leaves a "" entry the init() below catches at startup.
+// (PanelTabQuests hosts Quests + Bestiary sub-tabs, so it reads "Journal".)
+var panelTabLabels = [PanelTabCount]string{
+	PanelTabStats:     "Character",
+	PanelTabEquipment: "Equipment",
+	PanelTabItems:     "Items",
+	PanelTabSkills:    "Skills",
+	PanelTabQuests:    "Journal",
+	PanelTabMap:       "Map",
+}
+
+func init() {
+	for t := PanelTab(0); t < PanelTabCount; t++ {
+		if panelTabLabels[t] == "" {
+			panic("core: panelTabLabels has an empty entry — label every PanelTab")
+		}
+	}
+}
+
 // PanelTabLabel returns the short label for a tab (the tab-strip header).
 func PanelTabLabel(t PanelTab) string {
-	switch t {
-	case PanelTabStats:
-		return "Character"
-	case PanelTabEquipment:
-		return "Equipment"
-	case PanelTabItems:
-		return "Items"
-	case PanelTabSkills:
-		return "Skills"
-	case PanelTabQuests:
-		// Hosts Quests + Bestiary sub-tabs, so the top-level tab reads "Journal".
-		return "Journal"
-	case PanelTabMap:
-		return "Map"
-	default:
-		// Fail loudly if a new tab forgets its label.
-		panic("core: PanelTabLabel missing case for PanelTab")
+	if t < 0 || int(t) >= len(panelTabLabels) {
+		return ""
 	}
+	return panelTabLabels[t]
 }
 
 // JournalSubtab selects the Journal tab's view (quest log or bestiary), toggled
@@ -188,16 +194,27 @@ const (
 	JournalSubtabCount
 )
 
+// journalSubtabLabels is the short label per journal sub-tab, indexed by
+// JournalSubtab; a missing label leaves a "" entry init() catches at startup.
+var journalSubtabLabels = [JournalSubtabCount]string{
+	JournalQuests:   "Quests",
+	JournalBestiary: "Bestiary",
+}
+
+func init() {
+	for s := JournalSubtab(0); s < JournalSubtabCount; s++ {
+		if journalSubtabLabels[s] == "" {
+			panic("core: journalSubtabLabels has an empty entry — label every JournalSubtab")
+		}
+	}
+}
+
 // JournalSubtabLabel returns the short label for a journal sub-tab.
 func JournalSubtabLabel(s JournalSubtab) string {
-	switch s {
-	case JournalQuests:
-		return "Quests"
-	case JournalBestiary:
-		return "Bestiary"
-	default:
-		panic("core: JournalSubtabLabel missing case for JournalSubtab")
+	if s < 0 || int(s) >= len(journalSubtabLabels) {
+		return ""
 	}
+	return journalSubtabLabels[s]
 }
 
 // JournalRowCount returns the active Journal sub-view's row count (quest entries vs

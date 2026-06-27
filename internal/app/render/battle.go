@@ -304,6 +304,11 @@ const actionLogLineH = int32(22)
 // actionLogSpineInset is the spine stripe's top/bottom inset (stripe runs panelH - 2×inset).
 const actionLogSpineInset = int32(18)
 
+// logSpineClearance is the extra left gutter past the frame inset that clears the
+// ledger spine; the content X, wrap width, and rule width all key off it so they
+// can't drift apart.
+const logSpineClearance = int32(6)
+
 // Action-log spine wood-accent alphas: main binding stripe and dimmer binding ties.
 const (
 	actionLogSpineAlpha = float32(0.75)
@@ -392,11 +397,11 @@ func drawActionLogPanel(g *core.GameState, assets Resources) {
 	drawPanelCard(x, y, w, h)
 	drawActionLogSpine(x, y, h)
 
-	// Inner inset: frame ~6px + 8px off the bevel; +6px on the left clears the spine.
+	// Inner inset: frame ~6px + 8px off the bevel; logSpineClearance on the left clears the spine.
 	innerInset := int32(uiCellInsetX)
-	innerX := x + innerInset + 6
+	innerX := x + innerInset + logSpineClearance
 	innerY := y + innerInset
-	innerW := w - 2*innerInset - 6
+	innerW := w - 2*innerInset - logSpineClearance
 	innerH := h - 2*innerInset
 
 	lineH := actionLogLineH
@@ -544,10 +549,10 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 	// rightX: content inset from the right edge; rows stretch their highlight to it.
 	rightX := x + w - hudContentInsetX
 	// Active member's name as the header, in class color, over a gilt divider rule.
-	drawEngravedText(assets.hudFont, member.Name, float32(contentX), float32(y+14), FontHeading, classCol)
-	ruleY := y + 48
+	drawEngravedText(assets.hudFont, member.Name, float32(contentX), float32(y+actionMenuHeaderY), FontHeading, classCol)
+	ruleY := y + actionMenuRuleY
 	drawPipCappedRule(x+actionMenuRuleInsetX, ruleY, w-2*actionMenuRuleInsetX, fadeColor(giltBright, 0.5), 2.4, fadeColor(giltDim, 0.85))
-	contentY := y + 58
+	contentY := y + actionMenuContentGap
 	// subY: sub-prompt/list start, via bodyBelowHeading for a consistent heading→body gap.
 	subY := bodyBelowHeading(contentY, FontHeading)
 
@@ -869,6 +874,15 @@ const actionMenuListTopGap = int32(10)
 // from the panel edges (header rule + footer hint rule share it, width = w - 2x).
 const actionMenuRuleInsetX = int32(18)
 
+// Action-menu header band, derived so the name heading, its divider rule, and the
+// content below it can't drift: name at headerY, rule 2px under the FontHeading
+// text band, content one row-gap below the rule.
+const (
+	actionMenuHeaderY    = int32(14)
+	actionMenuRuleY      = actionMenuHeaderY + int32(FontHeading) - 2 // 48
+	actionMenuContentGap = actionMenuRuleY + uiRowGap                 // 58: rule → content heading
+)
+
 // drawActionRow paints one key-plate row (selected gets the gilt plate, else dark glass).
 // The plate spans x-actionRowPlateInsetX to rightX so the highlight reaches the content edge.
 // A disabled row keeps the selection plate (cursor must stay visible) but greys its text.
@@ -923,6 +937,15 @@ const (
 	splashExitDur  = float32(0.32)
 )
 
+// Splash banner geometry: title→panel padding and the intro scale ramp
+// (splashScaleBase at lead-in, growing by splashScaleRange to 1.0 settled).
+const (
+	splashPadX       = float32(40)
+	splashPadY       = float32(22)
+	splashScaleBase  = float32(0.86)
+	splashScaleRange = float32(0.14)
+)
+
 // drawBattleSplash slams the encounter-title banner in at the top on battle start.
 func drawBattleSplash(g *core.GameState, assets Resources) {
 	members := core.BattleMembers(g)
@@ -952,15 +975,12 @@ func drawBattleSplash(g *core.GameState, assets Resources) {
 	// Title is stable across the ~40-frame splash, so measure once (at base size) and scale.
 	titleMeasure := splashTitleMeasureCache.measure(assets.hudFont, text, titleSize, spacing)
 
-	scale := 0.86 + 0.14*intro
+	scale := splashScaleBase + splashScaleRange*intro
 	titleW := titleMeasure.X * scale
 	titleH := titleMeasure.Y * scale
 
-	padX := float32(40)
-	padY := float32(22)
-
-	bgW := titleW + padX*2
-	bgH := titleH + padY*2
+	bgW := titleW + splashPadX*2
+	bgH := titleH + splashPadY*2
 
 	sw, sh := screenSizeF()
 	cx := sw / 2
@@ -976,7 +996,7 @@ func drawBattleSplash(g *core.GameState, assets Resources) {
 	drawPanelOutline(int32(bgX), int32(bgY), int32(bgW), int32(bgH), fadeColor(borderEnemy, overall))
 
 	titleX := cx - titleW/2
-	titleY := bgY + padY
+	titleY := bgY + splashPadY
 	// Fade-driven shadow alpha + heavier 3px drop + title spacing via drawTextWithShadowStyle.
 	drawTextWithShadowStyle(assets.hudFont, text, titleX, titleY, titleSize*scale, spacing*scale,
 		colorWithAlpha(splashTitleColor, titleAlpha), colorWithAlpha(shadowBase, titleAlpha), 3, 3)

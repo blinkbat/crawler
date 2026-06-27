@@ -7,7 +7,6 @@ import (
 	"crawler/internal/app/input"
 	"crawler/internal/app/render"
 	"fmt"
-	rl "github.com/gen2brain/raylib-go/raylib"
 	"math"
 )
 
@@ -46,7 +45,7 @@ func init() {
 func Update(g *core.GameState) {
 	// Clamp dt: a frame stall must not fast-forward animations or overshoot tile
 	// targets. Single owner — battle.Update trusts the dt here is already clamped.
-	dt := core.ClampFrameTime(rl.GetFrameTime())
+	dt := core.ClampFrameTime(input.FrameTime())
 
 	// Weather tint eases every frame, before the early-returns below, so the wash
 	// keeps catching up while a panel/battle is up (pure visual catch-up).
@@ -856,16 +855,16 @@ func tryQueueDoorTransition(g *core.GameState) {
 // only re-opens on a fresh step onto a door, not while standing still).
 func updateDoorPrompt(g *core.GameState) {
 	if g.DoorPrompt < 0 || g.DoorPrompt >= len(g.Doors) {
-		g.DoorPrompt = -1
+		g.DoorPrompt = core.NoIndex
 		return
 	}
 	if input.BackPressed() {
-		g.DoorPrompt = -1
+		g.DoorPrompt = core.NoIndex
 		return
 	}
 	if input.ConfirmPressed() {
 		door := g.Doors[g.DoorPrompt]
-		g.DoorPrompt = -1
+		g.DoorPrompt = core.NoIndex
 		g.PendingTransition = core.AreaTransition{
 			TargetMap:  door.TargetMap,
 			TargetDoor: door.TargetDoor,

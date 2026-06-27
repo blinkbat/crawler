@@ -127,9 +127,9 @@ func drawPanelsBody(g *core.GameState, assets Resources) {
 	tabH := overlayTabHeight + 4
 	tabRowY := cardY + 14
 	tabPad := overlayTabPadding
-	tabW := (cardW - 24 - tabPad*int32(core.PanelTabCount-1)) / int32(core.PanelTabCount)
+	tabW := (cardW - 2*overlayTabGutter - tabPad*int32(core.PanelTabCount-1)) / int32(core.PanelTabCount)
 	for t := core.PanelTab(0); t < core.PanelTabCount; t++ {
-		tx := cardX + 12 + int32(t)*(tabW+tabPad)
+		tx := cardX + overlayTabGutter + int32(t)*(tabW+tabPad)
 		active := t == g.PanelsTab
 		bg := glassMid
 		txt := textMuted
@@ -748,8 +748,7 @@ func drawPickerCardEx(font rl.Font, cardW, cardH float32, title string, titleX, 
 		_, screenH := screenSize()
 		bx := centerX(cw)
 		by := screenH/2 - ch/2
-		backdrop := rl.NewRectangle(float32(bx), float32(by), float32(cw), float32(ch))
-		rl.DrawRectangleRounded(backdrop, fixedRoundnessFor(cw, ch, cornerRadius), 8, surfaceCardBackdrop)
+		drawCardFill(bx, by, cw, ch, surfaceCardBackdrop)
 	}
 	card := drawVeiledCard(int32(cardW), int32(cardH), borderActive, woodAccent, woodAccent)
 	drawEngravedText(font, title, card.X+titleX, card.Y+titleY, FontHeading, textPrimary)

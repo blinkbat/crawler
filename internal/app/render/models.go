@@ -507,13 +507,6 @@ const (
 	rockMeshMoss         // untextured moss cushion (tinted at part level)
 )
 
-// mossPaletteBright/Deep are the moss-cushion tints shared by every mossy rock
-// prop. Bright sits on sun-side caps, deep in crevice patches.
-var (
-	mossPaletteBright = rl.NewColor(122, 160, 100, 255)
-	mossPaletteDeep   = rl.NewColor(96, 138, 90, 255)
-)
-
 // RockMeshBaseHeight is the GenMeshCube Y dimension for rockMeshBase. Exported
 // so drawPebbleCluster computes its y-anchor without baking the literal twice.
 const RockMeshBaseHeight = float32(0.36)
@@ -521,16 +514,6 @@ const RockMeshBaseHeight = float32(0.36)
 // RockMeshBaseHalfHeight is the y-anchor scale for ground-scatter draws of
 // rockMeshBase, multiplied by per-instance height so the bottom face lands flush.
 const RockMeshBaseHalfHeight = RockMeshBaseHeight / 2
-
-// stonePalette* are the shared faceted-rock tints (boulder, cairn, formation):
-// close-grouped greys with warm/cool variation so multi-lump rocks read as one
-// stone broken at fault lines.
-var (
-	stonePaletteWarm  = rl.NewColor(214, 204, 188, 255)
-	stonePaletteCool  = rl.NewColor(196, 198, 202, 255)
-	stonePaletteDark  = rl.NewColor(176, 172, 164, 255)
-	stonePaletteLight = rl.NewColor(232, 224, 210, 255)
-)
 
 // loadRockProp builds a chunky polygonal boulder: faceted lumps fused at varied
 // angles in close-grouped stone greys. Low slice/ring counts (4–6) keep the
@@ -1924,8 +1907,9 @@ func loadCandleProp(shader rl.Shader) propModel {
 	shadeAll(models, shader)
 	wax := rl.NewColor(244, 220, 156, 255)
 	waxDark := rl.NewColor(196, 168, 108, 255)
-	fire := rl.NewColor(232, 144, 64, 255)
-	fireBright := rl.NewColor(252, 230, 148, 255)
+	// Shared torch/flame palette (world.go) so the candle flame matches the brazier.
+	fire := torchFlameTints[1]
+	fireBright := torchFlameTints[0]
 	return propModel{
 		models: models,
 		parts: []treePart{
