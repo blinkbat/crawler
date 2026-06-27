@@ -30,9 +30,6 @@ const (
 	wipeFlashPeakAlpha = float32(0.9)  // WipeFlash: peak white opacity at entry
 )
 
-// wipeTintColor is the warm overlay tone the WipeTint case washes the frame with.
-var wipeTintColor = rl.NewColor(255, 170, 80, 255)
-
 // battleWipeProgress returns (t in 0..1, active). The debug preview timer wins;
 // otherwise the early window of Battle.Splash drives it. t goes 0 (full FX) → 1
 // (settled). Inactive for WipeNone.

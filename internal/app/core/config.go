@@ -495,6 +495,12 @@ const (
 	LevelUpRowCount      = int(StatCount) + 1
 )
 
+// IsLevelUpStatRow reports whether a LevelUp row cursor sits on a stat row (vs the
+// Apply row at LevelUpApplyRowIndex) — keeps the row map owned in one place.
+func IsLevelUpStatRow(cursor int) bool {
+	return cursor < LevelUpApplyRowIndex
+}
+
 // PressWindow: press-bar window geometry, as fractions of the bar duration.
 // Start is randomized in [MinStart, MaxStart] (never before MinStart). Width is
 // fixed; MaxEnd clamps the tail (slides back to fit, see NewTimingState).

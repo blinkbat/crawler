@@ -319,13 +319,7 @@ func updateIsoCanvas(s *State, mp rl.Vector2) {
 // isoSetColumnLevel raises/lowers the column's ground level by delta, clamped to [0, maxEditLevel].
 func isoSetColumnLevel(s *State, x, z, delta int) {
 	cur := s.area.ElevationLevelAt(x, z)
-	next := cur + delta
-	if next < 0 {
-		next = 0
-	}
-	if next > maxEditLevel {
-		next = maxEditLevel
-	}
+	next := clampLevel(cur + delta)
 	if next == cur {
 		return
 	}

@@ -135,6 +135,15 @@ func drawModalListRow(x, y, w, h int32, focused bool, fn func()) {
 	fn()
 }
 
+// drawModalTextRow is the common case of drawModalListRow: optional cursor
+// highlight plus one left-aligned body label at the row origin. Shared by the
+// chest and dialog-choice modals so the highlight+label pairing lives in one place.
+func drawModalTextRow(font rl.Font, x, y, w, h int32, focused bool, label string, col rl.Color) {
+	drawModalListRow(x, y, w, h, focused, func() {
+		drawTextWithShadow(font, label, float32(x), float32(y), FontBody, col)
+	})
+}
+
 // DrawSelectedRow paints the standard cursor-on-row highlight per UI_STANDARDS.md
 // "Row > Selected": warm glass fill, 3px gilt left spine, thin gilt-dim underline.
 func DrawSelectedRow(r rl.Rectangle) {

@@ -1282,21 +1282,13 @@ func SumStatusMods(mods []StatusMod) (stats Stats, armor, mdef int) {
 func addStatsFloored(base, delta Stats) Stats {
 	// Hand-unrolled (see SumStats) — same hot-path rationale.
 	return Stats{
-		STR: floorInt(base.STR + delta.STR),
-		DEX: floorInt(base.DEX + delta.DEX),
-		INT: floorInt(base.INT + delta.INT),
-		WIS: floorInt(base.WIS + delta.WIS),
-		VIT: floorInt(base.VIT + delta.VIT),
-		SPD: floorInt(base.SPD + delta.SPD),
+		STR: MaxZero(base.STR + delta.STR),
+		DEX: MaxZero(base.DEX + delta.DEX),
+		INT: MaxZero(base.INT + delta.INT),
+		WIS: MaxZero(base.WIS + delta.WIS),
+		VIT: MaxZero(base.VIT + delta.VIT),
+		SPD: MaxZero(base.SPD + delta.SPD),
 	}
-}
-
-// floorInt clamps a stat fold result up to 0 (a debuff can't drive it negative).
-func floorInt(v int) int {
-	if v < 0 {
-		return 0
-	}
-	return v
 }
 
 // TickStatusMods decrements every mod's Turns and drops expired ones, returning
@@ -1352,10 +1344,7 @@ func AdjustStat(s *Stats, st Stat, delta int) {
 	if st < 0 || int(st) >= len(statTable) || s == nil {
 		return
 	}
-	v := statTable[st].Get(*s) + delta
-	if v < 0 {
-		v = 0
-	}
+	v := MaxZero(statTable[st].Get(*s) + delta)
 	statSetters[st](s, v)
 }
 

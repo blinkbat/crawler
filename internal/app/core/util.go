@@ -363,6 +363,25 @@ func SubFloorZero(cur *int, delta int) {
 	}
 }
 
+// ClampIndex keeps an index in [0, n-1], returning 0 for an empty list (n<=0) —
+// the shared "clamp a cursor into a possibly-empty slice" guard.
+func ClampIndex(i, n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return Clamp(i, 0, n-1)
+}
+
+// MaxZero returns v clamped up to 0 — the value-returning floor-at-zero used
+// wherever a debuff/decrement/load must not drive an int negative (the mirror of
+// the pointer-mutating SubFloorZero).
+func MaxZero(v int) int {
+	if v < 0 {
+		return 0
+	}
+	return v
+}
+
 func ClampByte(v int) uint8 {
 	if v < 0 {
 		return 0

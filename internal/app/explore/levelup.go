@@ -28,7 +28,7 @@ func updateLevelUpModal(g *core.GameState) {
 	m := &g.Party[g.LevelUpMember]
 	if input.ConfirmPressed() {
 		switch {
-		case isStatRow(g.LevelUpRowCursor):
+		case core.IsLevelUpStatRow(g.LevelUpRowCursor):
 			// Stage one more point if budget allows.
 			if core.SumStatPending(g.LevelUpPending) < m.PendingLevelUps {
 				g.LevelUpPending[g.LevelUpRowCursor]++
@@ -43,17 +43,12 @@ func updateLevelUpModal(g *core.GameState) {
 	// Back on a staged stat row decrements it; on an empty focused row it closes
 	// the modal (staged points on OTHER rows revert).
 	if input.BackPressed() {
-		if isStatRow(g.LevelUpRowCursor) && g.LevelUpPending[g.LevelUpRowCursor] > 0 {
+		if core.IsLevelUpStatRow(g.LevelUpRowCursor) && g.LevelUpPending[g.LevelUpRowCursor] > 0 {
 			g.LevelUpPending[g.LevelUpRowCursor]--
 		} else {
 			closeLevelUp(g)
 		}
 	}
-}
-
-// isStatRow reports whether the cursor sits on a stat row vs the Apply row.
-func isStatRow(cursor int) bool {
-	return cursor < int(core.StatCount)
 }
 
 // openLevelUpFor opens (or re-focuses) the modal on a member, clearing staged

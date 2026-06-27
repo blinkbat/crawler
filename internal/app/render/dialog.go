@@ -137,17 +137,12 @@ func DrawDialogModal(g *core.GameState, assets Resources) {
 				label = "Continue"
 			}
 		}
-		drawModalListRow(rowX, y, rowW, dialogChoiceRowH, true, func() {
-			drawTextWithShadow(font, label, float32(rowX), float32(y), FontBody, textPrimary)
-		})
+		drawModalTextRow(font, rowX, y, rowW, dialogChoiceRowH, true, label, textPrimary)
 	} else {
 		for i, v := range views {
 			focused := g.Dialog.ChoiceCursor == i
 			col := rowTextColor(focused, v.Disabled, textDim)
-			ry := y
-			drawModalListRow(rowX, ry, rowW, dialogChoiceRowH, focused && !v.Disabled, func() {
-				drawTextWithShadow(font, labels[i], float32(rowX), float32(ry), FontBody, col)
-			})
+			drawModalTextRow(font, rowX, y, rowW, dialogChoiceRowH, focused && !v.Disabled, labels[i], col)
 			y += dialogChoiceRowH
 		}
 	}

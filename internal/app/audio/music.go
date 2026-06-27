@@ -43,9 +43,11 @@ func (c *volumeChannel) set(v float32) { c.value = core.Clamp(v, 0, 1) }
 // Volume settings (0..1), loaded from disk at Init and persisted on change. music
 // scales the streamed track; sfx scales every bank Sound; muted is a master kill
 // that forces BOTH to silence. Same single-goroutine contract as the bank (no lock).
+// Values are seeded by loadVolumeSettings() in Init before any audio plays — no
+// struct-literal defaults (they'd be dead).
 var (
-	music = volumeChannel{value: userconfig.DefaultMusicVolume}
-	sfx   = volumeChannel{value: userconfig.DefaultSFXVolume}
+	music volumeChannel
+	sfx   volumeChannel
 	muted bool
 )
 

@@ -74,9 +74,14 @@ func (d *sliderDragState) update(held bool, fieldCount int, apply func(idx int))
 	}
 }
 
-// foeDrag holds the visualizer's in-flight drag. slider = Layout-tab field drag,
-// asset = Asset-tab param drag (one active at a time, gated by tab).
-var foeDrag = struct{ slider, asset sliderDragState }{slider: noSliderDrag, asset: noSliderDrag}
+// visualizerDrag holds a visualizer modal's in-flight drag: slider = Layout-tab
+// field drag, asset = Asset-tab param drag (one active at a time, gated by tab).
+// Named so the foe/party drag vars, the tab-switch param, and the callbacks field
+// can't drift apart.
+type visualizerDrag struct{ slider, asset sliderDragState }
+
+// foeDrag holds the Foe Visualizer's in-flight drag.
+var foeDrag = visualizerDrag{slider: noSliderDrag, asset: noSliderDrag}
 
 // Modal geometry. Wide card: preview pane left, slider stack right.
 const (
@@ -498,7 +503,7 @@ func updateFoeViewModal(s *State) Action {
 // selectFoeViewTab switches the active tab (shared by both modals), dropping any
 // drag. The FX preview is untouched — it shows on BOTH tabs (only the gizmos are
 // Layout-only, gated at draw time).
-func selectFoeViewTab(s *State, tab int, drag *struct{ slider, asset sliderDragState }) {
+func selectFoeViewTab(s *State, tab int, drag *visualizerDrag) {
 	if s.foeViewTab == tab {
 		return
 	}
@@ -527,7 +532,7 @@ func setVisualFieldFromTrack(ov *core.EnemyVisualOverride, i int, track rl.Recta
 // override pointer (s.foeVisual / s.partyVisual) and cursor (s.foeCursor /
 // s.partyCursor) are shared; the rest are per-modal actions.
 type visualizerCallbacks struct {
-	drag           *struct{ slider, asset sliderDragState }
+	drag           *visualizerDrag
 	override       *core.EnemyVisualOverride
 	cursor         *int
 	importPNG      func()             // import a dropped PNG as this entity's sprite

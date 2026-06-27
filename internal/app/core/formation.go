@@ -150,7 +150,7 @@ func UpdateEnemySlides(members []Enemy, slots []EnemySlot, dt float32) {
 // A trade keeps a clean 2-front/2-back grid. The ONLY rearrange path; no-op on
 // out-of-range or self.
 func SwapFormationSlots(party []PartyMember, i, j int) {
-	if i < 0 || j < 0 || i >= len(party) || j >= len(party) || i == j {
+	if !validDistinctSlotPair(party, i, j) {
 		return
 	}
 	party[i].HomeRow, party[j].HomeRow = party[j].HomeRow, party[i].HomeRow
@@ -198,11 +198,11 @@ func SwapPlacesMessage(a, b string) string {
 // formationSlotsValid reports whether the standing slots form a clean grid:
 // every (HomeRow, HomeCol) in bounds and unique.
 func formationSlotsValid(party []PartyMember) bool {
-	var seen [2][2]bool
+	var seen [RowCount][ColCount]bool
 	for i := range party {
 		r, c := party[i].HomeRow, party[i].HomeCol
 		// Row/Col are unsigned — only the upper bound + uniqueness can fail.
-		if r > RowBack || c > ColRight || seen[r][c] {
+		if r >= RowCount || c >= ColCount || seen[r][c] {
 			return false
 		}
 		seen[r][c] = true
@@ -417,11 +417,17 @@ func firstLivingInRow(party []PartyMember, row Row) int {
 // tactical Swap (reverts next fight); SwapFormationSlots edits the persistent Home
 // (preferred) formation instead.
 func SwapLiveSlots(party []PartyMember, i, j int) {
-	if i < 0 || j < 0 || i >= len(party) || j >= len(party) || i == j {
+	if !validDistinctSlotPair(party, i, j) {
 		return
 	}
 	party[i].Row, party[j].Row = party[j].Row, party[i].Row
 	party[i].Col, party[j].Col = party[j].Col, party[i].Col
+}
+
+// validDistinctSlotPair reports whether i and j are two distinct in-range party
+// slots — the shared precondition for both swap paths.
+func validDistinctSlotPair(party []PartyMember, i, j int) bool {
+	return i >= 0 && j >= 0 && i < len(party) && j < len(party) && i != j
 }
 
 // defaultPartyRows is each class's starting formation row. Init-asserted complete

@@ -861,7 +861,7 @@ func dialogNodeLayoutFor(cursor, choiceCount int) dialogNodeLayout {
 	// Choice list rows (scroll window over the full list).
 	top, rows := scrollRows(x, y, fw, dialogListRowH, cursor, choiceCount, dialogChoiceVisible)
 	// Choice action buttons + Back along the bottom.
-	by := r.Y + r.Height - modalBtnH - modalBottomInset
+	by := modalFooterButtonY(r)
 	btns := equalButtonRow(x, by, fw, modalBtnH, 4)
 	return dialogNodeLayout{
 		card:          r,
@@ -906,7 +906,7 @@ func drawDialogNodeEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawButton(font, l.actionBtn, "Action: "+dialogActionLabel(n.EndAction)+dropdownArrowSuffix, n.EndAction != nil)
 
 	drawLabel(font, fmt.Sprintf("Choices (%d) — Up/Down select, Enter edit", len(n.Choices)),
-		rl.NewRectangle(l.card.X+modalContentInset, l.actionBtn.Y+l.actionBtn.Height+10, l.card.Width, labelCaptionH))
+		listHeaderBelow(l.card, l.actionBtn))
 	drawScrollList(font, theme, l.choiceRows, l.choiceTop, len(n.Choices), s.modalCursor, dialogChoiceRowTruncLen,
 		l.card.X+entityListTextInset, l.addChoiceBtn.Y-18,
 		func(idx int) string { return n.Choices[idx].Label })
@@ -1089,7 +1089,7 @@ func dialogChoiceLayoutFor(cursor, condCount int) dialogChoiceLayout {
 	actionBtn := fields[2]
 	y += 3*rowGap + 8 // gap for the "Conditions (N)" header
 	top, rows := scrollRows(x, y, fw, dialogListRowH, cursor, condCount, dialogCondVisible)
-	by := r.Y + r.Height - modalBtnH - modalBottomInset
+	by := modalFooterButtonY(r)
 	btns := equalButtonRow(x, by, fw, modalBtnH, 4)
 	return dialogChoiceLayout{
 		card: r, labelField: labelField, nextField: nextField, actionBtn: actionBtn,
@@ -1115,7 +1115,7 @@ func drawDialogChoiceEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawLabel(font, "End action on pick (click to edit)", labelAbove(l.actionBtn))
 	drawButton(font, l.actionBtn, "Action: "+dialogActionLabel(c.EndAction)+dropdownArrowSuffix, c.EndAction != nil)
 
-	header := rl.NewRectangle(l.card.X+modalContentInset, l.actionBtn.Y+l.actionBtn.Height+8, l.card.Width, labelCaptionH)
+	header := listHeaderBelow(l.card, l.actionBtn)
 	drawLabel(font, fmt.Sprintf("Conditions (%d) — gate selectability; Up/Down select, Enter edit", len(c.Conditions)), header)
 	drawScrollList(font, theme, l.condRows, l.condTop, len(c.Conditions), s.modalCursor, dialogCondRowTruncLen,
 		l.card.X+entityListTextInset, l.addCondBtn.Y-16,
@@ -1855,6 +1855,7 @@ func toggleTriggerOnce(s *State) {
 const (
 	labelCaptionH   = float32(14) // field caption height
 	labelCaptionGap = float32(16) // caption top above its field
+	listHeaderGap   = float32(8)  // sub-list header caption below the action button
 
 	// Per-list row text budgets (runes) — distinct values because the lists differ
 	// in width, but named so they can't drift unintentionally.
@@ -1868,16 +1869,23 @@ func labelAbove(field rl.Rectangle) rl.Rectangle {
 	return rl.NewRectangle(field.X, field.Y-labelCaptionGap, field.Width, labelCaptionH)
 }
 
+// listHeaderBelow returns the caption rect for a sub-list header sitting
+// listHeaderGap below the action button, spanning the card width. Shared by the
+// node (choices) and choice (conditions) editors so the gap can't drift.
+func listHeaderBelow(card, actionBtn rl.Rectangle) rl.Rectangle {
+	return rl.NewRectangle(card.X+modalContentInset, actionBtn.Y+actionBtn.Height+listHeaderGap, card.Width, labelCaptionH)
+}
+
 // bottomRightBtn returns the bottom-right "Back (Esc)" button rect, shared by the
 // action / condition / trigger edit modals.
 func bottomRightBtn(card rl.Rectangle) rl.Rectangle {
-	by := card.Y + card.Height - modalBtnH - modalBottomInset
+	by := modalFooterButtonY(card)
 	return rl.NewRectangle(card.X+card.Width-modalWideBtnW-modalContentInset, by, modalWideBtnW, modalBtnH)
 }
 
 // bottomLeftBtn mirrors bottomRightBtn for a left-aligned action (e.g. Delete).
 func bottomLeftBtn(card rl.Rectangle) rl.Rectangle {
-	by := card.Y + card.Height - modalBtnH - modalBottomInset
+	by := modalFooterButtonY(card)
 	return rl.NewRectangle(card.X+modalContentInset, by, modalWideBtnW, modalBtnH)
 }
 

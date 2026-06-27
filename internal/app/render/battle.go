@@ -225,7 +225,7 @@ func drawEnemyRosterCell(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targ
 	}
 
 	condition, condCol := enemyHealthStyle(enemy)
-	pad := hudContentInsetX/2 + 2 // tighter inset for the compact cell
+	pad := rosterCellInsetX
 	nameX := float32(x + pad)
 	nameY := float32(y) + 6
 	drawEngravedText(font, core.EnemyName(enemy), nameX, nameY, FontBody, nameCol)
@@ -297,6 +297,9 @@ func drawEnemyStatusPill(font rl.Font, x, y, w, h float32, fill, outline rl.Colo
 // actionLogTextPad is the text inset for the action-log; the wrap width and per-line X
 // both read it so the inset can't drift between the two seams.
 const actionLogTextPad = int32(10)
+
+// actionLogLineH is the action-log row pitch (rule spacing + per-line Y step).
+const actionLogLineH = int32(22)
 
 // actionLogSpineInset is the spine stripe's top/bottom inset (stripe runs panelH - 2×inset).
 const actionLogSpineInset = int32(18)
@@ -396,7 +399,7 @@ func drawActionLogPanel(g *core.GameState, assets Resources) {
 	innerW := w - 2*innerInset - 6
 	innerH := h - 2*innerInset
 
-	lineH := int32(22)
+	lineH := actionLogLineH
 	lineSize := FontSmall
 
 	// Ruled-parchment hairlines at each line slot's bottom, on the same -6 footing as

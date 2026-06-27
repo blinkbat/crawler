@@ -271,7 +271,7 @@ func drawGlyphSpark(cx, cy, t, baseR float32) {
 	r := baseR * 1.25
 	// Step the clock into ~18 frames/sec so the bolts SNAP rather than slide —
 	// that staccato reads as lightning twitch.
-	step := math.Floor(rl.GetTime() * 18)
+	step := math.Floor(frameTime() * 18)
 	for i, ang := range []float64{-1.4, 0.35, 2.05} {
 		drawLightningTendril(cx, cy, ang, r, bolt, step*3+float64(i))
 	}

@@ -307,11 +307,7 @@ func BuySkillNode(m *PartyMember, id string) bool {
 			m.SkillTiers = make(map[SkillID]int, 4)
 		}
 		// rank r -> tier r-1, capped at MaxSkillTier (rank 1 = tier 0).
-		tier := newRank - 1
-		if tier > MaxSkillTier {
-			tier = MaxSkillTier
-		}
-		m.SkillTiers[n.GrantSkill] = tier
+		m.SkillTiers[n.GrantSkill] = min(newRank-1, MaxSkillTier)
 	}
 	return true
 }

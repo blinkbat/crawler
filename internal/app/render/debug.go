@@ -15,6 +15,13 @@ import (
 // debugLabelRange: tiles around the player to label. Past ~25 labels overlap badly even depth-sorted.
 const debugLabelRange = 4
 
+// debugLabelSlack{X,Y}: pixels past each screen edge a projected tile label may
+// drift before it's culled (the debug-overlay sibling of offscreenPopupSlack).
+const (
+	debugLabelSlackX = float32(120)
+	debugLabelSlackY = float32(80)
+)
+
 // debugLabelsBuf reuses the per-tile label slice across frames (renderer is single-threaded).
 var debugLabelsBuf = make([]labelStack, 0, (2*debugLabelRange+1)*(2*debugLabelRange+1))
 
@@ -74,7 +81,7 @@ func DrawDebugOverlay(camera rl.Camera3D, g *core.GameState, assets Resources) {
 			lines = append(lines, fmt.Sprintf("(%d,%d)", x, z))
 			// Float the label ~1.6 units above the floor so it sits above the tile's prop.
 			screen := rl.GetWorldToScreen(rl.NewVector3(cx, 1.6, cz), camera)
-			if screen.X < -120 || screen.X > screenW+120 || screen.Y < -80 || screen.Y > screenH+80 {
+			if screen.X < -debugLabelSlackX || screen.X > screenW+debugLabelSlackX || screen.Y < -debugLabelSlackY || screen.Y > screenH+debugLabelSlackY {
 				continue
 			}
 			labels = append(labels, labelStack{

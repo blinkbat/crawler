@@ -869,17 +869,13 @@ func parseHeaderLine(mf *MapFile, line string, lineNo int) error {
 // validateOptionalGrid dimension-checks an optional single-grid layer (prop_levels
 // / decor_levels): absent is fine, but a present grid must be exactly Height×Width.
 func (mf *MapFile) validateOptionalGrid(name string, rows []string) error {
-	n := len(rows)
-	if n == 0 {
+	if len(rows) == 0 {
 		return nil
 	}
-	if n != mf.Height {
-		return fmt.Errorf("%s has %d rows, size declares %d", name, n, mf.Height)
+	if err := mf.validateGridDims(name, rows); err != nil {
+		return err
 	}
 	for i, row := range rows {
-		if len(row) != mf.Width {
-			return fmt.Errorf("%s row %d has %d cols, size declares %d", name, i, len(row), mf.Width)
-		}
 		// Each cell is the '.' auto sentinel or a level char ('0'..'9' then 'A'..'K'
 		// for 10..20, same encoding as elevation). Anything else reads as level 0
 		// downstream, silently flattening the prop/decor instead of failing here.
@@ -890,6 +886,27 @@ func (mf *MapFile) validateOptionalGrid(name string, rows []string) error {
 		}
 	}
 	return nil
+}
+
+// validateGridDims checks that rows is exactly Height rows of Width cols, tagging
+// errors with name ("floor layer", "ceiling layer", "solids plane 2", "prop_levels"
+// …). The single dimension check shared by every required + optional grid below.
+func (mf *MapFile) validateGridDims(name string, rows []string) error {
+	if len(rows) != mf.Height {
+		return fmt.Errorf("%s has %d rows, size declares %d", name, len(rows), mf.Height)
+	}
+	for i, row := range rows {
+		if len(row) != mf.Width {
+			return fmt.Errorf("%s row %d has %d cols, size declares %d", name, i, len(row), mf.Width)
+		}
+	}
+	return nil
+}
+
+// oobErr is the shared out-of-bounds error for a placed entity (pack/chest/crystal/
+// door) at (x,z); what is the entity label (e.g. "pack" or `door "gate"`).
+func (mf *MapFile) oobErr(what string, x, z int) error {
+	return fmt.Errorf("%s at (%d,%d) outside map %dx%d", what, x, z, mf.Width, mf.Height)
 }
 
 // isLevelChar reports whether b is a level char: '0'..'9' then 'A'..'K' (10..20).
@@ -910,38 +927,25 @@ func (mf *MapFile) validate() error {
 		return fmt.Errorf("size must be >0x0; got %dx%d", mf.Width, mf.Height)
 	}
 	for _, layer := range mf.requiredLayers() {
-		if len(layer.rows) != mf.Height {
-			return fmt.Errorf("%s layer has %d rows, size declares %d", layer.name, len(layer.rows), mf.Height)
-		}
-		for i, row := range layer.rows {
-			if len(row) != mf.Width {
-				return fmt.Errorf("%s layer row %d has %d cols, size declares %d", layer.name, i, len(row), mf.Width)
-			}
+		if err := mf.validateGridDims(layer.name+" layer", layer.rows); err != nil {
+			return err
 		}
 	}
 	// Ceiling optional: missing → blank "no ceiling" layer so downstream can
 	// index it like the others; partial → malformed (an authoring mistake).
-	switch len(mf.Ceiling) {
-	case 0:
+	if len(mf.Ceiling) == 0 {
 		mf.Ceiling = BlankLayer(mf.Width, mf.Height, CeilingOpenChar)
-	case mf.Height:
-		for i, row := range mf.Ceiling {
-			if len(row) != mf.Width {
-				return fmt.Errorf("ceiling layer row %d has %d cols, size declares %d", i, len(row), mf.Width)
-			}
-		}
-	default:
-		return fmt.Errorf("ceiling layer has %d rows, size declares %d", len(mf.Ceiling), mf.Height)
+	} else if err := mf.validateGridDims("ceiling layer", mf.Ceiling); err != nil {
+		return err
 	}
 	// Elevation optional (same rule as ceiling): missing → blank all-'0' (flat).
-	switch len(mf.Elevation) {
-	case 0:
+	if len(mf.Elevation) == 0 {
 		mf.Elevation = BlankLayer(mf.Width, mf.Height, ElevationGroundChar)
-	case mf.Height:
+	} else {
+		if err := mf.validateGridDims("elevation layer", mf.Elevation); err != nil {
+			return err
+		}
 		for i, row := range mf.Elevation {
-			if len(row) != mf.Width {
-				return fmt.Errorf("elevation layer row %d has %d cols, size declares %d", i, len(row), mf.Width)
-			}
 			// Each cell must be a level char: '0'..'9' then 'A'..'K' for 10..20
 			// (upper bound 'K' = core's MaxElevationLevel 20; core's map.go init
 			// asserts ElevationChar(MaxElevationLevel)=='K' so this can't drift).
@@ -952,19 +956,12 @@ func (mf *MapFile) validate() error {
 				}
 			}
 		}
-	default:
-		return fmt.Errorf("elevation layer has %d rows, size declares %d", len(mf.Elevation), mf.Height)
 	}
 	// solids: optional voxel stack, each plane a full Height×Width grid. Only
 	// dimensions checked (cell-char alphabet is core's); guards against a ragged plane.
 	for L, plane := range mf.Solids {
-		if len(plane) != mf.Height {
-			return fmt.Errorf("solids plane %d has %d rows, size declares %d", L, len(plane), mf.Height)
-		}
-		for i, row := range plane {
-			if len(row) != mf.Width {
-				return fmt.Errorf("solids plane %d row %d has %d cols, size declares %d", L, i, len(row), mf.Width)
-			}
+		if err := mf.validateGridDims(fmt.Sprintf("solids plane %d", L), plane); err != nil {
+			return err
 		}
 	}
 	// prop_levels / decor_levels: optional per-tile level grids; dimension-check only.
@@ -992,7 +989,7 @@ func (mf *MapFile) validate() error {
 	// load rather than as a silently-skipped entry at runtime.
 	for _, p := range mf.Packs {
 		if !InBoundsWH(p.X, p.Z, mf.Width, mf.Height) {
-			return fmt.Errorf("pack at (%d,%d) outside map %dx%d", p.X, p.Z, mf.Width, mf.Height)
+			return mf.oobErr("pack", p.X, p.Z)
 		}
 		// Members encode comma/semicolon-joined (',' within a row, ';' splits the
 		// front/back rows) and re-split on those, so a member name containing either —
@@ -1007,7 +1004,7 @@ func (mf *MapFile) validate() error {
 	}
 	for _, c := range mf.Chests {
 		if !InBoundsWH(c.X, c.Z, mf.Width, mf.Height) {
-			return fmt.Errorf("chest at (%d,%d) outside map %dx%d", c.X, c.Z, mf.Width, mf.Height)
+			return mf.oobErr("chest", c.X, c.Z)
 		}
 		// Items encode comma-joined and re-split on ',', so an item name containing a
 		// comma would silently re-parse as two items. Reject at the data-model boundary
@@ -1021,7 +1018,7 @@ func (mf *MapFile) validate() error {
 	// Crystals: same bounds guard as packs/chests.
 	for _, c := range mf.Crystals {
 		if !InBoundsWH(c.X, c.Z, mf.Width, mf.Height) {
-			return fmt.Errorf("crystal at (%d,%d) outside map %dx%d", c.X, c.Z, mf.Width, mf.Height)
+			return mf.oobErr("crystal", c.X, c.Z)
 		}
 	}
 	// Doors: bounds, non-empty name + target, no duplicate names (runtime resolves
@@ -1029,7 +1026,7 @@ func (mf *MapFile) validate() error {
 	seenNames := make(map[string]struct{}, len(mf.Doors))
 	for _, d := range mf.Doors {
 		if !InBoundsWH(d.X, d.Z, mf.Width, mf.Height) {
-			return fmt.Errorf("door %q at (%d,%d) outside map %dx%d", d.Name, d.X, d.Z, mf.Width, mf.Height)
+			return mf.oobErr(fmt.Sprintf("door %q", d.Name), d.X, d.Z)
 		}
 		if d.Name == "" {
 			return fmt.Errorf("door at (%d,%d) has empty name", d.X, d.Z)

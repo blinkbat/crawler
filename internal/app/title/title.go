@@ -84,7 +84,7 @@ func Update(s *State) Action {
 }
 
 // mainMenuRowDef binds a row to its label producer and confirm action.
-// mainMenuRows order IS the draw order; index is the cursor position.
+// s.rows (built by mainRows) IS the draw + cursor order; it may prepend continueRow.
 type mainMenuRowDef struct {
 	Label  func() string
 	Action func(s *State) Action

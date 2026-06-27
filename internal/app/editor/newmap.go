@@ -72,7 +72,7 @@ func newMapModalLayout() newMapLayout {
 	}
 
 	// Footer buttons, anchored bottom-right via the shared modal-button spec.
-	btnY := card.Y + card.Height - modalBtnH - modalBottomInset
+	btnY := modalFooterButtonY(card)
 	btns := buttonRowAt(card.X+card.Width-modalContentInset-buttonRowWidth(newMapBtnLabels), btnY, newMapBtnLabels)
 	l.createBtn, l.cancelBtn = btns[0], btns[1]
 	return l

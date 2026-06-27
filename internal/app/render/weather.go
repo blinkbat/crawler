@@ -85,7 +85,7 @@ func init() {
 }
 
 // DrawWeather paints the ambient-rain overlay in screen space, above the 3D world but below the
-// HUD. No-op when clear. Stateless: rl.GetTime() drives the fall, traits come from hash01(index).
+// HUD. No-op when clear. Stateless: the cached frameTime() drives the fall, traits come from hash01(index).
 func DrawWeather(g *core.GameState) {
 	w := g.Weather
 	// Clamp at the consumption site so the uint8 alpha casts can't wrap if the [0,1] invariant drifts.
@@ -108,7 +108,7 @@ func DrawWeather(g *core.GameState) {
 			if n > len(rainStreakTraits) {
 				n = len(rainStreakTraits)
 			}
-			t := float32(rl.GetTime())
+			t := float32(frameTime())
 			streakCol := colorWithAlpha(rainStreakColor, uint8(intensity*vis.streakAlpha))
 			for i := 0; i < n; i++ {
 				tr := rainStreakTraits[i]

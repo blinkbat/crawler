@@ -298,7 +298,7 @@ func doorEditLayoutFor() doorEditLayout {
 	// Style row: one button per DoorStyle.
 	var style [core.DoorStyleCount]rl.Rectangle
 	copy(style[:], equalButtonRow(x, y, fw, fieldH, int(core.DoorStyleCount)))
-	y = r.Y + r.Height - modalBtnH - modalBottomInset
+	y = modalFooterButtonY(r)
 	deleteBtn := rl.NewRectangle(x, y, modalWideBtnW, modalBtnH)
 	closeBtn := rl.NewRectangle(r.X+r.Width-modalWideBtnW-modalContentInset, y, modalWideBtnW, modalBtnH)
 	return doorEditLayout{
@@ -3237,6 +3237,12 @@ const (
 	entityListModalW  = float32(580)
 	objectsRowH       = float32(24)
 	entityListVisible = 14
+	// Content-sized Objects modal: header band + footer reserve bracket the row
+	// stack, clamped to a minimum card height; rows start entityListHeaderH down.
+	entityListHeaderH    = float32(56) // card top → first row
+	entityListFooterPad  = float32(36) // last row → card bottom (button room)
+	entityListMinH       = float32(150)
+	entityListContentTop = float32(46) // first-row text Y past the card top
 )
 
 // entityListRows builds the Objects index fresh (player start, then packs/chests/
@@ -3304,12 +3310,12 @@ func entityListGeom(s *State) (card rl.Rectangle, listTop float32, rows []entity
 	if shown > entityListVisible {
 		shown = entityListVisible
 	}
-	ph := 56 + float32(shown)*objectsRowH + 36
-	if ph < 150 {
-		ph = 150
+	ph := entityListHeaderH + float32(shown)*objectsRowH + entityListFooterPad
+	if ph < entityListMinH {
+		ph = entityListMinH
 	}
 	card = centeredCardRect(entityListModalW, ph)
-	listTop = card.Y + 46
+	listTop = card.Y + entityListContentTop
 	top, end = scrollWindow(s.modalCursor, len(rows), entityListVisible)
 	return card, listTop, rows, top, end
 }

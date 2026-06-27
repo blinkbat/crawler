@@ -709,10 +709,7 @@ var elevGridKey struct {
 // separators so ragged splits can't collide. Allocation-free.
 func foldLayer(h uint64, layer []string) uint64 {
 	for _, row := range layer {
-		for i := 0; i < len(row); i++ {
-			h = (h ^ uint64(row[i])) * core.FNVPrime64
-		}
-		h = (h ^ 0xff) * core.FNVPrime64 // row separator
+		h = core.FoldLayerRow(h, row)
 	}
 	return (h ^ 0xfe) * core.FNVPrime64 // layer separator
 }
@@ -1292,7 +1289,7 @@ func collectTorches(m *core.AreaDefinition, crystals []core.Crystal, camera rl.C
 	if n > maxTorches {
 		n = maxTorches
 	}
-	t := float32(rl.GetTime())
+	t := worldFrameClock // set by drawWorld before this collect runs
 	breathe := crystalBreathe() // crystals breathe with the gem body
 	for i := 0; i < n; i++ {
 		c := torchCandidateBuf[i]
@@ -1903,7 +1900,7 @@ func drawScaledMarker(position rl.Vector3, baseStyle markerStyle, scale float32)
 // all faces are wound CCW-from-outside so backface culling stays on (else the back
 // faces z-fight the front).
 func drawSelectorPyramid(tip rl.Vector3, height, baseRadius float32, col rl.Color, phase float32) {
-	t := rl.GetTime()
+	t := float64(worldFrameClock) // cached world clock (set by drawWorld), not a fresh GetTime() per marker
 	yaw := t*0.9 + float64(phase) // gentler spin than before
 	bob := float32(math.Sin(t*math.Pi*1.2)) * 0.04
 

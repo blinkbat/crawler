@@ -136,7 +136,7 @@ func EffectiveMDef(m PartyMember) int {
 func EffectiveDefenses(m PartyMember) (armor, mdef int) {
 	equipDelta, equipArmor, equipMDef := foldEquipment(&m)
 	buffStats, buffArmor, buffMDef := SumStatusMods(m.Buffs)
-	armor = floorInt(m.Armor + equipArmor + buffArmor)
+	armor = MaxZero(m.Armor + equipArmor + buffArmor)
 	// WIS-derived MDef reads effective WIS (base + equip + buff), then the starving
 	// penalty (so a starving member's magic defense sags with the rest of their stats).
 	eff := addStatsFloored(addStatsFloored(m.Stats, equipDelta), buffStats)
@@ -145,7 +145,7 @@ func EffectiveDefenses(m PartyMember) (armor, mdef int) {
 	if m.IceArmorTurns > 0 {
 		mdef += IceArmorMDef
 	}
-	return armor, floorInt(mdef)
+	return armor, MaxZero(mdef)
 }
 
 // EffectiveStats returns base stats with equipped StatBonus folded in. Read

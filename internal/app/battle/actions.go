@@ -2185,6 +2185,18 @@ func mitigateDamage(raw int, tag core.SkillTag, armor, mdef int) int {
 	return d
 }
 
+// damageEnemyUntallied is damageEnemy with the per-turn tallies (Bloodthirst
+// lifesteal PhysDamageThisTurn + Killing Spree EnemyKillsThisTurn) snapshotted and
+// restored, so an OFF-TURN strike (ancestral shade, riposte/retribution counters)
+// never feeds the acting member's own-turn bonuses. Callers that should still
+// lifesteal feed the returned amount to bloodthirstHeal explicitly.
+func damageEnemyUntallied(g *core.GameState, slot, rawDamage, quality int, tag core.SkillTag) (int, bool) {
+	physTally, killTally := g.Battle.PhysDamageThisTurn, g.Battle.EnemyKillsThisTurn
+	dealt, defeated := damageEnemy(g, slot, rawDamage, quality, tag)
+	g.Battle.PhysDamageThisTurn, g.Battle.EnemyKillsThisTurn = physTally, killTally
+	return dealt, defeated
+}
+
 // damageEnemy applies rawDamage to the enemy at slot (mitigated per tag), drives
 // the popup color by quality, and returns (postArmorDamage, defeated) — callers log
 // the post-armor figure so it matches the HP delta. quality may be Miss for
@@ -2918,9 +2930,7 @@ func tickAncestralSpirit(g *core.GameState, actor core.ActorRef) {
 	}
 	raw := max(int(float64(core.MemberAttackDamage(*m, 0))*core.AncestralSpiritDamageMult), 1)
 	noun := core.EnemySingularNoun(core.BattleMemberAt(g, target))
-	physTally, killTally := g.Battle.PhysDamageThisTurn, g.Battle.EnemyKillsThisTurn
-	dealt, defeated := damageEnemy(g, target, raw, core.TimingQualityGood, core.SkillTagPhys)
-	g.Battle.PhysDamageThisTurn, g.Battle.EnemyKillsThisTurn = physTally, killTally
+	dealt, defeated := damageEnemyUntallied(g, target, raw, core.TimingQualityGood, core.SkillTagPhys)
 	core.EnqueueEnemyVFX(g, core.VFXSlash, target)
 	switch {
 	case defeated:
@@ -2982,13 +2992,7 @@ func offTurnReflect(g *core.GameState, enemySlot, raw int, tag core.SkillTag, vf
 		return 0, false
 	}
 	noun := core.EnemySingularNoun(enemy)
-	// Keep this off-turn strike out of BOTH per-turn tallies (Bloodthirst lifesteal
-	// and Killing Spree kills) — it lands outside the actor's own turn.
-	physTally := g.Battle.PhysDamageThisTurn
-	killTally := g.Battle.EnemyKillsThisTurn
-	dealt, defeated = damageEnemy(g, enemySlot, raw, core.TimingQualityGood, tag)
-	g.Battle.PhysDamageThisTurn = physTally
-	g.Battle.EnemyKillsThisTurn = killTally
+	dealt, defeated = damageEnemyUntallied(g, enemySlot, raw, core.TimingQualityGood, tag)
 	core.EnqueueEnemyVFX(g, vfx, enemySlot)
 	if defeated {
 		setBattleMessageCat(g, defeatedMsg(noun, dealt), core.LogDeath)

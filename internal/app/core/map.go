@@ -316,16 +316,9 @@ func (a *AreaDefinition) PropCharAt(x, z int) (byte, bool)  { return a.layerByte
 // prop, or deep water). Does NOT consider elevation steps (StepElevationOK).
 // Out-of-bounds reads as solid.
 func (a *AreaDefinition) WallAt(x, z int) bool {
-	if !a.InBounds(x, z) {
-		return true
-	}
-	if p, ok := a.layerByteAt(a.Props, x, z); ok && IsPropChar(p) && !PropIsNonBlocking(p) {
-		return true
-	}
-	if f, ok := a.layerByteAt(a.Floor, x, z); ok && IsBlockingFloor(f) {
-		return true
-	}
-	return false
+	// Same static-obstruction rule as BlockedAt (blocking prop or blocking floor,
+	// OOB solid); kept as a distinct name for the "is this a wall" call sites.
+	return a.BlockedAt(x, z)
 }
 
 // FaceSkinAt returns the cliff-face skin char for tile (x,z); blank/TileOpen/OOB
@@ -492,12 +485,10 @@ func ElevationChar(level int) byte {
 }
 
 // IsRampChar reports whether a floor char is one of the four ramp tiles.
+// Derived from RampAscentFacing so the ramp roster lives in one switch.
 func IsRampChar(c byte) bool {
-	switch c {
-	case FloorRampNorth, FloorRampEast, FloorRampSouth, FloorRampWest:
-		return true
-	}
-	return false
+	_, ok := RampAscentFacing(c)
+	return ok
 }
 
 // RampAscentFacing maps a ramp char to the cardinal facing it rises toward;
@@ -664,8 +655,8 @@ func (a *AreaDefinition) TileAt(x, z int) byte {
 	if p, ok := a.layerByteAt(a.Props, x, z); ok && IsPropChar(p) {
 		return p
 	}
-	if f, ok := a.layerByteAt(a.Floor, x, z); ok && f == FloorDeepWater {
-		return FloorDeepWater
+	if f, ok := a.layerByteAt(a.Floor, x, z); ok && IsBlockingFloor(f) {
+		return f
 	}
 	return TileOpen
 }
@@ -858,20 +849,23 @@ func ChestIndexAt(chests []Chest, x, z int) int {
 // AdjacentChestIndex returns the index of a chest one cardinal step from (x,z),
 // or -1. Includes looted chests (lid still blocks the tile); no diagonals.
 func AdjacentChestIndex(chests []Chest, x, z int) int {
-	for i, c := range chests {
-		if ManhattanDistance(c.TileX, c.TileZ, x, z) == 1 {
-			return i
-		}
-	}
-	return -1
+	return adjacentChestIndex(chests, x, z, false)
 }
 
 // AdjacentInteractableChestIndex is the openable-only variant (skips looted chests).
-// Filters inside the scan: post-filtering AdjacentChestIndex's first hit would miss an
-// openable chest whenever a looted chest sits earlier in the slice and is also adjacent.
 func AdjacentInteractableChestIndex(chests []Chest, x, z int) int {
+	return adjacentChestIndex(chests, x, z, true)
+}
+
+// adjacentChestIndex scans for a chest one cardinal step from (x,z). When
+// openableOnly, skips looted chests inside the scan: post-filtering the first hit
+// would miss an openable chest whenever a looted chest sits earlier in the slice.
+func adjacentChestIndex(chests []Chest, x, z int, openableOnly bool) int {
 	for i, c := range chests {
-		if !c.Looted && ManhattanDistance(c.TileX, c.TileZ, x, z) == 1 {
+		if openableOnly && c.Looted {
+			continue
+		}
+		if ManhattanDistance(c.TileX, c.TileZ, x, z) == 1 {
 			return i
 		}
 	}

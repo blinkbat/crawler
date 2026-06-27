@@ -339,15 +339,9 @@ func sanitizeLoadedParty(party []PartyMember) {
 		if m.Level < BaseLevel {
 			m.Level = BaseLevel
 		}
-		if m.XP < 0 {
-			m.XP = 0
-		}
-		if m.PendingLevelUps < 0 {
-			m.PendingLevelUps = 0
-		}
-		if m.SkillPoints < 0 {
-			m.SkillPoints = 0
-		}
+		m.XP = MaxZero(m.XP)
+		m.PendingLevelUps = MaxZero(m.PendingLevelUps)
+		m.SkillPoints = MaxZero(m.SkillPoints)
 		// Clear slots holding an unregistered kind: foldEquipment skips them, so
 		// they'd occupy the slot as a silently dead, re-usable-blocking entry.
 		for s := range m.Equipped {

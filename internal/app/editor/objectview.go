@@ -3,6 +3,7 @@ package editor
 import (
 	"fmt"
 
+	"crawler/internal/app/core"
 	"crawler/internal/app/render"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -142,13 +143,7 @@ func updateObjectViewModal(s *State) Action {
 
 // setObjectViewPage stores page clamped to [0, pageCount-1] — the single write site.
 func setObjectViewPage(s *State, page, pageCount int) {
-	if page < 0 {
-		page = 0
-	}
-	if page >= pageCount {
-		page = pageCount - 1
-	}
-	s.objectViewPage = page
+	s.objectViewPage = core.Clamp(page, 0, pageCount-1)
 }
 
 func drawObjectViewModal(s *State, font rl.Font, theme render.Theme) {

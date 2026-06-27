@@ -101,13 +101,20 @@ const (
 	FNVPrime64  = uint64(1099511628211)
 )
 
+// FoldLayerRow folds one row's bytes into FNV-1a digest h with a row separator
+// so ragged splits can't collide. Allocation-free; the one shared row-fold used
+// by every layer-hash fold (here and render's foldLayer).
+func FoldLayerRow(h uint64, row string) uint64 {
+	for i := 0; i < len(row); i++ {
+		h = (h ^ uint64(row[i])) * FNVPrime64
+	}
+	return (h ^ 0xff) * FNVPrime64 // row separator
+}
+
 func (a *AreaDefinition) elevationLayerHash() uint64 {
 	h := FNVOffset64
 	for _, row := range a.Elevation {
-		for i := 0; i < len(row); i++ {
-			h = (h ^ uint64(row[i])) * FNVPrime64
-		}
-		h = (h ^ 0xff) * FNVPrime64 // row separator
+		h = FoldLayerRow(h, row)
 	}
 	return h
 }

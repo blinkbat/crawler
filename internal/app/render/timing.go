@@ -814,18 +814,11 @@ func drawArrow(cx, cy, size float32, dir int, col rl.Color) {
 }
 
 // arrowAxisVec returns the tip-direction unit vector for a SeqDir (screen-Y-down).
+// SeqDir* share int values with the cardinal facings (asserted in core/timing.go
+// init), so the direction map is sourced once from core.FacingVector.
 func arrowAxisVec(dir int) (float32, float32) {
-	switch dir {
-	case core.SeqDirUp:
-		return 0, -1
-	case core.SeqDirRight:
-		return 1, 0
-	case core.SeqDirDown:
-		return 0, 1
-	case core.SeqDirLeft:
-		return -1, 0
-	}
-	return 0, -1
+	dx, dz := core.FacingVector(dir)
+	return float32(dx), float32(dz)
 }
 
 // drawBarSlice paints a stripe between two normalized fractions (clamped to [0,1], skips zero/negative).

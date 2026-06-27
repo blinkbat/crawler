@@ -34,10 +34,7 @@ func stackAtCursor[T any](stacks []T, cursor int) (T, bool) {
 // clampCursorToLen keeps a cursor in range after the list shrank (last row, or 0
 // for empty). Shared by the shop-sell and chest-take paths.
 func clampCursorToLen(cursor, n int) int {
-	if n <= 0 {
-		return 0
-	}
-	return core.Clamp(cursor, 0, n-1)
+	return core.ClampIndex(cursor, n)
 }
 
 // tryUseItem handles a use press on the Items tab: a restorative opens the

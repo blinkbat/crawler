@@ -68,7 +68,7 @@ func DrawCrystals(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		return
 	}
 	vc := newViewCull(camera)
-	t := float32(rl.GetTime())
+	t := worldFrameClock // cached world clock (set by drawWorld), shared by every in-world prop
 	for _, c := range g.Crystals {
 		base := tileWorldPos(c.TileX, c.TileZ, g.Area.StandGroundY(c.TileX, c.TileZ))
 		if vc.cull(base) {

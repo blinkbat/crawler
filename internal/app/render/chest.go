@@ -142,19 +142,14 @@ func DrawChestModal(g *core.GameState, assets Resources) {
 		focused := g.ChestMenuIndex == i
 		col := rowTextColor(focused, false, textMuted)
 		label := stackLabel(core.ItemInfo(st.Kind).Name, st.Count)
-		y := rowY
-		drawModalListRow(rowX, y, rowW, rowH, focused, func() {
-			drawTextWithShadow(font, label, float32(rowX), float32(y), FontBody, col)
-		})
+		drawModalTextRow(font, rowX, rowY, rowW, rowH, focused, label, col)
 		rowY += rowH
 	}
 	// "Take All" row, always present so the cursor never lands on an unselectable row. ChestTakeAllRow keeps render + explore in sync.
 	{
 		focused := g.ChestMenuIndex == core.ChestTakeAllRow(len(stacks))
 		col := rowTextColor(focused, false, textMuted)
-		drawModalListRow(rowX, rowY, rowW, rowH, focused, func() {
-			drawTextWithShadow(font, "Take All", float32(rowX), float32(rowY), FontBody, col)
-		})
+		drawModalTextRow(font, rowX, rowY, rowW, rowH, focused, "Take All", col)
 	}
 	drawModalFooterGlyphs(font, card, chestHints)
 }

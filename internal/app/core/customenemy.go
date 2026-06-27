@@ -264,18 +264,19 @@ func MapCustomEnemyFromDef(ce CustomEnemyDef) (mapfile.MapCustomEnemy, error) {
 // 3&4 guarded by TestCustomEnemyDefMapRoundTrip; 5&6 by TestCustomEnemyDefToRuntime.
 func (d CustomEnemyDef) Definition() EnemyDefinition {
 	base := EnemyInfo(d.BaseKind)
-	display := CustomEnemyDisplayName(d.Name)
-	if display == "" {
-		display = base.SingularName
-	}
-	noun := strings.ToLower(display)
 	def := base
-	def.Name = display
-	def.SingularName = display
-	def.PluralName = display + "s"
-	def.SingularNoun = noun
-	def.PluralNoun = noun + "s"
-	def.GroupName = display
+	// Only a custom display name overrides the naming; an empty name inherits the
+	// base's authored singular/plural/nouns verbatim so irregular plurals
+	// (e.g. "Amoeba" -> "Amoebae") survive instead of becoming a naive "+s".
+	if display := CustomEnemyDisplayName(d.Name); display != "" {
+		noun := strings.ToLower(display)
+		def.Name = display
+		def.SingularName = display
+		def.PluralName = display + "s"
+		def.SingularNoun = noun
+		def.PluralNoun = noun + "s"
+		def.GroupName = display
+	}
 	d.applyCombatTo(&def)
 	return def
 }
@@ -284,19 +285,12 @@ func (d CustomEnemyDef) Definition() EnemyDefinition {
 // DefinitionOverride carries the authored stats/loadout for EnemyInfoFor readers.
 func (d CustomEnemyDef) Instantiate() Enemy {
 	def := d.Definition()
-	// Scale spawn HP by the difficulty dial like NewEnemy, else custom foes get scaled damage but baseline HP.
-	maxHP := ScaleEnemyDifficulty(def.MaxHP)
-	return Enemy{
-		Kind:                  d.BaseKind,
-		HP:                    maxHP,
-		MaxHP:                 maxHP,
-		Armor:                 def.Armor,
-		Alive:                 true,
-		Item:                  def.Item,
-		CustomName:            d.Name,
-		DefinitionOverride:    def,
-		HasDefinitionOverride: true,
-	}
+	// Shares newEnemyFromDef with NewEnemy so spawn HP scaling + base fields can't drift.
+	e := newEnemyFromDef(d.BaseKind, def)
+	e.CustomName = d.Name
+	e.DefinitionOverride = def
+	e.HasDefinitionOverride = true
+	return e
 }
 
 // CustomEnemyByName looks up a def by exact or sanitized name (so pack refs survive whitespace normalization).

@@ -601,10 +601,10 @@ func EffectiveEnemyStats(e *Enemy) Stats {
 func EffectiveEnemyDefenses(e *Enemy) (armor, mdef int) {
 	baseMDef := enemyGoverningDef(e).MDef
 	if len(e.Debuffs) == 0 {
-		return floorInt(e.Armor), floorInt(baseMDef)
+		return MaxZero(e.Armor), MaxZero(baseMDef)
 	}
 	_, armorDelta, mdefDelta := SumStatusMods(e.Debuffs)
-	return floorInt(e.Armor + armorDelta), floorInt(baseMDef + mdefDelta)
+	return MaxZero(e.Armor + armorDelta), MaxZero(baseMDef + mdefDelta)
 }
 
 // StampEnemyDebuff adds or refreshes a skill's stat debuff on the enemy for
@@ -670,7 +670,15 @@ func EnemyBasicDamage(e *Enemy) int {
 }
 
 func NewEnemy(kind EnemyKind) Enemy {
-	def := EnemyInfo(kind)
+	return newEnemyFromDef(kind, EnemyInfo(kind))
+}
+
+// newEnemyFromDef builds the base spawn Enemy from a definition: difficulty-scaled
+// HP, alive, with the def's drop item + armor. The single spawn-construction site
+// shared by NewEnemy and CustomEnemyDef.Instantiate (which augments the override
+// fields). SkillCastCount stays nil — nil-map reads return 0, so the lookup is
+// safe before any cast; handleEnemyRaiseBones lazily allocates.
+func newEnemyFromDef(kind EnemyKind, def EnemyDefinition) Enemy {
 	maxHP := ScaleEnemyDifficulty(def.MaxHP)
 	return Enemy{
 		Kind:  kind,
@@ -679,8 +687,6 @@ func NewEnemy(kind EnemyKind) Enemy {
 		Alive: true,
 		Item:  def.Item,
 		Armor: def.Armor,
-		// SkillCastCount stays nil — nil-map reads return 0, so the lookup is
-		// safe before any cast; handleEnemyRaiseBones lazily allocates.
 	}
 }
 

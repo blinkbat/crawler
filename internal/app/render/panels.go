@@ -327,11 +327,16 @@ func drawCardIdentity(font rl.Font, m core.PartyMember, x, w, y0 float32, nameCo
 	return y
 }
 
+// cardSubLineStep is the vertical step from a card's header/lead line to the
+// sub-line beneath it — shared by the member-card metrics and the Items/Skills
+// detail cards so the sub-line rhythm stays in lockstep.
+const cardSubLineStep = float32(30)
+
 // Equipment-tab card-header steps: the name row is one FontHeading line tall; the MP step
 // is uiRowPitch (the card body below starts on the standard row grid).
 var memberCardHeaderMetrics = cardIdentityMetrics{
 	nameStep: FontHeading, // 36 — name's own line height, no extra gap
-	subStep:  30,
+	subStep:  cardSubLineStep,
 	hpStep:   36,
 	mpStep:   float32(uiRowPitch), // 42
 }
@@ -367,7 +372,7 @@ const (
 // Character-tab formation-card steps: tighter than the header so the stat grid clears the pill.
 var formationCardMetrics = cardIdentityMetrics{
 	nameStep: 34,
-	subStep:  30,
+	subStep:  cardSubLineStep,
 	hpStep:   34,
 	mpStep:   38,
 }
@@ -1072,7 +1077,7 @@ func drawPanelsItems(g *core.GameState, assets Resources, body rl.Rectangle) {
 		drawEngravedText(font, info.Name, dx, dy, FontHeading, textPrimary)
 		dy += 38
 		drawTextWithShadow(font, panelsItemEffectLabel(info), dx, dy, FontBody, inkAccent)
-		dy += 30
+		dy += cardSubLineStep
 		owned := "Owned: " + strconv.Itoa(stack.Count)
 		drawTextWithShadow(font, owned, dx, dy, FontBody, textMuted)
 		dy += 36
@@ -1227,7 +1232,7 @@ func drawPanelsSkills(g *core.GameState, assets Resources, body rl.Rectangle) {
 		spCol := accentIfPositive(m.SkillPoints, inkAccent)
 		drawTextWithShadow(font, "SKILL POINTS", innerX, contentY, FontSmall, textMuted)
 		drawTextRightAligned(font, spText, innerX+innerW, contentY, FontSmall, spCol)
-		contentY += 30
+		contentY += cardSubLineStep
 
 		// One summary panel per tree: name + invested/total + theme.
 		trees := core.SkillTreesFor(m.Class)
@@ -1333,7 +1338,7 @@ func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 		for localZ := -1; localZ <= cellsY; localZ++ {
 			for localX := -1; localX <= cellsX; localX++ {
 				col, onSlice, seenWall, rampDir := mapSliceCell(m, g, indoor, startX+localX, startZ+localZ)
-				i := (localZ+1)*gw + (localX + 1)
+				i := borderIdx(gw, localX, localZ)
 				slice[i], seen[i], ramp[i], colGrid[i] = onSlice, seenWall, rampDir, col
 			}
 		}
@@ -1354,7 +1359,7 @@ func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 			if ph < 1 {
 				ph = 1
 			}
-			rl.DrawRectangle(px, py, pw, ph, colGrid[(localZ+1)*gw+(localX+1)])
+			rl.DrawRectangle(px, py, pw, ph, colGrid[borderIdx(gw, localX, localZ)])
 		}
 	}
 

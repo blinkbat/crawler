@@ -13,7 +13,7 @@ import (
 // seed/save targets, and preview call differ.
 
 // partyDrag is the party modal's in-flight drag (twin of foeDrag).
-var partyDrag = struct{ slider, asset sliderDragState }{slider: noSliderDrag, asset: noSliderDrag}
+var partyDrag = visualizerDrag{slider: noSliderDrag, asset: noSliderDrag}
 
 // openPartyViewModal opens the visualizer (mirrors openFoeViewModal).
 func openPartyViewModal(s *State) {

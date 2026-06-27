@@ -5,8 +5,8 @@
   "playerTileZ": 24,
   "playerFacing": 0,
   "playerLevel": 10,
-  "stepCount": 2336,
-  "gold": 134,
+  "stepCount": 74,
+  "gold": 141,
   "party": [
     {
       "Class": 0,
@@ -21,9 +21,9 @@
       },
       "HP": 16,
       "MaxHP": 16,
-      "MP": 0,
+      "MP": 4,
       "MaxMP": 4,
-      "Hunger": 450,
+      "Hunger": 374,
       "Armor": 0,
       "Equipped": [
         0,
@@ -39,13 +39,19 @@
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 1,
+      "DamagePopup": 4,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "SwapSlide": 0,
       "SwapFromRow": 0,
       "SwapFromCol": 0,
       "Defending": false,
+      "Guarding": false,
+      "Guarded": false,
+      "GuardedBy": 0,
+      "LastStandUsed": false,
+      "VanishTurns": 0,
+      "SpiritTurns": 0,
       "PoisonTurns": 0,
       "SleepTurns": 0,
       "StunTurns": 0,
@@ -59,7 +65,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 3,
-      "XP": 81,
+      "XP": 96,
       "PendingLevelUps": 0,
       "SkillPoints": 1,
       "SkillTiers": {
@@ -85,9 +91,9 @@
       },
       "HP": 14,
       "MaxHP": 14,
-      "MP": 0,
+      "MP": 9,
       "MaxMP": 9,
-      "Hunger": 396,
+      "Hunger": 374,
       "Armor": 0,
       "Equipped": [
         11,
@@ -103,13 +109,19 @@
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 2,
+      "DamagePopup": 4,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "SwapSlide": 0,
       "SwapFromRow": 0,
       "SwapFromCol": 0,
       "Defending": false,
+      "Guarding": false,
+      "Guarded": false,
+      "GuardedBy": 0,
+      "LastStandUsed": false,
+      "VanishTurns": 0,
+      "SpiritTurns": 0,
       "PoisonTurns": 0,
       "SleepTurns": 0,
       "StunTurns": 0,
@@ -123,7 +135,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 3,
-      "XP": 81,
+      "XP": 96,
       "PendingLevelUps": 0,
       "SkillPoints": 1,
       "SkillTiers": {
@@ -133,7 +145,7 @@
         "searing-light": 1,
         "smite": 1
       },
-      "SkillCursor": 0
+      "SkillCursor": 1
     },
     {
       "Class": 2,
@@ -148,9 +160,9 @@
       },
       "HP": 14,
       "MaxHP": 14,
-      "MP": 2,
+      "MP": 5,
       "MaxMP": 5,
-      "Hunger": 396,
+      "Hunger": 374,
       "Armor": 0,
       "Equipped": [
         0,
@@ -171,8 +183,14 @@
       "DamagePopupTimer": 0,
       "SwapSlide": 0,
       "SwapFromRow": 0,
-      "SwapFromCol": 0,
+      "SwapFromCol": 1,
       "Defending": false,
+      "Guarding": false,
+      "Guarded": false,
+      "GuardedBy": 0,
+      "LastStandUsed": false,
+      "VanishTurns": 0,
+      "SpiritTurns": 0,
       "PoisonTurns": 0,
       "SleepTurns": 0,
       "StunTurns": 0,
@@ -186,7 +204,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 3,
-      "XP": 81,
+      "XP": 96,
       "PendingLevelUps": 0,
       "SkillPoints": 1,
       "SkillTiers": {
@@ -212,9 +230,9 @@
       },
       "HP": 14,
       "MaxHP": 14,
-      "MP": 3,
+      "MP": 10,
       "MaxMP": 10,
-      "Hunger": 396,
+      "Hunger": 370,
       "Armor": 0,
       "Equipped": [
         11,
@@ -230,13 +248,19 @@
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 0,
+      "DamagePopup": 3,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "SwapSlide": 0,
       "SwapFromRow": 0,
       "SwapFromCol": 0,
       "Defending": false,
+      "Guarding": false,
+      "Guarded": false,
+      "GuardedBy": 0,
+      "LastStandUsed": false,
+      "VanishTurns": 0,
+      "SpiritTurns": 0,
       "PoisonTurns": 0,
       "SleepTurns": 0,
       "StunTurns": 0,
@@ -250,7 +274,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 3,
-      "XP": 81,
+      "XP": 96,
       "PendingLevelUps": 0,
       "SkillPoints": 1,
       "SkillTiers": {
@@ -260,25 +284,17 @@
         "arc-bolt": 1,
         "chain-lightning": 1
       },
-      "SkillCursor": 0
+      "SkillCursor": 1
     }
   ],
   "inventory": [
-    {
-      "Kind": 14,
-      "Count": 3
-    },
     {
       "Kind": 15,
       "Count": 2
     },
     {
-      "Kind": 1,
-      "Count": 2
-    },
-    {
       "Kind": 11,
-      "Count": 1
+      "Count": 2
     }
   ],
   "quests": [
@@ -291,7 +307,7 @@
   ],
   "bestiary": {
     "0": {
-      "kills": 37
+      "kills": 40
     },
     "1": {
       "kills": 10

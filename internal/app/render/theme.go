@@ -110,6 +110,10 @@ var (
 	gizmoGlyphColor    = rl.NewColor(176, 226, 255, 220)
 	gizmoNumberColor   = rl.NewColor(255, 232, 120, 220)
 
+	// wipeTintColor is the warm overlay tone the battle WipeTint case washes the
+	// frame with (alpha modulated per-frame by wipeTintMaxAlpha).
+	wipeTintColor = rl.NewColor(255, 170, 80, 255)
+
 	// ----- Wood frames -----
 	woodDark   = rl.NewColor(48, 30, 18, 255)
 	woodMid    = rl.NewColor(96, 62, 36, 255)
@@ -471,6 +475,9 @@ const (
 	// (chest). Named here so the family lives in one place, not re-derived per file.
 	modalGutterWide  = int32(24)
 	modalGutterTight = int32(20)
+	// rosterCellInsetX is the tighter left inset for the compact enemy-roster cell:
+	// half the window gutter plus a 2px nudge so the cramped cell still has air.
+	rosterCellInsetX = hudContentInsetX/2 + 2
 
 	// --- Spacing system (see UI_STANDARDS.md "Spacing") -----------------
 	// Shared gaps so headings/rows/footers line up the same everywhere. Header→
