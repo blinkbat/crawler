@@ -167,11 +167,7 @@ func updatePanels(g *core.GameState, dt float32) {
 			g.JournalTab = sub
 			g.PanelsRowCursor = 0
 		}
-		rows := len(g.Quests)
-		if g.JournalTab == core.JournalBestiary {
-			rows = g.Bestiary.SeenCount()
-		}
-		g.PanelsRowCursor = input.CursorUpDown(g.PanelsRowCursor, rows)
+		g.PanelsRowCursor = input.CursorUpDown(g.PanelsRowCursor, g.JournalRowCount())
 	case core.PanelTabMap:
 		// Pan: left stick / d-pad / arrows / WASD (analog, both axes). Zoom: right
 		// stick / mouse wheel. Analog input accumulates into the integer tile-pan +

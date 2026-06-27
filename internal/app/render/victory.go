@@ -17,7 +17,7 @@ const (
 	victoryMemberRowH = float32(54)
 	victoryNameRowH   = float32(30) // name line → XP bar vertical step
 	victoryNameInsetX = float32(22) // name X past the class rail in the gutter
-	victoryBarH       = float32(22)
+	victoryBarH       = barHeightCard
 	victoryContentPad = float32(modalContentInsetX) // shared modal side gutter (22)
 	victoryHeaderH    = float32(70)                 // heading band → first member row
 	victoryRuleGap    = float32(22)                 // member rows → loot rule + breath
@@ -144,7 +144,7 @@ func drawSpoilsMemberRow(g *core.GameState, font rl.Font, ms core.MemberSpoils, 
 
 	if lvl > ms.BeforeLvl {
 		// Pulsing gilt "LEVEL UP! Lv before → now" with a leading fleuron, right-anchored.
-		flag := fadeColor(giltBright, 0.72+0.28*pulse(2.4))
+		flag := fadeColor(giltBright, 0.72+0.28*pulseAttention())
 		badge := "LEVEL UP!  Lv " + strconv.Itoa(ms.BeforeLvl) + " → " + strconv.Itoa(lvl)
 		bw := measureRichText(font, badge, FontBody, canonicalSpacing(FontBody)).X
 		drawTextRightAligned(font, badge, x+w, y, FontBody, flag)

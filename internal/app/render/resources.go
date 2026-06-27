@@ -309,7 +309,7 @@ func LoadResources() (r Resources) {
 	tableNonEmpty := func(t *[256]propModel) int {
 		c := 0
 		for i := 0; i < 256; i++ {
-			if len(t[i].parts) > 0 {
+			if t[i].registered() {
 				c++
 			}
 		}
@@ -446,7 +446,7 @@ func assertPropCoverage(models map[byte]propModel) {
 
 func assertDoorProps(models [core.DoorStyleCount]propModel) {
 	for i := range models {
-		if len(models[i].parts) == 0 {
+		if !models[i].registered() {
 			panic("render: door style " + core.DoorStyleName(core.DoorStyle(i)) + " has no doorProps entry")
 		}
 	}
@@ -769,24 +769,29 @@ func loadEnemyVisuals() (visuals map[core.EnemyKind]enemyVisual, owned []rl.Text
 			panic(rec)
 		}
 	}()
+	// genSprite generates a procedural sprite at (w,h) and uploads it at the same size —
+	// one place for the dimensions so the gen size and upload size can't drift apart.
+	genSprite := func(w, h int, gen func(w, h int) []color.RGBA) rl.Texture2D {
+		return loadEnemySprite(gen(w, h), w, h, &owned)
+	}
 	// Feral Rat: authored PNG, falling back to procedural makeRatPixels so a checkout without the asset still renders.
 	ratTexture, ratFromFile := loadEnemySpriteFile(core.EnemySlug(core.EnemyRat)+".png", &owned)
 	if !ratFromFile {
-		ratTexture = loadEnemySprite(makeRatPixels(72, 96), 72, 96, &owned)
+		ratTexture = genSprite(72, 96, makeRatPixels)
 	}
-	batTexture := loadEnemySprite(makeBatPixels(80, 88), 80, 88, &owned)
-	diseasedRatTexture := loadEnemySprite(makeDiseasedRatPixels(72, 96), 72, 96, &owned)
-	goblinTexture := loadEnemySprite(makeGoblinPixels(72, 112), 72, 112, &owned)
-	goblinMageTexture := loadEnemySprite(makeGoblinMagePixels(72, 112), 72, 112, &owned)
-	amoebaTexture := loadEnemySprite(makeAmoebaPixels(96, 80), 96, 80, &owned)
-	mantrapTexture := loadEnemySprite(makeVenusMantrapPixels(88, 128), 88, 128, &owned)
+	batTexture := genSprite(80, 88, makeBatPixels)
+	diseasedRatTexture := genSprite(72, 96, makeDiseasedRatPixels)
+	goblinTexture := genSprite(72, 112, makeGoblinPixels)
+	goblinMageTexture := genSprite(72, 112, makeGoblinMagePixels)
+	amoebaTexture := genSprite(96, 80, makeAmoebaPixels)
+	mantrapTexture := genSprite(88, 128, makeVenusMantrapPixels)
 	// Roster-expansion sprites, dimensions sized to each kind's silhouette role.
-	caveSpiderTexture := loadEnemySprite(makeCaveSpiderPixels(88, 72), 88, 72, &owned)
-	vampireBatTexture := loadEnemySprite(makeVampireBatPixels(96, 88), 96, 88, &owned)
-	wispTexture := loadEnemySprite(makeWispPixels(56, 72), 56, 72, &owned)
-	stoneGolemTexture := loadEnemySprite(makeStoneGolemPixels(96, 120), 96, 120, &owned)
-	necromancerTexture := loadEnemySprite(makeNecromancerPixels(72, 112), 72, 112, &owned)
-	skeletonTexture := loadEnemySprite(makeSkeletonPixels(72, 112), 72, 112, &owned)
+	caveSpiderTexture := genSprite(88, 72, makeCaveSpiderPixels)
+	vampireBatTexture := genSprite(96, 88, makeVampireBatPixels)
+	wispTexture := genSprite(56, 72, makeWispPixels)
+	stoneGolemTexture := genSprite(96, 120, makeStoneGolemPixels)
+	necromancerTexture := genSprite(72, 112, makeNecromancerPixels)
+	skeletonTexture := genSprite(72, 112, makeSkeletonPixels)
 	visuals = map[core.EnemyKind]enemyVisual{
 		core.EnemyRat: {
 			texture: ratTexture,

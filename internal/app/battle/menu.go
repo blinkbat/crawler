@@ -145,7 +145,7 @@ func updateSkillMenu(g *core.GameState) {
 	}
 	// MP gate via canAffordSkill so it matches chargeMP's deduct-time check; shares
 	// mpRefusalMessage so the pre-gate and chargeMP can't word the refusal differently.
-	if !g.DebugAllSkills && !canAffordSkill(&g.Party[g.Battle.CurrentParty], skill) {
+	if !g.DebugAllSkills && !canAffordSkill(member, skill) {
 		setBattleStatus(g, mpRefusalMessage(skill))
 		return
 	}
@@ -156,7 +156,7 @@ func updateSkillMenu(g *core.GameState) {
 		return
 	}
 	// Persist the choice so next turn's submenu opens on this skill.
-	g.Party[g.Battle.CurrentParty].SkillCursor = g.Battle.SkillMenuIndex
+	member.SkillCursor = g.Battle.SkillMenuIndex
 	g.Battle.PendingSkill = skill
 	switch core.SkillTargetMode(skill) {
 	case core.ActionPartyTarget:

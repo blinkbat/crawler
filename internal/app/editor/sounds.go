@@ -217,7 +217,7 @@ const (
 // contract (the layout places the track, drawSoundsSlider places the label/value against the
 // same x/w). Shares the sliderRowMetrics type with the Foe/Party visualizer (foeSliderMetrics).
 // Track X = x+labelW; track W = w-trackReserve(2); value X = x+w-valueW.
-var soundSliderMetrics = sliderRowMetrics{labelW: 96, valueW: 78, trackH: 14}
+var soundSliderMetrics = sliderRowMetrics{labelW: 96, valueW: 78, trackH: 14, thumbR: 7}
 
 // assignableCueList is the fixed built-in cue list for the assignments column,
 // cached package-level so the draw loop doesn't allocate per frame.
@@ -854,7 +854,7 @@ func drawSoundsSlider(font rl.Font, theme render.Theme, x, y, w float32, info sl
 	// Display callback overrides the numeric readout for label rows (e.g. Wave).
 	drawSliderField(font, theme, info, &p,
 		rl.NewVector2(x, y), rl.NewVector2(x+w-soundSliderMetrics.valueW, y),
-		soundFontBody, track, 7, focused)
+		soundFontBody, track, soundSliderMetrics.thumbR, focused)
 }
 
 func drawSoundsListCol(s *State, font rl.Font, theme render.Theme, l *soundLayout, names []string) {

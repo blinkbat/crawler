@@ -444,6 +444,10 @@ type propModel struct {
 	parts  []treePart // reuse the per-part record
 }
 
+// registered reports whether this slot holds a built model — the single home for
+// the "has parts" presence test used at every prop/decor table lookup + coverage assert.
+func (p propModel) registered() bool { return len(p.parts) > 0 }
+
 // draw renders the prop with uniform scale and yaw (see treeModel.draw for yaw
 // composition). Parts with non-zero sway get a time-based horizontal offset;
 // phase is hashed from world position so adjacent tiles drift independently.

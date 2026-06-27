@@ -766,7 +766,7 @@ func Parse(r io.Reader) (MapFile, error) {
 			if err != nil {
 				return mf, err
 			}
-			var sk [4]byte
+			var sk [faceSkinCount]byte
 			copy(sk[:], fields[2])
 			mf.Faces = append(mf.Faces, MapFace{X: fx, Z: fz, Skins: sk})
 			continue

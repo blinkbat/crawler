@@ -197,7 +197,7 @@ func drawTomeBinding(cardX, cardY, cardW, cardH int32) {
 	if cardW < 520 || cardH < 360 {
 		return
 	}
-	inset := int32(14)
+	inset := int32(uiCellInsetX)
 	leftPage := rl.NewRectangle(float32(cardX+inset), float32(cardY+inset), float32(cardW/2-inset-6), float32(cardH-inset*2))
 	rightPage := rl.NewRectangle(float32(cardX+cardW/2+6), float32(cardY+inset), float32(cardW/2-inset-6), float32(cardH-inset*2))
 	rl.DrawRectangleGradientEx(leftPage,
@@ -338,9 +338,11 @@ var memberCardHeaderMetrics = cardIdentityMetrics{
 
 // cardDetailRowMetrics is the shared header rhythm for a glass detail card: content
 // inset, title baseline, right-aligned value baseline, and sub-line baseline (all from
-// the card's top-left). Shared by the Skills-tab tree summary + skill-tree detail strip.
-var cardDetailRowMetrics = struct{ insetX, titleY, valueY, subY float32 }{
-	insetX: 12, titleY: 8, valueY: 10, subY: 34,
+// the card's top-left). footUp is the foot-line baseline measured UP from the card
+// bottom; belowGap is the breath between the strip and the footer hint below it (skill
+// -tree detail strip only). Shared by the Skills-tab tree summary + that detail strip.
+var cardDetailRowMetrics = struct{ insetX, titleY, valueY, subY, footUp, belowGap float32 }{
+	insetX: 12, titleY: 8, valueY: 10, subY: 34, footUp: 22, belowGap: 4,
 }
 
 // Member-card column split: the right (vitals) column starts at memberCardBarSplit of
@@ -828,7 +830,7 @@ func drawEquipPicker(g *core.GameState, assets Resources) {
 		slotIconForKind(def.Slot)(rect.X+18, rect.Y+rect.Height/2, 11, giltBright)
 		name := def.Name
 		if row.Count > 1 {
-			name += "  x" + strconv.Itoa(row.Count)
+			name = stackLabel(name, row.Count)
 		}
 		drawTextWithShadow(font, name, rect.X+38, rect.Y+4, FontSmall, textPrimary)
 		if bonus := equipBonusSummary(def); bonus != "" {
@@ -1105,6 +1107,11 @@ func goldLabelShort(n int) string { return fmt.Sprintf("%d G", n) }
 
 // goldGainLabel formats a reward gain ("Gold  +N") — the victory-spoils sibling of the two above.
 func goldGainLabel(n int) string { return fmt.Sprintf("Gold  +%d", n) }
+
+// stackLabel renders an item-stack label with the shared "  x<count>" convention
+// (chest, shop, equip picker). One home so the two-space-x format can't drift;
+// TestBuildShopRowsMatchesCatalogOrder pins the literal format against this.
+func stackLabel(name string, count int) string { return name + "  x" + strconv.Itoa(count) }
 
 // skillPointsLabel returns "<n> SP" from a LUT — the SP sibling of skillCostMPLabel, shared across the Skills tab + tree modal.
 func skillPointsLabel(n int) string {

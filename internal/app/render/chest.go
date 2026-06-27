@@ -2,7 +2,6 @@ package render
 
 import (
 	"crawler/internal/app/core"
-	"strconv"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -142,7 +141,7 @@ func DrawChestModal(g *core.GameState, assets Resources) {
 	for i, st := range stacks {
 		focused := g.ChestMenuIndex == i
 		col := rowTextColor(focused, false, textMuted)
-		label := core.ItemInfo(st.Kind).Name + "  x" + strconv.Itoa(st.Count)
+		label := stackLabel(core.ItemInfo(st.Kind).Name, st.Count)
 		y := rowY
 		drawModalListRow(rowX, y, rowW, rowH, focused, func() {
 			drawTextWithShadow(font, label, float32(rowX), float32(y), FontBody, col)

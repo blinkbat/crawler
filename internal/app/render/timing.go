@@ -51,6 +51,7 @@ const (
 	barHighlightAlpha     = uint8(245)    // fully-lit element (pending arrow, locked reel frame, cursor underline)
 	iconShadowAlpha       = uint8(180)    // arrow drop-shadow alpha
 	reelRimAlpha          = uint8(150)    // dark rim behind a reel symbol (definition over glass)
+	flashHaloAlpha        = uint8(180)    // frozen-cursor halo peak alpha during the flash hold
 	timingStrongFillAlpha = uint8(220)    // strong fill alpha (track flood, shockwave ring, charge/decay slices, tick flash)
 )
 
@@ -351,7 +352,7 @@ func applyTimingFlashCursor(curX, y, barH, flashTimer float32, base rl.Color) (f
 	flashCol := base
 	flashCol.A = 255
 	halo := flashCol
-	halo.A = uint8(180 * flashAlpha(flashTimer))
+	halo.A = uint8(float32(flashHaloAlpha) * flashAlpha(flashTimer))
 	rl.DrawRectangle(int32(curX-cursorW*2), int32(y)-8, int32(cursorW*4), int32(barH)+16, halo)
 	return cursorW, flashCol
 }
@@ -365,6 +366,10 @@ const (
 	timingCursorWidthFlash = float32(12)
 	// timingCursorBleed is the cursor's top/bottom overhang so it reads as a slider, not a fill.
 	timingCursorBleed = int32(6)
+	// timingTickBleed / timingTickFlashBleed: charge-segment separators straddle the bar
+	// by this overhang — the plain tick (drawChargeTick) and the wider fresh-flash tick.
+	timingTickBleed      = int32(3)
+	timingTickFlashBleed = int32(5)
 )
 
 // drawTimingCursor paints the vertical cursor block at curX (press + charge bars).
@@ -579,7 +584,7 @@ func drawChargeTickWithFlash(timing core.TimingState, barX, barY, barW, barH flo
 	col := qualityColor(core.TimingQualityExcellent, false)
 	col.A = uint8(float32(timingStrongFillAlpha) * fresh)
 	width := 2 + fresh*4
-	rl.DrawRectangle(int32(tx-width/2), int32(barY)-5, int32(width), int32(barH)+10, col)
+	rl.DrawRectangle(int32(tx-width/2), int32(barY)-timingTickFlashBleed, int32(width), int32(barH)+timingTickFlashBleed*2, col)
 }
 
 // drawSequenceBar paints the pickpocket prompt: N arrows tapped in order before the timer drains.
@@ -859,7 +864,7 @@ func chargeFillEnd(timing core.TimingState) float32 {
 func drawChargeTick(timing core.TimingState, barX, barY, barW, barH float32, pct float32) {
 	tx := barX + pct*barW
 	tickCol := timingTickColor
-	rl.DrawRectangle(int32(tx-1), int32(barY)-3, 2, int32(barH)+6, tickCol)
+	rl.DrawRectangle(int32(tx-1), int32(barY)-timingTickBleed, 2, int32(barH)+timingTickBleed*2, tickCol)
 }
 
 // drawWindowZone paints a stripe centered on sweet, scaled to `ratio` of the window width.
@@ -932,7 +937,7 @@ func drawTallyBar(t core.TimingState, barX, barY, barW, barH float32, isDefend b
 			col = consumedCol
 		case cursorElapsed >= w.Start && cursorElapsed <= w.End:
 			// Live-preview throb while the cursor is in-zone.
-			throb := 0.75 + 0.25*pulse(2.4)
+			throb := 0.75 + 0.25*pulseAttention()
 			col = fadeColor(blendTowardWhite(hitCol, 0.45), throb)
 		default:
 			col = hitCol
@@ -1131,6 +1136,7 @@ const popupWorldRise = float32(0.6)
 // Popup punch-in curve breakpoints (peak scale + phase durations); popupPeakEnd = grow + shrink.
 const (
 	popupPeakScale   = 2.15
+	popupStartScale  = 0.6 // scale at spawn; grows to peak then settles to 1.0
 	popupGrowPhase   = 0.12
 	popupShrinkPhase = 0.10
 	popupPeakEnd     = 0.22
@@ -1144,12 +1150,12 @@ func popupAnimation(t float32) (scale, rise float32, alpha uint8) {
 	scale = 1
 	switch {
 	case age < popupGrowPhase:
-		scale = 0.6 + 1.55*(age/popupGrowPhase)
+		scale = popupStartScale + (popupPeakScale-popupStartScale)*(age/popupGrowPhase)
 		if scale > popupPeakScale {
 			scale = popupPeakScale
 		}
 	case age < popupPeakEnd:
-		scale = popupPeakScale - 1.15*((age-popupGrowPhase)/popupShrinkPhase)
+		scale = popupPeakScale - (popupPeakScale-1)*((age-popupGrowPhase)/popupShrinkPhase)
 	}
 	rise = (1 - t) * 36
 	alpha = uint8(255 * core.Smoothstep(t))

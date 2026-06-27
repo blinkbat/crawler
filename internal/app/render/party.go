@@ -160,7 +160,7 @@ const (
 	partyCardGap  = float32(14)
 	partyRowGap   = float32(10) // vertical gap between the two card rows
 	partyCardCols = 2
-	partyCardBarH = float32(22) // shorter gauge so HP+MP stack in the right column
+	partyCardBarH = barHeightCard // shorter gauge so HP+MP stack in the right column
 	// cardGlowMargin: per-side inset shared by active halo + selected outline.
 	cardGlowMargin = int32(3)
 	// activeCardJut nudges the active card OUTWARD by column so "whose turn" reads
@@ -168,14 +168,15 @@ const (
 	activeCardJut = float32(28)
 	// ribbonBottom is the ribbon's bottom margin (hudEdgePad, matching other panels).
 	ribbonBottom = float32(hudEdgePad)
+	// activeCardGlassTint is the glass-blend factor for the active member's card fill
+	// (cf. levelUpRowGlassAlpha for the level-up row's equivalent).
+	activeCardGlassTint = 0.8
 )
 
 // drawCardScrim paints the dim wash over a card's rounded rect (matching
 // drawCard's radius) to recede non-active cards during a member's turn.
 func drawCardScrim(x, y, w, h int32) {
-	rect := rl.NewRectangle(float32(x), float32(y), float32(w), float32(h))
-	roundness := fixedRoundnessFor(w, h, cornerRadius)
-	rl.DrawRectangleRounded(rect, roundness, 8, surfaceDimScrim)
+	drawCardFill(x, y, w, h, surfaceDimScrim)
 }
 
 // drawPartyCard renders one party member card. `dim` requests the inactive-member
@@ -198,7 +199,7 @@ func drawPartyCard(font rl.Font, member *core.PartyMember, x, y float32, active,
 		border = borderTarget
 		accent = borderTarget
 	case active:
-		bg = selectedGlassTint(surfacePrimary, 0.8)
+		bg = selectedGlassTint(surfacePrimary, activeCardGlassTint)
 		border = borderActive
 	}
 

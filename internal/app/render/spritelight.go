@@ -60,7 +60,7 @@ var tanHalfFovYCache struct {
 func tanHalfFovY(fovy float32) float32 {
 	if tanHalfFovYCache.fovy != fovy {
 		tanHalfFovYCache.fovy = fovy
-		tanHalfFovYCache.tan = float32(math.Tan(float64(fovy) * math.Pi / 360)) // Fovy/2 in radians
+		tanHalfFovYCache.tan = float32(math.Tan(float64(fovy) * 0.5 * degToRad64)) // Fovy/2 in radians
 	}
 	return tanHalfFovYCache.tan
 }

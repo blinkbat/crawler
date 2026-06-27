@@ -53,7 +53,7 @@ func crystalSpinAngle(t float32, c core.Crystal) float32 {
 	angle := t * crystalSpinDegPerSec
 	if c.SpinBurst > 0 {
 		p := 1 - c.SpinBurst/core.CrystalSpinBurstDuration // 0→1 over the burst
-		ease := 1 - (1-p)*(1-p)*(1-p)                      // ease-out cubic — fast then settle
+		ease := core.EaseOutCubic(p)                       // fast then settle
 		angle += 360 * core.CrystalSpinBurstTurns * ease
 	}
 	return angle

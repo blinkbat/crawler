@@ -120,7 +120,7 @@ func buildShopRows(g *core.GameState, buf []shopRow) []shopRow {
 		for _, s := range stacks {
 			def := core.ItemInfo(s.Kind)
 			buf = append(buf, shopRow{
-				name:       fmt.Sprintf("%s  x%d", def.Name, s.Count),
+				name:       stackLabel(def.Name, s.Count),
 				price:      fmt.Sprintf("%dg", core.ShopSellPrice(def.Price)),
 				affordable: true,
 			})

@@ -280,10 +280,9 @@ type doorEditLayout struct {
 
 func doorEditLayoutFor() doorEditLayout {
 	r := centeredCardRect(doorEditModalW, doorEditModalH)
-	x := r.X + modalContentInset
 	// Field-stack metrics shared with the dialog editors so field height / header
 	// inset / row pitch can't drift.
-	fw := r.Width - 2*modalContentInset
+	x, fw := cardContentBox(r)
 	y := r.Y + dialogHeaderInset
 	fieldH := dialogFieldH
 	rowGap := dialogRowGap
@@ -522,7 +521,7 @@ func drawTooltipCard(font rl.Font, lines []string, fontSize, lineH float32, mp r
 func drawButtonTooltip(font rl.Font, theme render.Theme, text string, mp rl.Vector2) {
 	_ = theme // styled with the shared tooltip* tokens
 	sw, sh := render.ScreenSizeF()
-	drawTooltipCard(font, []string{text}, editorFontHint, editorFontHint, mp, rl.NewRectangle(0, 0, sw, sh))
+	drawTooltipCard(font, []string{text}, editorFontHint, tooltipLineH, mp, rl.NewRectangle(0, 0, sw, sh))
 }
 
 // topbarButtonAt returns the index of the menu-bar label under p, or -1.
@@ -1050,6 +1049,10 @@ const overlayGutterPad = scrollbarThickness + 5 // = 16
 // recent-brush row, so the two visibility checks can't drift apart.
 const overlayMinGridDim = float32(260)
 
+// overlayMinGridHeight gates grid-corner overlays that need vertical room (the
+// recent-brush swatch row), companion to overlayMinGridDim's width gate.
+const overlayMinGridHeight = float32(200)
+
 // minimapRect computes the overview minimap's on-screen rect (bottom-right of
 // the grid) and whether it shows (hidden when no map / grid too small). Shared
 // by draw and click-to-jump.
@@ -1138,7 +1141,7 @@ func drawMinimap(s *State) {
 
 // brushRecentsVisible reports whether the recent-brush swatch row should show.
 func brushRecentsVisible(s *State) bool {
-	return len(s.recentBrushes) > 0 && s.rect.grid.Width >= overlayMinGridDim && s.rect.grid.Height >= 200
+	return len(s.recentBrushes) > 0 && s.rect.grid.Width >= overlayMinGridDim && s.rect.grid.Height >= overlayMinGridHeight
 }
 
 // brushRecentRect is the i-th recent-brush swatch rect (grid bottom-left).
@@ -2424,7 +2427,7 @@ func drawHoverTooltip(s *State, font rl.Font) {
 		tooltipKeyX, tooltipKeyZ = x, z
 		tooltipReady = true
 	}
-	drawTooltipCard(font, tooltipLines, editorFontTiny, 14, frameMouse, s.rect.grid)
+	drawTooltipCard(font, tooltipLines, editorFontTiny, tooltipLineH, frameMouse, s.rect.grid)
 }
 
 // tooltipLinesFor builds the hover tooltip body for tile (x, z), nil if empty.

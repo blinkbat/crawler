@@ -100,7 +100,7 @@ func drawObjectPreviewModel(assets Resources, item ObjectPreviewItem, center rl.
 			handler(assets, &core.AreaDefinition{}, 0, 0, center, 0)
 			return
 		}
-		if pm := &assets.propModelTable[char]; len(pm.parts) > 0 {
+		if pm := &assets.propModelTable[char]; pm.registered() {
 			if r := propShadowRadiusTable[char]; r > 0 {
 				drawGroundShadow(center.X, center.Z, r)
 			}
@@ -112,7 +112,7 @@ func drawObjectPreviewModel(assets Resources, item ObjectPreviewItem, center rl.
 		handler(assets, 0, 0, center.X, center.Z, center.Y)
 		return
 	}
-	if dm := &assets.decorModelTable[char]; len(dm.parts) > 0 {
+	if dm := &assets.decorModelTable[char]; dm.registered() {
 		dm.draw(center, 1, 0)
 	}
 }
@@ -125,8 +125,8 @@ func objectPreviewCamera(bb rl.BoundingBox, zoom float32) rl.Camera3D {
 	if radius < 0.35 {
 		radius = 0.35
 	}
-	dist := radius / float32(math.Sin(float64(fovy)*math.Pi/360)) // sin(fov/2)
-	dist *= 1.25                                                  // breathing room around the silhouette
+	dist := radius / float32(math.Sin(float64(fovy)*0.5*degToRad64)) // sin(fov/2)
+	dist *= 1.25                                                     // breathing room around the silhouette
 	if zoom > 0 {
 		dist /= zoom
 	}
@@ -160,7 +160,7 @@ func objectPreviewBounds(assets Resources, item ObjectPreviewItem) rl.BoundingBo
 		case core.TileTorch:
 			return rl.NewBoundingBox(rl.NewVector3(-0.35, 0, -0.6), rl.NewVector3(0.35, 1.55, 0.25))
 		}
-		if pm := &assets.propModelTable[char]; len(pm.parts) > 0 {
+		if pm := &assets.propModelTable[char]; pm.registered() {
 			return partsBoundsOr(pm.models, pm.parts, 1, unit)
 		}
 		return unit
@@ -173,7 +173,7 @@ func objectPreviewBounds(assets Resources, item ObjectPreviewItem) rl.BoundingBo
 	case core.DecorPebble:
 		return rl.NewBoundingBox(rl.NewVector3(-0.5, 0, -0.5), rl.NewVector3(0.5, 0.3, 0.5))
 	}
-	if dm := &assets.decorModelTable[char]; len(dm.parts) > 0 {
+	if dm := &assets.decorModelTable[char]; dm.registered() {
 		return partsBoundsOr(dm.models, dm.parts, 1, unit)
 	}
 	return unit

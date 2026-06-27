@@ -285,6 +285,13 @@ var (
 	chestPeekHave  bool
 )
 
+// camShakeHzX/Y are the two incommensurate wall-clock freqs of the combat screen
+// shake (sibling of torchFlickerHzA/B) — named so the jitter isn't bare magic.
+const (
+	camShakeHzX = 47.0
+	camShakeHzY = 61.0
+)
+
 func Camera(g *core.GameState) rl.Camera3D {
 	// Sync the live combat tuning before any battle geometry (incl. this camera)
 	// reads it. Guard against a zero-value GameState (struct-literal in a test) so a
@@ -367,8 +374,8 @@ func Camera(g *core.GameState) rl.Camera3D {
 	if g.Battle.Active() && g.Battle.ShakeTimer > 0 && g.Battle.ShakeDur > 0 {
 		amp := g.Battle.ShakePeak * core.Clamp(g.Battle.ShakeTimer/g.Battle.ShakeDur, 0, 1)
 		t := rl.GetTime()
-		position.X += float32(math.Sin(t*47.0)) * amp
-		position.Y += float32(math.Sin(t*61.0)) * amp
+		position.X += float32(math.Sin(t*camShakeHzX)) * amp
+		position.Y += float32(math.Sin(t*camShakeHzY)) * amp
 	}
 	// FOV eases between the wide walking FOV and the combat FOV on the same blend.
 	fov := exploreFOV + (battleTune.CamFOV-exploreFOV)*battleCamBlend
@@ -582,7 +589,7 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 					handler(assets, m, x, z, propCenter, propYaw)
 					drawn = true
 				} else if footprint := core.PropFootprint(prop); footprint != nil {
-					if pm := &assets.propModelTable[prop]; len(pm.parts) > 0 {
+					if pm := &assets.propModelTable[prop]; pm.registered() {
 						anchor := footprintAnchor(propCenter, footprint)
 						if r := propShadowRadiusTable[prop]; r > 0 {
 							drawGroundShadowElev(anchor.X, anchor.Z, anchor.Y, r)
@@ -590,7 +597,7 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 						pm.draw(anchor, propWorldScale, propYaw)
 						drawn = true
 					}
-				} else if pm := &assets.propModelTable[prop]; len(pm.parts) > 0 {
+				} else if pm := &assets.propModelTable[prop]; pm.registered() {
 					if r := propShadowRadiusTable[prop]; r > 0 {
 						drawGroundShadowElev(propCenter.X, propCenter.Z, propCenter.Y, r)
 					}
@@ -675,7 +682,7 @@ type tileElev struct {
 	// faceSkins is the resolved skin char per cardinal direction (N=0/E=1/S=2/W=3):
 	// the per-direction override (FaceSkinForDir) or base skin. Cached so the
 	// FaceOverrides scan runs once per area, not per exposed edge per frame.
-	faceSkins [4]byte
+	faceSkins [core.FacingCount]byte
 	// decorLevel/propLevel are the surfaces decor/props anchor to. Cached because
 	// on a VOXEL map an auto-level tile resolves through an O(stackHeight) column
 	// rescan that would otherwise run per visible tile per frame.
@@ -746,8 +753,8 @@ func elevGrid(m *core.AreaDefinition, w, h int) []tileElev {
 			}
 			// Resolve each face's skin once (override-or-base) so the cliff pass
 			// never re-scans FaceOverrides. Index = direction (N=0/E=1/S=2/W=3).
-			var faces [4]byte
-			for d := 0; d < 4; d++ {
+			var faces [core.FacingCount]byte
+			for d := 0; d < core.FacingCount; d++ {
 				faces[d] = m.FaceSkinForDir(x, z, d)
 			}
 			elevGridBuf[z*w+x] = tileElev{
@@ -886,12 +893,12 @@ func drawDecor(assets Resources, cell byte, x, z int, cx, cz float32, center rl.
 		return
 	}
 	if footprint := core.DecorFootprint(cell); footprint != nil {
-		if dm := &assets.decorModelTable[cell]; len(dm.parts) > 0 {
+		if dm := &assets.decorModelTable[cell]; dm.registered() {
 			dm.draw(footprintAnchor(center, footprint), 1.0, 0)
 		}
 		return
 	}
-	if dm := &assets.decorModelTable[cell]; len(dm.parts) > 0 {
+	if dm := &assets.decorModelTable[cell]; dm.registered() {
 		dm.draw(center, 1.0, propYawDeg(x, z))
 	}
 }

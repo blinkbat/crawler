@@ -20,6 +20,10 @@ const (
 	editorFontTick   = float32(12) // grid axis tick labels
 )
 
+// tooltipLineH is the line pitch for drawTooltipCard rows, shared by every tooltip
+// caller so the row stride isn't conflated with (or smuggled in as) the font size.
+const tooltipLineH = float32(14)
+
 // bodyLineH is the body-font line height used to vertically center editorFontBody
 // text in a row (r.Y + (r.Height-bodyLineH)/2).
 const bodyLineH = float32(16)

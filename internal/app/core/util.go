@@ -302,6 +302,14 @@ func EaseOutQuad(t float32) float32 {
 	return 1 - inv*inv
 }
 
+// EaseOutCubic maps t (clamped to [0,1]) by 1-(1-t)^3 — quick start, a softer and
+// longer settle than EaseOutQuad. Used by the crystal spin-burst.
+func EaseOutCubic(t float32) float32 {
+	t = Clamp(t, 0, 1)
+	inv := 1 - t
+	return 1 - inv*inv*inv
+}
+
 // DistanceFade indexes a precomputed fade table by |d| (level/depth distance from
 // the observer), returning min once past the table's end. Single source for the
 // minimap depth fade and the editor level-distance fade.

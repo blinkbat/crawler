@@ -769,8 +769,9 @@ func drawAssetTab(font rl.Font, theme render.Theme, l foeViewLayout, ov *core.En
 // right, at the foe metrics + accent font. Shared by the Layout and Asset tabs.
 func drawFoeSliderRow(font rl.Font, theme render.Theme, f sliderField[core.EnemyVisualOverride], ov *core.EnemyVisualOverride, track rl.Rectangle, focused bool) {
 	drawSliderField(font, theme, f, ov,
-		rl.NewVector2(track.X-foeSliderMetrics.labelW, track.Y-4), rl.NewVector2(track.X+track.Width+8, track.Y-4),
-		editorFontAccent, track, 6, focused)
+		rl.NewVector2(track.X-foeSliderMetrics.labelW, track.Y-foeSliderLabelDY),
+		rl.NewVector2(track.X+track.Width+foeSliderValueGap, track.Y-foeSliderLabelDY),
+		editorFontAccent, track, foeSliderMetrics.thumbR, focused)
 }
 
 // drawVisualSlider draws foeFields row i against override ov and cursor (the
@@ -784,14 +785,21 @@ func drawVisualSlider(font rl.Font, theme render.Theme, l foeViewLayout, i int, 
 // The Foe/Party visualizer (foeSliderMetrics) and the sound creator (soundSliderMetrics)
 // each instantiate it with their own values — previously two parallel const families.
 type sliderRowMetrics struct {
-	labelW, valueW, trackH float32
+	labelW, valueW, trackH, thumbR float32
 }
 
 // trackReserve is the width removed from a row for the label + value columns (+gap), so
 // trackWidth = rowWidth - trackReserve(gap). Foe uses gap 0, the sound creator gap 2.
 func (m sliderRowMetrics) trackReserve(gap float32) float32 { return m.labelW + m.valueW + gap }
 
-var foeSliderMetrics = sliderRowMetrics{labelW: 86, valueW: 56, trackH: 12}
+var foeSliderMetrics = sliderRowMetrics{labelW: 86, valueW: 56, trackH: 12, thumbR: 6}
+
+// foe slider label/value placement relative to the track: baseline lifted above the
+// track top, value column gapped past the track's right edge.
+const (
+	foeSliderLabelDY  = float32(4)
+	foeSliderValueGap = float32(8)
+)
 
 // drawSliderField renders one sliderField row against ov's value. The single
 // slider-row draw shared by both Visualizers and the sound creator. Display-aware:

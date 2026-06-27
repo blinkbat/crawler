@@ -200,6 +200,16 @@ func JournalSubtabLabel(s JournalSubtab) string {
 	}
 }
 
+// JournalRowCount returns the active Journal sub-view's row count (quest entries vs
+// seen foes) — one source the panel cursor-clamp (and any scroll logic) share so they
+// can't disagree on the active list length.
+func (g *GameState) JournalRowCount() int {
+	if g.JournalTab == JournalBestiary {
+		return g.Bestiary.SeenCount()
+	}
+	return len(g.Quests)
+}
+
 // Chest is one runtime chest. Looted goes true once every stack is drained, at
 // which point it renders open and ignores interaction. Blocks movement onto its
 // tile — opened from an adjacent square.

@@ -33,7 +33,9 @@ func drawJournalSubtabHeader(font rl.Font, active core.JournalSubtab, body rl.Re
 // Journal list rhythm — ONE metric set shared by both sub-views so they page at the same stride and don't "jump" when flipping.
 const (
 	journalRowH           = float32(52)
-	journalListTopDY      = float32(30) // tally line is FontSmall at +4; list starts below it
+	journalListTopDY      = float32(30) // tally line is FontSmall at +journalTallyDY; list starts below it
+	journalTallyDY        = float32(4)  // tally-header baseline nudge below body top
+	journalRowTitleDY     = float32(2)  // row title baseline nudge (detail uses journalRowDetailDY)
 	journalRowDetailDY    = float32(26)
 	journalRowInsetX      = float32(8)  // shared left inset for header, tally, rows, selection plate
 	journalSubtabStripGap = float32(22) // inter-tab spacing for the Quests/Bestiary sub-tab strip
@@ -158,7 +160,7 @@ func drawJournalQuests(g *core.GameState, font rl.Font, body rl.Rectangle) {
 	}
 
 	tally := journalTally(core.ActiveQuestCount(quests), core.CompletedQuestCount(quests), false)
-	drawTextWithShadow(font, tally, body.X+journalRowInsetX, body.Y+4, FontSmall, textLabel)
+	drawJournalTally(font, body, tally)
 
 	forEachJournalRow(body, g.PanelsRowCursor, len(quests), func(i int, rowY float32) {
 		q := quests[i]
@@ -168,9 +170,14 @@ func drawJournalQuests(g *core.GameState, font rl.Font, body rl.Rectangle) {
 			titleCol = textMuted
 			titleText = completedQuestTitle(q.Title)
 		}
-		drawTextWithShadow(font, titleText, body.X+journalRowInsetX, rowY+2, FontBody, titleCol)
+		drawTextWithShadow(font, titleText, body.X+journalRowInsetX, rowY+journalRowTitleDY, FontBody, titleCol)
 		drawTextWithShadow(font, q.Desc, body.X+journalRowInsetX, rowY+journalRowDetailDY, FontSmall, textMuted)
 	})
+}
+
+// drawJournalTally paints the FontSmall tally header shared by both journal sub-views.
+func drawJournalTally(font rl.Font, body rl.Rectangle, tally string) {
+	drawTextWithShadow(font, tally, body.X+journalRowInsetX, body.Y+journalTallyDY, FontSmall, textLabel)
 }
 
 // forEachJournalRow walks the visible window (shared by both sub-views), painting the cursor row's selection plate and calling fn(i, rowY) per row.
@@ -206,13 +213,13 @@ func drawJournalBestiary(g *core.GameState, font rl.Font, body rl.Rectangle) {
 	}
 
 	tally := journalTally(len(seen), core.EnemyKindCount(), true)
-	drawTextWithShadow(font, tally, body.X+journalRowInsetX, body.Y+4, FontSmall, textLabel)
+	drawJournalTally(font, body, tally)
 
 	forEachJournalRow(body, g.PanelsRowCursor, len(seen), func(i int, rowY float32) {
 		kind := seen[i]
 		def := core.EnemyInfo(kind)
 		entry := g.Bestiary.Entry(kind)
-		drawTextWithShadow(font, def.Name, body.X+journalRowInsetX, rowY+2, FontBody, textPrimary)
+		drawTextWithShadow(font, def.Name, body.X+journalRowInsetX, rowY+journalRowTitleDY, FontBody, textPrimary)
 
 		known := g.Bestiary.Knows(kind)
 		rowText := bestiaryRowStrings(kind, def.MaxHP, entry.Kills, entry.Scanned, known)

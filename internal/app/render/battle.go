@@ -390,7 +390,7 @@ func drawActionLogPanel(g *core.GameState, assets Resources) {
 	drawActionLogSpine(x, y, h)
 
 	// Inner inset: frame ~6px + 8px off the bevel; +6px on the left clears the spine.
-	innerInset := int32(14)
+	innerInset := int32(uiCellInsetX)
 	innerX := x + innerInset + 6
 	innerY := y + innerInset
 	innerW := w - 2*innerInset - 6

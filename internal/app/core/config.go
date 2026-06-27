@@ -779,6 +779,11 @@ const (
 	// FireBurnMin/MaxTurns: Burn duration shared by Firebolt + Fireball.
 	FireBurnMinTurns = 2
 	FireBurnMaxTurns = 3
+	// ArcBolt T3 node grants a short Burn on every arc target — its own range,
+	// shorter than the fire skills' (it's a lightning splash, not a fire skill).
+	ArcBoltBurnChance   = 0.15
+	ArcBoltBurnMinTurns = 1
+	ArcBoltBurnMaxTurns = 2
 	// PoisonCloudPoisonChance: per-target Poison for the AoE; lower than single-target VenomStrikePoisonChance.
 	PoisonCloudPoisonChance = 0.45
 )

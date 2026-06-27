@@ -15,8 +15,14 @@ const (
 	minimapViewCells = int32(17) // odd so the player sits dead-center; wider window shows more surrounding area
 	minimapHeader    = int32(26)
 	minimapFooter    = int32(52) // time-of-day strip beneath the grid (label line + gap + bar + cursor pips)
-	minimapPanelW    = minimapViewCells*minimapCell + 16
-	minimapPanelH    = minimapViewCells*minimapCell + 16 + minimapHeader + minimapFooter
+	// minimapGridInset is the gutter between the card edge and the grid; the panel reserves it on
+	// both sides. minimapFooterGap is the breath above the time-of-day strip; minimapFooterInsetX
+	// is the strip's own side inset (its width is panelW - 2*minimapFooterInsetX).
+	minimapGridInset    = int32(8)
+	minimapFooterGap    = int32(12)
+	minimapFooterInsetX = int32(14)
+	minimapPanelW       = minimapViewCells*minimapCell + 2*minimapGridInset
+	minimapPanelH       = minimapViewCells*minimapCell + 2*minimapGridInset + minimapHeader + minimapFooter
 )
 
 // minimapSliceBuf / minimapSeenBuf / minimapRampBuf / minimapColBuf are reused per-cell
@@ -75,11 +81,11 @@ func drawMinimap(m *core.AreaDefinition, g *core.GameState, assets Resources) {
 		drawTextWithShadow(assets.hudFont, areaName, nameX, float32(pad+6), FontSmall, textMuted)
 	}
 
-	gridX := pad + 8
-	gridY := pad + 8 + header
-	footerY := gridY + gridSize + 12
+	gridX := pad + minimapGridInset
+	gridY := pad + minimapGridInset + header
+	footerY := gridY + gridSize + minimapFooterGap
 	drawMinimapGridBacking(gridX, gridY, gridSize)
-	drawMinimapTimeOfDay(assets.hudFont, g.StepCount, pad+14, footerY, panelW-28)
+	drawMinimapTimeOfDay(assets.hudFont, g.StepCount, pad+minimapFooterInsetX, footerY, panelW-2*minimapFooterInsetX)
 
 	// One MaterialIsIndoor lookup for the whole grid (per-area constant), passed per cell.
 	indoor := core.MaterialIsIndoor(m.Materials)

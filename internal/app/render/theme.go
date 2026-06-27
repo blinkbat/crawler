@@ -16,8 +16,11 @@ const sqrt2Inv = float32(0.7071)
 // tau is one full turn in radians (2π).
 const tau = 6.2831853
 
-// degToRad converts degrees to radians (π/180).
+// degToRad converts degrees to radians (π/180). degToRad64 is the float64 form
+// for the trig (math.Sin/Tan) paths so half-FOV math reads as (fov/2)·degToRad64
+// instead of a bare π/360 literal.
 const degToRad = float32(math.Pi / 180)
+const degToRad64 = float64(math.Pi / 180)
 
 // worldUp is the +Y world-up / yaw axis, shared by every billboard, look-at, and
 // yaw rotation so the literal isn't re-created at each call site. Passed by value
@@ -535,10 +538,11 @@ const (
 	barValuePadRight    = float32(10)
 	barLabelPadLeft     = float32(8)
 
-	// Canonical HP/MP gauge heights: Character tab (compact) and the use-item
-	// picker row (mini). The party ribbon cards size their own gauge (partyCardBarH).
+	// Canonical HP/MP gauge heights: Character tab (compact), use-item picker row
+	// (mini), and the in-card gauge shared by the party ribbon + victory spoils (card).
 	barHeightCompact = float32(28)
 	barHeightMini    = float32(18)
+	barHeightCard    = float32(22)
 
 	// World-popup horizontal slack: pixels past the screen edge a projected popup
 	// can drift before culling, so it fades cleanly instead of snapping off.
@@ -1021,13 +1025,22 @@ func drawFleuronsFlanking(leftX, w, gap, cy, r float32, col color.RGBA) {
 	drawFleuron(leftX+w+gap, cy, r, col)
 }
 
-// drawPanel fills a rounded rect at a fixed pixel corner radius.
-func drawPanel(x, y, w, h int32, fill color.RGBA) {
+// drawCardFill paints just the rounded card fill at the standard corner radius —
+// the shared body of drawPanel (minus the bevel) and the inactive-card scrim.
+func drawCardFill(x, y, w, h int32, fill color.RGBA) {
 	if w <= 0 || h <= 0 {
 		return
 	}
 	rect := rl.NewRectangle(float32(x), float32(y), float32(w), float32(h))
 	rl.DrawRectangleRounded(rect, fixedRoundnessFor(w, h, cornerRadius), 8, fill)
+}
+
+// drawPanel fills a rounded rect at a fixed pixel corner radius.
+func drawPanel(x, y, w, h int32, fill color.RGBA) {
+	if w <= 0 || h <= 0 {
+		return
+	}
+	drawCardFill(x, y, w, h, fill)
 	drawSoftPanelBevel(x, y, w, h, false)
 }
 
@@ -1555,6 +1568,11 @@ func drawRowSheen(r rl.Rectangle, flick float32) {
 func pulseActiveActor() float32 { return 0.40 + 0.60*pulse(0.7) }
 func pulseHalo() float32        { return 0.20 + 0.80*pulse(1.0) }
 func pulseFlicker() float32     { return 0.30 + 0.70*pulse(1.3) }
+
+// pulseAttention is the brisk 2.4 Hz "look here" throb (commit-zone cue, victory
+// flag wave). Callers supply their own base+amp; this owns only the frequency so
+// a fourth ad-hoc pulse speed isn't spelled inline (UI_STANDARDS.md "Pulse").
+func pulseAttention() float32 { return pulse(2.4) }
 
 // fadeColor returns col scaled by alpha multiplier in 0..1.
 func fadeColor(col color.RGBA, alpha float32) color.RGBA {

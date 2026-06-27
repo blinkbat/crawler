@@ -428,7 +428,7 @@ func QuitPressed() bool {
 }
 
 // UsePressed is the panels "use / cast" edge (Items consumable / Skills heal),
-// separate from Confirm. F + pad Square/X (AGENTS.md flags Square/X as unbound).
+// separate from Confirm. F + pad Square/X (Square/X = Use in-game, Erase in editor).
 func UsePressed() bool {
 	return rl.IsKeyPressed(rl.KeyF) || padPressed(rl.GamepadButtonRightFaceLeft) // Square / X
 }

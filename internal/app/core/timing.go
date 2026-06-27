@@ -162,6 +162,27 @@ func NewTimingState(rng *rand.Rand, duration float32) TimingState {
 	}
 }
 
+// tallyWindowAt clamps a fractional window center (0..1) to
+// [winWidth/2, commitStart-winWidth/2] so the window stays fully pressable before
+// the commit zone, then scales it into a duration-space TallyWindow.
+func tallyWindowAt(center, winWidth, commitStart, duration float32) TallyWindow {
+	lo := winWidth * 0.5
+	hi := commitStart - lo
+	if hi < lo {
+		hi = lo
+	}
+	if center < lo {
+		center = lo
+	} else if center > hi {
+		center = hi
+	}
+	return TallyWindow{
+		Start: (center - winWidth*0.5) * duration,
+		End:   (center + winWidth*0.5) * duration,
+		Sweet: center * duration,
+	}
+}
+
 // NewMultiPressState builds a tally-mode press bar with `count` evenly-spaced
 // accept windows + a late commit zone. count <= 0 falls back to one window.
 func NewMultiPressState(rng *rand.Rand, duration float32, count int) TimingState {
@@ -195,19 +216,7 @@ func NewMultiPressState(rng *rand.Rand, duration float32, count int) TimingState
 		center += jitter
 		// Clamp so a jittered window never goes negative or crosses CommitStart
 		// (a commit-zone press resolves the bar early, making it unreachable).
-		if lo := winWidth * 0.5; center < lo {
-			center = lo
-		}
-		if hi := commitStart - winWidth*0.5; center > hi {
-			center = hi
-		}
-		start := center - winWidth*0.5
-		end := center + winWidth*0.5
-		windows[i] = TallyWindow{
-			Start: start * duration,
-			End:   end * duration,
-			Sweet: center * duration,
-		}
+		windows[i] = tallyWindowAt(center, winWidth, commitStart, duration)
 	}
 	return TimingState{
 		Kind:        TimingKindPress,
@@ -227,24 +236,9 @@ func NewTallyStateAtCenters(duration float32, centers ...float32) TimingState {
 	}
 	commitStart := 1.0 - MultiPressWindow.CommitZoneFrac
 	winWidth := MultiPressWindow.WindowWidthFrac
-	lo := winWidth * 0.5
-	hi := commitStart - winWidth*0.5
-	if hi < lo {
-		hi = lo
-	}
 	windows := make([]TallyWindow, 0, len(centers))
 	for _, c := range centers {
-		if c < lo {
-			c = lo
-		}
-		if c > hi {
-			c = hi
-		}
-		windows = append(windows, TallyWindow{
-			Start: (c - winWidth*0.5) * duration,
-			End:   (c + winWidth*0.5) * duration,
-			Sweet: c * duration,
-		})
+		windows = append(windows, tallyWindowAt(c, winWidth, commitStart, duration))
 	}
 	return TimingState{
 		Kind:        TimingKindPress,

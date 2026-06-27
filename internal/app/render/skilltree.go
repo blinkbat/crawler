@@ -243,12 +243,12 @@ func drawSkillTreeDetail(font rl.Font, g *core.GameState, m *core.PartyMember, t
 	}
 	node := nodes[row]
 
+	md := cardDetailRowMetrics
 	x := card.X + skillTreeCardInset
 	w := card.Width - skillTreeCardInset*2
-	y := card.Y + card.Height - footerH - detailH - 4
+	y := card.Y + card.Height - footerH - detailH - md.belowGap
 	drawGlassPane(int32(x), int32(y), int32(w), int32(detailH), glassDeep)
 
-	md := cardDetailRowMetrics
 	drawTextWithShadow(font, node.Name, x+md.insetX, y+md.titleY, FontBody, textPrimary)
 	rank := core.TreeNodeRank(m, node.ID)
 	state := "Rank " + formatRatioSpaced(rank, node.MaxRank)
@@ -273,5 +273,5 @@ func drawSkillTreeDetail(font rl.Font, g *core.GameState, m *core.PartyMember, t
 		foot = "Confirm to invest (" + skillPointsLabel(node.Cost) + ")"
 		footCol = giltBright
 	}
-	drawTextWithShadow(font, foot, x+md.insetX, y+detailH-22, FontSmall, footCol)
+	drawTextWithShadow(font, foot, x+md.insetX, y+detailH-md.footUp, FontSmall, footCol)
 }

@@ -314,7 +314,7 @@ func AllItems() []ItemDefinition {
 	return out
 }
 
-// ItemKindByName looks up a kind from the name used in EnemyDefinition.Item.
+// ItemKindByName looks up a kind from a chest-loot name token (areas.go chest loading).
 // Returns ItemNone on no match (caller decides what to do).
 func ItemKindByName(name string) ItemKind {
 	if kind, ok := itemByName[name]; ok {

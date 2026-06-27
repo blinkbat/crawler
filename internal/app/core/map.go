@@ -867,12 +867,15 @@ func AdjacentChestIndex(chests []Chest, x, z int) int {
 }
 
 // AdjacentInteractableChestIndex is the openable-only variant (skips looted chests).
+// Filters inside the scan: post-filtering AdjacentChestIndex's first hit would miss an
+// openable chest whenever a looted chest sits earlier in the slice and is also adjacent.
 func AdjacentInteractableChestIndex(chests []Chest, x, z int) int {
-	idx := AdjacentChestIndex(chests, x, z)
-	if idx < 0 || chests[idx].Looted {
-		return -1
+	for i, c := range chests {
+		if !c.Looted && ManhattanDistance(c.TileX, c.TileZ, x, z) == 1 {
+			return i
+		}
 	}
-	return idx
+	return -1
 }
 
 // SpawnIndexAt is the shared "find the authored spawn at (x,z)" scan, generic

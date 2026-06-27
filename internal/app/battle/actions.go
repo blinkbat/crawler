@@ -1009,14 +1009,16 @@ func multiPressPasses(t core.TimingState, quality int) int {
 	return 1
 }
 
-// setupTargetedAllyAndPay confirms a LIVING ally is targeted, then pays MP. A dead
-// / unselected ally refuses WITHOUT spending MP. deadMsg is the per-skill downed-target line.
+// setupTargetedAllyAndPay confirms an AVAILABLE ally is targeted, then pays MP. A dead/
+// ingested/unselected ally refuses WITHOUT spending MP. deadMsg is the per-skill downed-
+// target line. Uses the same core.PartyMemberAvailable predicate as the apply-side gate
+// (ensureAlivePartyTargetOrCancel) so setup can't pass a target apply would later reject.
 func setupTargetedAllyAndPay(g *core.GameState, skill core.SkillID, deadMsg string) bool {
 	if !partyIndexValid(g, g.Battle.PartyTarget) {
 		setBattleStatus(g, msgNoAllySelected)
 		return false
 	}
-	if g.Party[g.Battle.PartyTarget].HP <= 0 {
+	if !core.PartyMemberAvailable(g.Party, g.Battle.PartyTarget) {
 		setBattleStatus(g, deadMsg)
 		return false
 	}
@@ -1278,7 +1280,9 @@ func applyMassMend(g *core.GameState, quality int) bool {
 	// (shared with the out-of-battle Mass Mend; no-ops dead/ingested, clamps at MaxHP).
 	healed := 0
 	for _, i := range core.AvailablePartyTargets(g.Party) {
-		if g.Party[i].HP < g.Party[i].MaxHP {
+		// A starving wounded ally is counted only if HealWholeParty can actually mend it;
+		// HealMember no-ops while Starving, so counting it would overstate "mends N allies".
+		if g.Party[i].HP < g.Party[i].MaxHP && !core.MemberStarving(g.Party[i]) {
 			healed++
 		}
 		core.EnqueuePartyVFX(g, vfxKindFor(core.SkillMassMend), i)
@@ -1522,10 +1526,7 @@ func applyStaticField(g *core.GameState, quality int) bool {
 	live := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	target := *live
 	effect := core.EffectiveSkillEffect(actor, core.SkillStaticField)
-	raw := core.ScaleDamage(int(float64(live.HP)*effect.PercentCurrentHP), quality)
-	if raw < 1 {
-		raw = 1
-	}
+	raw := max(core.ScaleDamage(int(float64(live.HP)*effect.PercentCurrentHP), quality), 1)
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, raw, quality, core.SkillTagNone)
 	enqueueSkillVFXAtEnemy(g, core.SkillStaticField)
 	foe := core.EnemySingularNoun(&target)
@@ -2059,10 +2060,7 @@ func applyRenewal(g *core.GameState, quality int) bool {
 	return applyAllyTargetSkill(g, core.SkillRenewal, core.LogHeal, func(actor, target *core.PartyMember) string {
 		effect := core.EffectiveSkillEffect(actor, core.SkillRenewal)
 		// Snapshot the per-turn heal at cast (WIS + timing), floored at 1. Re-cast replaces.
-		perTurn := core.ScaleHeal(core.SkillHealFor(actor, core.SkillRenewal), quality)
-		if perTurn < 1 {
-			perTurn = 1
-		}
+		perTurn := max(core.ScaleHeal(core.SkillHealFor(actor, core.SkillRenewal), quality), 1)
 		target.RegenPerTurn = perTurn
 		target.RegenTurns = effect.RegenTurns
 		return qualityLine(quality, actor.Name, " lays a renewal on %s — +%d HP at the end of their next %d turns.",
@@ -2606,11 +2604,8 @@ func damagePartyMemberPoison(g *core.GameState, partyIndex int) (int, bool) {
 // damagePartyMember directly so the brace doesn't soak them. A positive soak floors at 1.
 func damagePartyMemberDefendable(g *core.GameState, partyIndex, rawAmount int, tag core.SkillTag) (int, bool) {
 	if rawAmount > 0 && partyIndexValid(g, partyIndex) && g.Party[partyIndex].Defending {
-		rawAmount = int(float32(rawAmount) * core.DefendingDamageMult)
 		// Floor a positive soak at 1 (a soak, not free immunity).
-		if rawAmount < 1 {
-			rawAmount = 1
-		}
+		rawAmount = max(int(float32(rawAmount)*core.DefendingDamageMult), 1)
 	}
 	return damagePartyMember(g, partyIndex, rawAmount, tag)
 }
@@ -2921,10 +2916,7 @@ func tickAncestralSpirit(g *core.GameState, actor core.ActorRef) {
 	if target < 0 {
 		return
 	}
-	raw := int(float64(core.MemberAttackDamage(*m, 0)) * core.AncestralSpiritDamageMult)
-	if raw < 1 {
-		raw = 1
-	}
+	raw := max(int(float64(core.MemberAttackDamage(*m, 0))*core.AncestralSpiritDamageMult), 1)
 	noun := core.EnemySingularNoun(core.BattleMemberAt(g, target))
 	physTally, killTally := g.Battle.PhysDamageThisTurn, g.Battle.EnemyKillsThisTurn
 	dealt, defeated := damageEnemy(g, target, raw, core.TimingQualityGood, core.SkillTagPhys)
@@ -3017,10 +3009,7 @@ func tryRiposte(g *core.GameState, dodger, enemySlot int) {
 	if core.PassiveRank(member, core.PassiveRiposte) <= 0 {
 		return
 	}
-	raw := int(float64(core.MemberAttackDamage(*member, 0)) * core.RiposteDamageMult)
-	if raw < 1 {
-		raw = 1
-	}
+	raw := max(int(float64(core.MemberAttackDamage(*member, 0))*core.RiposteDamageMult), 1)
 	name := member.Name
 	dealt, _ := offTurnReflect(g, enemySlot, raw, core.SkillTagPhys, core.WeaponHitVFX(core.EquippedWeapon(*member)),
 		func(noun string, _ int) string { return fmt.Sprintf("%s ripostes — the %s drops!", name, noun) },

@@ -172,7 +172,7 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 	SkillArcBolt: {
 		tier(1, "+1 damage", "+1 base damage per arc target.", SkillEffectDelta{Damage: 1}),
 		tier(2, "+1 damage", "Another +1 damage per target.", SkillEffectDelta{Damage: 1}),
-		tier(3, "+15% Burn", "Every arc target rolls a 15% burn chance.", SkillEffectDelta{BurnChance: 0.15, BurnMinTurns: 1, BurnMaxTurns: 2}),
+		tier(3, "+15% Burn", "Every arc target rolls a 15% burn chance.", SkillEffectDelta{BurnChance: ArcBoltBurnChance, BurnMinTurns: ArcBoltBurnMinTurns, BurnMaxTurns: ArcBoltBurnMaxTurns}),
 	},
 	SkillFireball: {
 		tier(1, "+2 damage", "+2 base magic damage to every enemy in the blast.", SkillEffectDelta{Damage: 2}),

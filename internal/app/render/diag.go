@@ -23,6 +23,10 @@ const (
 	renderLogFilename = "crawler-render.log"
 	// renderLogFrameStride throttles the per-frame line: 6 ≈ one snapshot/100ms at 60Hz.
 	renderLogFrameStride = 6
+	// boundRaylibVersion is the raylib release bundled by our pinned raylib-go module
+	// (currently v0.55.1 → raylib 5.5). The binding exposes no Go constant; bump this
+	// alongside the go.mod raylib-go version.
+	boundRaylibVersion = "5.5"
 )
 
 var (
@@ -65,7 +69,7 @@ func OpenRenderLog() {
 	fmt.Fprintf(renderLogFile, "go=%s os=%s arch=%s monitor=%q raylib=%q\n",
 		runtime.Version(), runtime.GOOS, runtime.GOARCH,
 		safeStr(rl.GetMonitorName(0)),
-		"5.x",
+		boundRaylibVersion,
 	)
 	for _, line := range renderLogPendingInit {
 		fmt.Fprintln(renderLogFile, line)

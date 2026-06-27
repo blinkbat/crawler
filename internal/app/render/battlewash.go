@@ -19,12 +19,15 @@ const battleWipeDuration = core.BattleWipePreviewSeconds
 // Screen-wipe FX tuning magnitudes (were inline magics across the camera + overlay
 // cases).
 const (
-	wipeZoomFovDrop   = float32(32)   // WipeZoom: degrees of FOV narrowing at entry
-	wipeZoomFovFloor  = float32(12)   // WipeZoom: FOV floor
-	wipeWobbleFreq    = float32(38)   // WipeWobble: oscillation frequency
-	wipeWobbleRoll    = float32(0.16) // WipeWobble: roll amplitude (radians)
-	wipeTintMaxAlpha  = float32(0.6)  // WipeTint: peak overlay opacity at entry
-	wipeVignetteAlpha = float32(0.92) // WipeVignette: dark-iris ring opacity
+	wipeZoomFovDrop    = float32(32)   // WipeZoom: degrees of FOV narrowing at entry
+	wipeZoomFovFloor   = float32(12)   // WipeZoom: FOV floor
+	wipeWobbleFreq     = float32(38)   // WipeWobble: oscillation frequency
+	wipeWobbleRoll     = float32(0.16) // WipeWobble: roll amplitude (radians)
+	wipeTintMaxAlpha   = float32(0.6)  // WipeTint: peak overlay opacity at entry
+	wipeVignetteAlpha  = float32(0.92) // WipeVignette: dark-iris ring opacity
+	wipeWobbleFovDip   = float32(6)    // WipeWobble: FOV breathing coupled to the roll oscillation
+	wipeFlashHalfLife  = float32(0.5)  // WipeFlash: fraction of t over which the flash fully decays
+	wipeFlashPeakAlpha = float32(0.9)  // WipeFlash: peak white opacity at entry
 )
 
 // wipeTintColor is the warm overlay tone the WipeTint case washes the frame with.
@@ -70,7 +73,7 @@ func battleWipeCamera(g *core.GameState, dir rl.Vector3, fov float32) (rl.Vector
 	case core.WipeWobble:
 		osc := float32(math.Sin(float64(t*wipeWobbleFreq))) * r
 		up = wipeRollUp(dir, osc*wipeWobbleRoll)
-		fov -= osc * 6
+		fov -= osc * wipeWobbleFovDip
 	}
 	return up, fov
 }
@@ -97,8 +100,8 @@ func DrawBattleWipeOverlay(g *core.GameState, _ Resources) {
 	case core.WipeTint:
 		fillScreen(fadeColor(wipeTintColor, (1-t)*wipeTintMaxAlpha))
 	case core.WipeFlash:
-		if a := 1 - t/0.5; a > 0 { // gone by half
-			fillScreen(fadeColor(rl.White, a*0.9))
+		if a := 1 - t/wipeFlashHalfLife; a > 0 { // gone by half
+			fillScreen(fadeColor(rl.White, a*wipeFlashPeakAlpha))
 		}
 	case core.WipeVignette:
 		// Dark iris opening from the center: a ring from the growing hole radius out
@@ -148,6 +151,9 @@ func syncWipeGrid(g *core.GameState, active bool) {
 	if wipeGridValid && sw == wipeGridW && sh == wipeGridH {
 		return // already captured at the current size
 	}
+	// Invalidate before mutating grid dims/recapturing: a failed readback below must not
+	// leave drawWipePixelate indexing the new (larger) cols/rows against the stale slice.
+	wipeGridValid = false
 	wipeBlockW = sw / wipePixelGridCols
 	if wipeBlockW < 1 {
 		wipeBlockW = 1

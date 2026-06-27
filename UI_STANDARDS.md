@@ -356,7 +356,9 @@ site.
   forward (keyboard `Tab` / `Shift+Tab` for tabs; arrows for targets).
 - **Pause**: `Start` / `Options` (keyboard `P` / `Esc`).
 - **Free-look**: right stick, or right-mouse drag.
-- `Square` / `X` and `L3` / `R3` are intentionally unbound.
+- **Use / cast** (panels): `Square` / `X` (keyboard `F`); in the editor
+  `Square` / `X` is **erase**. `L3` / `R3` are the only intentionally
+  unbound buttons.
 
 Never invent a new keybinding or button combo for a new surface — route
 through `input.ConfirmPressed` / `input.BackPressed` / `input.CursorUpDown`
@@ -365,11 +367,13 @@ through `input.ConfirmPressed` / `input.BackPressed` / `input.CursorUpDown`
 ### Modal scaffolding
 Every modal calls `drawModalScaffold(font, w, h, heading)`:
 - Paints the full-screen `veil`.
-- Draws the wood-framed panel centered.
-- Renders the heading using `drawPanelHeading`.
-- Returns the body rect for the caller to paint into.
-- Reserves the bottom 28 px for the footer hint, drawn via
-  `drawModalFooterGlyphs` (see Footer hint below).
+- Draws the wood-framed panel centered (soft-clamped to the window).
+- Renders the heading (`drawHeading`).
+- Returns the card rect for the caller to paint into.
+
+The footer hint is drawn separately by the owner via `drawModalFooterGlyphs`
+at `footerBaselineY` (see Spacing and Footer hint below); the scaffold does
+not carve out footer space.
 
 ### Footer hint
 Every modal has a footer line of control affordances. The game is
