@@ -771,7 +771,14 @@ func applyCrimsonRampage(actor *core.PartyMember, raw int) int {
 	if missing <= 0 {
 		return raw
 	}
-	return raw + int(float64(raw)*missing*core.CrimsonRampageMaxBonus*float64(rank))
+	// Cap the bonus at CrimsonRampageMaxBonus regardless of rank: it's a single-rank
+	// capstone today, but the ×rank term would silently scale past +100% if MaxRank
+	// were ever bumped.
+	bonus := missing * core.CrimsonRampageMaxBonus * float64(rank)
+	if bonus > core.CrimsonRampageMaxBonus {
+		bonus = core.CrimsonRampageMaxBonus
+	}
+	return raw + int(float64(raw)*bonus)
 }
 
 // applyShatter folds the Wizard's Cryomancy capstone: +ShatterBonusVsControlled
@@ -1118,7 +1125,7 @@ func applySteal(g *core.GameState, quality int) bool {
 	actor := beginPartyAction(g)
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	if enemy.Item == core.ItemNone {
-		setBattleMessage(g, "There is nothing to steal.")
+		setBattleMessage(g, msgNothingToSteal)
 		finishActorTurn(g)
 		// The hand still moved — landed.
 		return true
@@ -2260,6 +2267,8 @@ func damageEnemyCrit(g *core.GameState, slot, rawDamage, quality int, tag core.S
 	// Crit multiplies the MITIGATED damage (post-armor), so a crit reliably beats a
 	// tank's armor floor instead of being swallowed by it.
 	damage = applyCritMultiplier(damage, crit, double)
+	damage = min(damage, core.MaxHitDamage) // sanity ceiling vs extreme authored stats
+
 	// Tally phys output this turn for Bloodthirst (finishActorTurn banks it as
 	// lifesteal). Off-turn counters (tryRiposte) snapshot/restore around this so
 	// their damage stays out of the tally. Non-phys tags don't feed it.
@@ -2624,6 +2633,8 @@ func applyPartyDamage(g *core.GameState, member *core.PartyMember, rawAmount int
 	amount := mitigateDamage(rawAmount, tag, armorVal, mdefVal)
 	// Crit punches post-armor (mirror of the enemy path) before the shield soaks it.
 	amount = applyCritMultiplier(amount, crit, false)
+	amount = min(amount, core.MaxHitDamage) // sanity ceiling vs extreme authored stats
+
 	// Aegis shield soaks post-mitigation BEFORE HP; only overflow reaches HP, and
 	// the bookkeeping below reads the post-shield amount.
 	if amount > 0 && member.ShieldHP > 0 {

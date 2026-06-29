@@ -656,7 +656,7 @@ type State struct {
 	// soundParamScroll is the vertical scroll offset (px) of the params slider body.
 	soundParamScroll float32
 	// deleteArmed is the shared two-press delete guard token (first click arms,
-	// second for the SAME token confirms). Backs sound/custom-enemy/door deletes.
+	// second for the SAME token confirms). Backs sound/door deletes.
 	deleteArmed string
 	// soundSavedCache / soundAssignCache cache audio.ListUserSounds() and the
 	// cue→user-sound assignment map; refreshed on open + each mutation, not per frame.
@@ -1014,9 +1014,9 @@ func Update(s *State, dt float32) Action {
 	if s.focus != focusNone {
 		updateTextInput(s)
 		if rl.IsMouseButtonPressed(rl.MouseLeftButton) && !pointIn(rl.GetMousePosition(), s.activeFieldRect()) {
-			// Click-outside must run the same finalization as Enter/Tab — the
-			// custom-enemy name field resolves uniqueness here or two defs collide
-			// on one mapfile row key.
+			// Click-outside must run the same finalization as Enter/Tab so the
+			// focused width/height field commits its typed value (a half-typed
+			// dimension would otherwise be silently dropped).
 			finalizeFocusedField(s)
 			s.focus = focusNone
 		}

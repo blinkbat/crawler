@@ -308,6 +308,12 @@ const (
 	DodgePerDEX = 0.02
 	DodgeCap    = 0.30
 
+	// MaxHitDamage caps any single post-mitigation, post-crit hit (both sides). A
+	// sanity ceiling, not a balance lever — authored stats land far below it; it only
+	// bites a custom-enemy def with an extreme SpellPower/AttackDamage so a ×1.4 ×crit
+	// can't produce an absurd one-shot.
+	MaxHitDamage = 9999
+
 	// Enemy basic-attack accuracy: rolled BEFORE the player's defend bar arms (a
 	// miss skips the minigame). DEX-driven via EffectiveEnemyStats (so Blind etc.
 	// lowers it), clamped [Floor, Cap]. Enemy SKILLS are NOT gated.
@@ -578,7 +584,7 @@ var timingGrades = []struct {
 	ShakePeak     float32
 	ShakeDur      float32
 }{
-	TimingQualityMiss:      {Label: "Miss...", Atk: 1.0, Def: 1.0, AccuracyBonus: 0.0, CritBonus: 0.0},
+	TimingQualityMiss:      {Label: "Whiff!", Atk: 1.0, Def: 1.0, AccuracyBonus: 0.0, CritBonus: 0.0},
 	TimingQualityNice:      {Label: "Nice!", Atk: 1.25, Def: 0.75, AccuracyBonus: 0.10, CritBonus: 0.02},
 	TimingQualityGood:      {Label: "Good!", Atk: 1.5, Def: 0.5, AccuracyBonus: 0.20, CritBonus: 0.05, ShakePeak: CombatShakeGoodPeak, ShakeDur: CombatShakeGoodDur},
 	TimingQualityGreat:     {Label: "Great!", Atk: 1.75, Def: 0.35, AccuracyBonus: 0.30, CritBonus: 0.12, HitStop: HitStopGreat, ShakePeak: CombatShakeGreatPeak, ShakeDur: CombatShakeGreatDur},

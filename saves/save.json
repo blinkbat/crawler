@@ -5,8 +5,8 @@
   "playerTileZ": 24,
   "playerFacing": 0,
   "playerLevel": 10,
-  "stepCount": 438,
-  "gold": 82,
+  "stepCount": 804,
+  "gold": 92,
   "party": [
     {
       "Class": 0,
@@ -19,11 +19,11 @@
         "VIT": 5,
         "SPD": 4
       },
-      "HP": 10,
+      "HP": 5,
       "MaxHP": 10,
       "MP": 4,
       "MaxMP": 4,
-      "Hunger": 288,
+      "Hunger": 450,
       "Armor": 0,
       "Equipped": [
         0,
@@ -42,6 +42,7 @@
       "DamagePopup": 2,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
+      "DamagePopupCrit": false,
       "SwapSlide": 0,
       "SwapFromRow": 0,
       "SwapFromCol": 0,
@@ -65,7 +66,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 2,
-      "XP": 113,
+      "XP": 150,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
@@ -91,9 +92,9 @@
       },
       "HP": 8,
       "MaxHP": 8,
-      "MP": 9,
+      "MP": 0,
       "MaxMP": 9,
-      "Hunger": 288,
+      "Hunger": 450,
       "Armor": 0,
       "Equipped": [
         11,
@@ -112,6 +113,7 @@
       "DamagePopup": 0,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
+      "DamagePopupCrit": false,
       "SwapSlide": 0,
       "SwapFromRow": 0,
       "SwapFromCol": 0,
@@ -135,7 +137,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 2,
-      "XP": 113,
+      "XP": 150,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
@@ -159,11 +161,11 @@
         "VIT": 4,
         "SPD": 9
       },
-      "HP": 8,
+      "HP": 5,
       "MaxHP": 8,
-      "MP": 5,
+      "MP": 2,
       "MaxMP": 5,
-      "Hunger": 348,
+      "Hunger": 450,
       "Armor": 0,
       "Equipped": [
         0,
@@ -179,9 +181,10 @@
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 2,
+      "DamagePopup": 1,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
+      "DamagePopupCrit": false,
       "SwapSlide": 0,
       "SwapFromRow": 0,
       "SwapFromCol": 0,
@@ -205,7 +208,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 2,
-      "XP": 113,
+      "XP": 150,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
@@ -231,9 +234,9 @@
       },
       "HP": 8,
       "MaxHP": 8,
-      "MP": 10,
+      "MP": 3,
       "MaxMP": 10,
-      "Hunger": 348,
+      "Hunger": 450,
       "Armor": 0,
       "Equipped": [
         11,
@@ -252,6 +255,7 @@
       "DamagePopup": 0,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
+      "DamagePopupCrit": false,
       "SwapSlide": 0,
       "SwapFromRow": 0,
       "SwapFromCol": 0,
@@ -275,7 +279,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 2,
-      "XP": 113,
+      "XP": 150,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
@@ -308,21 +312,23 @@
       "ID": "investigate-island",
       "Title": "Investigate the Island",
       "Desc": "Explore the island and uncover what drew you here.",
-      "Status": 0
+      "Status": 0,
+      "RewardGold": 0,
+      "RewardXP": 0
     }
   ],
   "bestiary": {
     "0": {
-      "kills": 19
+      "kills": 22
     },
     "1": {
-      "kills": 5
+      "kills": 6
     },
     "2": {
       "kills": 3
     },
     "3": {
-      "kills": 3
+      "kills": 4
     }
   },
   "crystals": [

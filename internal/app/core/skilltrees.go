@@ -312,6 +312,29 @@ func BuySkillNode(m *PartyMember, id string) bool {
 	return true
 }
 
+// RespecSkills refunds every SkillPoint the member invested across their trees and
+// clears all learned nodes/tiers so the points can be reallocated. Returns the
+// number of points refunded (0 if nothing was spent / nil member). Stat allocation
+// is NOT touched — this is a skill-tree respec only. Costs are summed from the live
+// node definitions (exact while every rank of a node costs the same).
+func RespecSkills(m *PartyMember) int {
+	if m == nil || len(m.TreeRanks) == 0 {
+		return 0
+	}
+	refund := 0
+	for _, tree := range SkillTreesFor(m.Class) {
+		for _, n := range tree.Nodes {
+			if rank := m.TreeRanks[n.ID]; rank > 0 {
+				refund += rank * n.Cost
+			}
+		}
+	}
+	m.TreeRanks = nil
+	m.SkillTiers = nil
+	m.SkillPoints += refund
+	return refund
+}
+
 // LearnedSkills returns the castable skills m has learned via their trees, in authoring order,
 // deduped. Learned once any granting node holds rank >= 1. Source of truth for the battle Skill
 // menu; a fresh member returns empty. Nil-safe.

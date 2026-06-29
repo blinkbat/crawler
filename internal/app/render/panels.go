@@ -1108,12 +1108,14 @@ var skillCostMPLabelCache = func() [32]string {
 }()
 
 // goldLabelFull / goldLabelShort: the two gold-readout formats, one source each. The Tome/shop show "Gold: N";
-// the HUD chip shows "N G". No LUT (unbounded range); the per-frame draws route already-cached values.
-func goldLabelFull(n int) string  { return fmt.Sprintf("Gold: %d", n) }
-func goldLabelShort(n int) string { return fmt.Sprintf("%d G", n) }
+// the HUD chip shows "N G". strconv concat (not Sprintf) — Tome/shop call goldLabelFull every frame they're
+// open, so avoid the per-frame reflection/format alloc. The HUD chip is cached via goldReadout.
+func goldLabelFull(n int) string  { return "Gold: " + strconv.Itoa(n) }
+func goldLabelShort(n int) string { return strconv.Itoa(n) + " G" }
 
-// goldGainLabel formats a reward gain ("Gold  +N") — the victory-spoils sibling of the two above.
-func goldGainLabel(n int) string { return fmt.Sprintf("Gold  +%d", n) }
+// goldGainLabel formats a reward gain ("Gold  +N") — the victory-spoils sibling of the two above. Concat, not
+// Sprintf: the spoils tally redraws it every frame with a ramping value, so the cache can't help here.
+func goldGainLabel(n int) string { return "Gold  +" + strconv.Itoa(n) }
 
 // stackLabel renders an item-stack label with the shared "  x<count>" convention
 // (chest, shop, equip picker). One home so the two-space-x format can't drift;

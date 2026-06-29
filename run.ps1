@@ -5,7 +5,7 @@
 # dir sidesteps that entirely.
 $ErrorActionPreference = "Stop"
 $proj = $PSScriptRoot
-$exe  = Join-Path $proj ".codex-build\crawler-3d.exe"
+$exe  = Join-Path $proj ".build\crawler-3d.exe"
 
 # A still-running instance locks the exe and makes the rebuild fail — kill it.
 Get-Process -Name crawler-3d -ErrorAction SilentlyContinue | Stop-Process -Force

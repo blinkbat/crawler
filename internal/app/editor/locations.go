@@ -97,8 +97,7 @@ func stepperFor(row rl.Rectangle) locStepper {
 
 func locEditLayoutFor() locEditLayout {
 	r := centeredCardRect(locModalW, locModalH)
-	x := r.X + modalContentInset
-	fw := r.Width - 2*modalContentInset
+	x, fw := cardContentBox(r)
 	fieldH := dialogFieldH
 	y := r.Y + dialogHeaderInset
 	rows := stackRows(x, y, fw, fieldH, dialogTrigRowGap, 6)

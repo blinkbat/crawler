@@ -66,6 +66,34 @@ func TestBuySkillNode_LearnsThenUpgradesLadder(t *testing.T) {
 	}
 }
 
+// TestRespecSkills_RefundsAndClears: respec returns every spent point, wipes learned
+// nodes/tiers, and leaves stat allocation alone; a no-investment member refunds 0.
+func TestRespecSkills_RefundsAndClears(t *testing.T) {
+	if got := RespecSkills(nil); got != 0 {
+		t.Errorf("RespecSkills(nil) = %d, want 0", got)
+	}
+	m := PartyMember{Class: ClassWizard, SkillPoints: 4}
+	fresh := PartyMember{Class: ClassWizard, SkillPoints: 4}
+	if got := RespecSkills(&fresh); got != 0 || fresh.SkillPoints != 4 {
+		t.Errorf("respec of unspent member refunded %d (points now %d), want 0/4", got, fresh.SkillPoints)
+	}
+	BuySkillNode(&m, "firebolt") // rank 1
+	BuySkillNode(&m, "firebolt") // rank 2
+	if m.SkillPoints != 2 {
+		t.Fatalf("setup: SkillPoints = %d, want 2 after 2 buys", m.SkillPoints)
+	}
+	refunded := RespecSkills(&m)
+	if refunded != 2 {
+		t.Errorf("respec refunded %d, want 2", refunded)
+	}
+	if m.SkillPoints != 4 {
+		t.Errorf("SkillPoints after respec = %d, want 4 (fully restored)", m.SkillPoints)
+	}
+	if len(LearnedSkills(&m)) != 0 || len(m.SkillTiers) != 0 || len(m.TreeRanks) != 0 {
+		t.Errorf("respec left state: learned=%v tiers=%v ranks=%v", LearnedSkills(&m), m.SkillTiers, m.TreeRanks)
+	}
+}
+
 // TestBuySkillNode_PassiveNodeGrantsNoSkill: a GrantSkill==SkillNone node records its rank but must
 // not change LearnedSkills or the SkillTiers map. Uses passive `bloodthirst` after granting
 // `cleave`→`rend` (Warrior Fury) — searing-light is now an active granting node.

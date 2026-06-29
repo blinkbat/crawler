@@ -123,6 +123,9 @@ func drawSpriteOutline(camera rl.Camera3D, tex rl.Texture2D, pos rl.Vector3, siz
 	// close (the old sprite-size scaling did exactly that). tan(Fovy/2)/scrH is the
 	// same for every sprite this frame; only the per-sprite distance varies.
 	_, scrH := screenSizeF()
+	if scrH <= 0 {
+		return // degenerate window height → divide-by-zero / NaN pad
+	}
 	dist := rl.Vector3Distance(pos, camera.Position)
 	pad := px * 2 * dist * tanHalfFovY(camera.Fovy) / scrH
 	base := rl.Vector3Subtract(pos, rl.Vector3Scale(fwd, spriteOutlineDepthBias))

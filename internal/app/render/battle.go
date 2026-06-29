@@ -350,7 +350,7 @@ var logCategoryColors = [core.LogCategoryCount]rl.Color{
 
 // logCategoryColor maps a log line's category to its tint (see theme.go).
 func logCategoryColor(cat core.LogCategory) rl.Color {
-	if int(cat) >= len(logCategoryColors) {
+	if int(cat) < 0 || int(cat) >= len(logCategoryColors) {
 		return logInfo
 	}
 	return logCategoryColors[cat]
@@ -502,7 +502,7 @@ var arrowPromptCache struct{ a, b, text string }
 func arrowPrompt(a, b string) string {
 	if a != arrowPromptCache.a || b != arrowPromptCache.b {
 		arrowPromptCache.a, arrowPromptCache.b = a, b
-		arrowPromptCache.text = a + " → " + b
+		arrowPromptCache.text = arrowTransition(a, b)
 	}
 	return arrowPromptCache.text
 }

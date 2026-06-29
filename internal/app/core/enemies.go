@@ -642,12 +642,18 @@ func DispelEnemyBuffs(e *Enemy) int {
 	return removed
 }
 
-// EnemyLevel is the foe's level, defaulting an unauthored (0) definition to
-// DefaultEnemyLevel. Read by the flee-chance math.
+// EnemyLevel is the foe's level for the flee-chance math: the authored Level if
+// set, else the authored Tier (which already encodes relative threat, so flee odds
+// scale with how dangerous the pack actually is instead of a uniform level 1), else
+// DefaultEnemyLevel.
 func EnemyLevel(e *Enemy) int {
-	// Through the governing-def pointer (Level isn't override-adjusted).
-	if l := enemyGoverningDef(e).Level; l > 0 {
-		return l
+	// Through the governing-def pointer (Level/Tier aren't override-adjusted).
+	def := enemyGoverningDef(e)
+	if def.Level > 0 {
+		return def.Level
+	}
+	if def.Tier > 0 {
+		return def.Tier
 	}
 	return DefaultEnemyLevel
 }

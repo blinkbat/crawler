@@ -6,7 +6,7 @@ REM "fork/exec ... Access is denied". Building into the project dir works.
 setlocal
 taskkill /IM crawler-3d.exe /F >nul 2>&1
 echo Building...
-go build -o "%~dp0.codex-build\crawler-3d.exe" "%~dp0."
+go build -o "%~dp0.build\crawler-3d.exe" "%~dp0."
 if errorlevel 1 ( echo BUILD FAILED & exit /b 1 )
 echo Launching...
-"%~dp0.codex-build\crawler-3d.exe" %*
+"%~dp0.build\crawler-3d.exe" %*

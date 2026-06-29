@@ -30,12 +30,16 @@ func (s QuestStatus) Valid() bool {
 }
 
 // Quest is one journal entry. ID is a stable string key for CompleteQuest /
-// QuestIndexByID; Title / Desc are player-facing.
+// QuestIndexByID; Title / Desc are player-facing. RewardGold / RewardXP are the
+// authored payout granted ONCE on the active→complete transition (0 = no reward,
+// the default — author per quest).
 type Quest struct {
-	ID     string
-	Title  string
-	Desc   string
-	Status QuestStatus
+	ID         string
+	Title      string
+	Desc       string
+	Status     QuestStatus
+	RewardGold int
+	RewardXP   int
 }
 
 // IsComplete reports whether the quest is marked done.
@@ -65,8 +69,8 @@ func QuestTitleFromID(id string) string {
 	words := strings.Fields(strings.NewReplacer("-", " ", "_", " ").Replace(id))
 	for i, w := range words {
 		r := []rune(w)
-		r[0] = []rune(strings.ToUpper(string(r[0])))[0]
-		words[i] = string(r)
+		// Uppercase the first rune fully (some runes expand to >1 rune, e.g. 'ß'→"SS").
+		words[i] = strings.ToUpper(string(r[0])) + string(r[1:])
 	}
 	return strings.Join(words, " ")
 }
@@ -86,14 +90,25 @@ func AddQuest(quests []Quest, q Quest) []Quest {
 	return append(quests, q)
 }
 
-// CompleteQuest marks the quest complete and reports whether it transitioned
-// (false if unknown or already complete — gate a one-time fanfare on this).
+// CompleteQuest marks the quest complete, grants its authored reward (gold to the
+// purse, XP to every living member) exactly once, and reports whether it
+// transitioned (false if unknown or already complete — gate a one-time fanfare on
+// this). The complete status persists in saves, so a reload can't re-grant.
 func CompleteQuest(g *GameState, id string) bool {
 	idx := QuestIndexByID(g.Quests, id)
 	if idx < 0 || g.Quests[idx].Status == QuestComplete {
 		return false
 	}
 	g.Quests[idx].Status = QuestComplete
+	q := g.Quests[idx]
+	if q.RewardGold > 0 {
+		g.Gold += q.RewardGold
+	}
+	if q.RewardXP > 0 {
+		for i := range g.Party {
+			AddXP(&g.Party[i], q.RewardXP) // no-ops on a downed member
+		}
+	}
 	return true
 }
 

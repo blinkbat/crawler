@@ -19,6 +19,7 @@ const (
 	msgNoItems        = "No items."
 	msgInvalidTarget  = "Invalid target."
 	msgNoAllySelected = "No ally selected."
+	msgNothingToSteal = "There is nothing to steal."
 	// Greyed melee ACTION refused (Attack row or melee skill picked anyway): one pattern
 	// via refuseMeleeAction — buzz + logged named-unit line, reason picked here. Back row =
 	// actor stuck behind the live front; flying = actor up front but every foe airborne.

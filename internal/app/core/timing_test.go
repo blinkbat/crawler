@@ -366,7 +366,7 @@ func TestScaleIncomingDamage_DefendedHitNeverHeals(t *testing.T) {
 
 func TestTimingQualityLabel_AllGrades(t *testing.T) {
 	cases := map[int]string{
-		TimingQualityMiss:      "Miss...",
+		TimingQualityMiss:      "Whiff!",
 		TimingQualityNice:      "Nice!",
 		TimingQualityGood:      "Good!",
 		TimingQualityGreat:     "Great!",

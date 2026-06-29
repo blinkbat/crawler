@@ -31,19 +31,26 @@ func TestAverageLevels_LivingOnly(t *testing.T) {
 	if got := PartyAverageLevel(party); got != 5 { // (4+6)/2
 		t.Errorf("PartyAverageLevel = %v, want 5", got)
 	}
+	rat := NewEnemy(EnemyRat) // Tier 1 == DefaultEnemyLevel
 	pack := Pack{Members: []Enemy{
-		{Alive: true}, // unauthored level → DefaultEnemyLevel
+		rat,
 		{Alive: false},
 	}}
-	if got := PackAverageLevel(pack); got != float64(DefaultEnemyLevel) {
-		t.Errorf("PackAverageLevel = %v, want %v", got, float64(DefaultEnemyLevel))
+	if got := PackAverageLevel(pack); got != float64(EnemyLevel(&rat)) {
+		t.Errorf("PackAverageLevel = %v, want %v", got, float64(EnemyLevel(&rat)))
 	}
 }
 
-// TestEnemyLevel_DefaultsWhenUnauthored: an unauthored definition reads DefaultEnemyLevel.
-func TestEnemyLevel_DefaultsWhenUnauthored(t *testing.T) {
-	rat := NewEnemy(EnemyRat)
-	if got := EnemyLevel(&rat); got != DefaultEnemyLevel {
-		t.Errorf("EnemyLevel(rat) = %d, want default %d", got, DefaultEnemyLevel)
+// TestEnemyLevel_ReadsTier: with no authored Level, EnemyLevel falls back to the
+// foe's Tier so flee odds scale with pack threat (a higher-tier pack is harder to
+// flee), not a uniform level 1.
+func TestEnemyLevel_ReadsTier(t *testing.T) {
+	bat := NewEnemy(EnemyBat) // Tier 2, no authored Level
+	rat := NewEnemy(EnemyRat) // Tier 1
+	if got, want := EnemyLevel(&bat), enemyGoverningDef(&bat).Tier; got != want {
+		t.Errorf("EnemyLevel(bat) = %d, want its Tier %d", got, want)
+	}
+	if EnemyLevel(&bat) <= EnemyLevel(&rat) {
+		t.Errorf("higher-tier Bat should out-level Tier-1 Rat for flee math")
 	}
 }

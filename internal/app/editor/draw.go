@@ -479,7 +479,7 @@ func drawToolbarTooltip(s *State, font rl.Font, theme render.Theme) {
 	if s.modal != modalNone || s.dropdownOpen() {
 		return
 	}
-	mp := rl.GetMousePosition()
+	mp := frameMouse // Draw()-cached; avoids a per-frame CGo poll
 	if !pointIn(mp, s.rect.toolbar) {
 		return
 	}
@@ -687,7 +687,7 @@ const (
 	modalBtnGap       = float32(8)   // gap between stacked / row modal buttons
 	modalBottomInset  = float32(14)  // gap from the card's bottom edge to the button block
 	tightBtnGap       = float32(6)   // gap for dense strips: the topbar/toolbar, the wrapped add grid, equal-width rows
-	modalWideBtnW     = float32(110) // width of the Delete / Close affordance shared by the door + custom-enemy modals
+	modalWideBtnW     = float32(110) // width of the Delete / Close affordance shared by the door + dialog edit modals
 	buttonLabelPadX   = float32(28)  // horizontal padding added around a measured label to size an auto-width button (buttonWidth + context menu)
 	textFieldH        = float32(28)  // single-line text-field / input row height (shared by rename, Save As, sound name, dialog rows)
 	modalFooterHintDY = float32(26)  // dismissal/help hint baseline up from the card's bottom edge

@@ -186,6 +186,7 @@ func Init() {
 	defer func() {
 		if r := recover(); r != nil {
 			// Clean up and return ready=false. Do NOT re-panic (see doc above).
+			stopMusic() // free BGM streams if the panic landed after startMusic
 			unloadBank()
 			rl.CloseAudioDevice()
 			ready = false

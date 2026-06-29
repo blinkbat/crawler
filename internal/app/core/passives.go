@@ -85,14 +85,16 @@ func MemberRollCrit(rng *rand.Rand, m *PartyMember, quality int) bool {
 }
 
 // MemberDodgeChance is DodgeChance plus the Thief's Fleet Footed bonus
-// (FleetFootedDodgePerRank per rank). Member-aware sibling of DodgeChance.
+// (FleetFootedDodgePerRank per rank), re-clamped at DodgeCap. Member-aware sibling
+// of DodgeChance (mirrors MemberCritChance re-clamping at CritCap — the passive must
+// not let a Thief vault the dodge ceiling the rest of the game respects).
 func MemberDodgeChance(m *PartyMember) float64 {
 	if m == nil {
 		return 0
 	}
 	c := DodgeChance(EffectiveStats(*m))
 	c += float64(PassiveRank(m, PassiveFleetFooted)) * FleetFootedDodgePerRank
-	return c
+	return Clamp(c, 0, DodgeCap)
 }
 
 // MemberRollDodge rolls a dodge for a member, folding in Fleet Footed via

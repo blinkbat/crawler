@@ -7,7 +7,7 @@ Windows-first (PowerShell default; prefer bash if installed). `raylib.dll` must 
 
 - Test: `go test -count=1 ./...`
 - Vet: `go vet ./...`
-- Build (smoke-check): `go build ./...` or `go build -o .\.codex-build\crawler-3d.exe .`
+- Build (smoke-check): `go build ./...` or `go build -o .\.build\crawler-3d.exe .`
 
 **Never `go run .` to smoke-test.** It opens a real game window over the user's screen. To verify a change builds: `go build` / `go test` / `go vet`. For UI/render changes, describe what should be visible and let the user open the binary. Only launch when explicitly asked ("run it", "show me") — and prefer the run skill.
 
