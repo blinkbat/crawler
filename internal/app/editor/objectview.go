@@ -9,23 +9,56 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Object Browser (modalObjectView): a paged 3D gallery of every placeable prop,
-// each a live thumbnail via render.DrawObjectPreview. render owns the art + list.
+// Object Browser (modalObjectView): a paged 3×3 gallery of every placeable object
+// (props, decor, and the 3D entities), each a live thumbnail via
+// render.DrawObjectPreview. Drag a thumbnail to rotate it; wheel over one to zoom.
+// render owns the art + list.
 
 const (
-	objViewModalW = float32(980)
-	objViewModalH = float32(660)
+	objViewModalW = float32(1140)
+	objViewModalH = float32(850)
 	objViewHeader = float32(44) // header band before the grid
-	objViewCols   = 5
-	objViewThumbH = float32(130)
+	objViewCols   = 3
+	objViewThumbH = float32(205)
 	objViewLabelH = float32(18)
 	objViewRowGap = float32(10) // gap between a label and the next thumb
-	objViewBtnW   = float32(96)
+	objViewBtnW   = float32(104)
+	// objViewZoom{Min,Max} clamp a preview's wheel dolly; Rot/Zoom rates tune the
+	// drag-rotate and wheel-zoom sensitivity.
+	objViewZoomMin  = float32(0.4)
+	objViewZoomMax  = float32(4)
+	objViewRotRate  = float32(0.01)
+	objViewZoomRate = float32(0.12)
 )
+
+// objPreview is one thumbnail's view pose: drag-rotate yaw/pitch (radians, added
+// to the default three-quarter view) and wheel-zoom dolly (1 = fit). Zero value's
+// zoom reads as 1 via objPreviewView.
+type objPreview struct {
+	yaw, pitch, zoom float32
+}
 
 func openObjectViewModal(s *State) {
 	openModal(s, modalObjectView)
 	s.objectViewPage = 0
+	s.objViewView = map[int]objPreview{}
+	s.objViewDrag = -1
+}
+
+// objPreviewView returns item idx's stored pose, defaulting zoom to 1 (fit).
+func (s *State) objPreviewView(idx int) objPreview {
+	v := s.objViewView[idx]
+	if v.zoom == 0 {
+		v.zoom = 1
+	}
+	return v
+}
+
+func (s *State) setObjPreviewView(idx int, v objPreview) {
+	if s.objViewView == nil {
+		s.objViewView = map[int]objPreview{}
+	}
+	s.objViewView[idx] = v
 }
 
 // objViewThumbsBuf is the reused gallery-cell rect buffer (single-instance modal).
@@ -39,6 +72,17 @@ type objectViewLayout struct {
 	page, pageCount  int
 	prevBtn, nextBtn rl.Rectangle
 	closeBtn         rl.Rectangle
+}
+
+// thumbAt returns the LOCAL thumb index (0..len-1) under mp, or -1. The object
+// index is l.start + the returned value.
+func thumbAt(l objectViewLayout, mp rl.Vector2) int {
+	for i, r := range l.thumbs {
+		if pointIn(mp, r) {
+			return i
+		}
+	}
+	return -1
 }
 
 // computeObjectViewLayout builds the current page's geometry (shared by draw +
@@ -109,12 +153,21 @@ func updateObjectViewModal(s *State) Action {
 		closeModal(s)
 		return ActionNone
 	}
+	mp := rl.GetMousePosition()
+	hoverThumb := thumbAt(l, mp) // local index, or -1
 
-	// All paging inputs funnel through setObjectViewPage (down/Right/PgDn/Next advances).
-	if w := rl.GetMouseWheelMove(); w < 0 {
-		setObjectViewPage(s, s.objectViewPage+1, l.pageCount)
-	} else if w > 0 {
-		setObjectViewPage(s, s.objectViewPage-1, l.pageCount)
+	// Wheel over a preview zooms THAT preview; elsewhere it pages.
+	if w := rl.GetMouseWheelMove(); w != 0 {
+		if hoverThumb >= 0 {
+			idx := l.start + hoverThumb
+			v := s.objPreviewView(idx)
+			v.zoom = core.Clamp(v.zoom*(1+objViewZoomRate*w), objViewZoomMin, objViewZoomMax)
+			s.setObjPreviewView(idx, v)
+		} else if w < 0 {
+			setObjectViewPage(s, s.objectViewPage+1, l.pageCount)
+		} else {
+			setObjectViewPage(s, s.objectViewPage-1, l.pageCount)
+		}
 	}
 	if rl.IsKeyPressed(rl.KeyRight) || rl.IsKeyPressed(rl.KeyPageDown) {
 		setObjectViewPage(s, s.objectViewPage+1, l.pageCount)
@@ -124,7 +177,6 @@ func updateObjectViewModal(s *State) Action {
 	}
 
 	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
-		mp := rl.GetMousePosition()
 		switch {
 		case pointIn(mp, l.prevBtn):
 			setObjectViewPage(s, s.objectViewPage-1, l.pageCount)
@@ -133,10 +185,24 @@ func updateObjectViewModal(s *State) Action {
 		case pointIn(mp, l.closeBtn):
 			closeModal(s)
 			return ActionNone
+		case hoverThumb >= 0:
+			s.objViewDrag = l.start + hoverThumb // grab this thumbnail to drag-rotate
 		case !pointIn(mp, l.card): // click-away dismisses
 			closeModal(s)
 			return ActionNone
 		}
+	}
+	// Drag-rotate the grabbed preview (index survives the cursor leaving the cell).
+	if s.objViewDrag >= 0 && rl.IsMouseButtonDown(rl.MouseLeftButton) {
+		if d := rl.GetMouseDelta(); d.X != 0 || d.Y != 0 {
+			v := s.objPreviewView(s.objViewDrag)
+			v.yaw += d.X * objViewRotRate
+			v.pitch -= d.Y * objViewRotRate
+			s.setObjPreviewView(s.objViewDrag, v)
+		}
+	}
+	if rl.IsMouseButtonReleased(rl.MouseLeftButton) {
+		s.objViewDrag = -1
 	}
 	return ActionNone
 }
@@ -152,9 +218,14 @@ func drawObjectViewModal(s *State, font rl.Font, theme render.Theme) {
 
 	for i, thumb := range l.thumbs {
 		item := l.items[l.start+i]
+		v := s.objPreviewView(l.start + i)
 		rl.DrawRectangleRec(thumb, bgFieldInset)
-		render.DrawObjectPreview(thumb, frameAssets, item, 1)
-		rl.DrawRectangleLinesEx(thumb, 1, editorBorderDim)
+		render.DrawObjectPreview(thumb, frameAssets, item, v.yaw, v.pitch, v.zoom)
+		border := editorBorderDim
+		if s.objViewDrag == l.start+i {
+			border = editorBorderActive // highlight the thumbnail being rotated
+		}
+		rl.DrawRectangleLinesEx(thumb, 1, border)
 
 		lw := render.MeasureRichText(font, item.Name, editorFontHint, 1).X
 		render.DrawRichText(font, item.Name,
@@ -166,7 +237,7 @@ func drawObjectViewModal(s *State, font rl.Font, theme render.Theme) {
 	drawButton(font, l.nextBtn, "Next ›", false)
 	drawButton(font, l.closeBtn, "Close", false)
 
-	pageText := fmt.Sprintf("Page %d / %d   ·   %d objects", l.page+1, l.pageCount, len(l.items))
+	pageText := fmt.Sprintf("Page %d / %d   ·   %d objects   ·   drag to rotate, wheel to zoom", l.page+1, l.pageCount, len(l.items))
 	pw := render.MeasureRichText(font, pageText, editorFontHint, 1).X
 	render.DrawRichText(font, pageText,
 		rl.NewVector2(l.card.X+(l.card.Width-pw)/2, l.prevBtn.Y+(modalBtnH-editorFontHint)/2),

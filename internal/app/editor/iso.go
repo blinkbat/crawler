@@ -10,36 +10,47 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// 3D view (View ▸ Isometric View / `I`): rotatable extruded-block view showing
-// elevation. LIMITED edit surface — elevation only: L-click raises / R-click
-// lowers a column; with Ramp tool on, L drops / R clears a ramp. Flat layers
-// stay top-down. Renders into an off-screen RenderTexture sized to the grid
-// panel and blits it in (same trick as the Foe/Object Visualizers).
+// 3D view (View ▸ Isometric View / `I`): a FULL editing surface that renders the
+// real lit world via render.DrawArea (not stand-in cubes) into an off-screen
+// RenderTexture and blits it into the grid panel. The same tools/brushes/layers
+// as the top-down canvas apply at the ray-picked tile, on the active floor
+// (editLevel). Camera: right-drag orbits freely, Shift+right-drag pans, arrows
+// pan, wheel zooms, Q/E snap the yaw by 90° (the mousewheel BUTTON is never bound).
+// The chrome panels (palette, Levels, menus) stay live via handleChromeInput, so
+// the active floor stays selectable while editing in 3D.
 
 // Iso scene tunables (world units inside the off-screen render).
 const (
-	isoTileW    = float32(1.0)  // one tile = one world unit
-	isoLevelH   = float32(0.55) // vertical rise per elevation level
 	isoFovy     = float32(46)
-	isoPitchDeg = 38.0          // camera tilt above the horizon
-	isoPanSpeed = float32(0.02) // middle-drag pan: screen px → world units
-	isoMinZoom  = float32(0.3)  // 3D-view zoom clamp (parallels minZoom/maxZoom for the canvas)
+	isoPitchDeg = 38.0           // default camera tilt above the horizon
+	isoPanSpeed = float32(0.05)  // shift+middle-drag pan: screen px → world units (real scale)
+	isoOrbitRate = float32(0.008) // middle-drag tumble: radians per screen px
+	isoMinPitch = float32(0.12)  // tumble pitch clamp (near-horizon)
+	isoMaxPitch = float32(1.50)  // tumble pitch clamp (near top-down)
+	isoMinZoom  = float32(0.3)   // 3D-view zoom clamp (parallels minZoom/maxZoom for the canvas)
 	isoMaxZoom  = float32(6)
 )
 
 var (
-	isoEdge      = rl.NewColor(20, 24, 30, 130)    // cube wire edges
-	isoEmptyTop  = rl.NewColor(70, 76, 86, 255)    // top when Floor hidden
-	isoHoverWire = rl.NewColor(255, 224, 130, 255) // hovered-column highlight
-	isoRampMark  = rl.NewColor(198, 168, 104, 255) // ramp marker (brass)
-	isoBG        = rl.NewColor(26, 28, 34, 255)    // off-screen clear
+	isoHoverWire   = editorGold                     // hovered-cell / placeable preview
+	isoBlockedWire = rl.NewColor(255, 96, 96, 255)  // footprint-won't-fit preview
+	isoBG          = rl.NewColor(26, 28, 34, 255)   // off-screen clear
+	isoActiveFloor = withAlpha(editorCyan, 55)      // faint slab marking the active editLevel
 )
+
+// setIsoView switches to (on=true) or away from the 3D view, a no-op if already
+// there. Routes through toggleIsoView so the flash + RT teardown stay in one place.
+func setIsoView(s *State, on bool) {
+	if s.isoView != on {
+		toggleIsoView(s)
+	}
+}
 
 // toggleIsoView flips the 3D view on/off, freeing the off-screen target on exit.
 func toggleIsoView(s *State) {
 	s.isoView = !s.isoView
 	if s.isoView {
-		s.flash("3D view — Q/E orbit · wheel zoom · L-click raise / R-click lower · I for top-down")
+		s.flash("3D edit — right-drag orbit · shift+right pan · wheel zoom · arrows pan · Q/E snap · I for top-down")
 		return
 	}
 	s.freeIsoRT()
@@ -105,31 +116,30 @@ func isoLevelSpan(s *State) (minL, maxL int) {
 	return minL, maxL
 }
 
-// isoColumnHeight is the world-space height of column (x,z): at least one level
-// tall (so flat maps show a pickable slab) plus its rise above the floor.
-func isoColumnHeight(s *State, x, z, minL int) float32 {
-	return float32(s.area.ElevationLevelAt(x, z)-minL+1) * isoLevelH
-}
-
-// isoCamera builds the orbit camera (one of four 45° yaws, fixed pitch,
-// fit-to-map distance × zoom). Level span passed in to avoid rescanning.
+// isoCamera builds the orbit camera in REAL world coordinates (core.TileSize /
+// core.LevelStep), so render.DrawArea — the live game renderer — draws the editor
+// scene identically. One of four 45° yaws, fixed pitch, fit-to-map distance ×
+// zoom. Level span passed in to avoid rescanning.
 func (s *State) isoCamera(minL, maxL int) rl.Camera3D {
 	W, H := s.area.Width, s.area.Height
-	tall := float32(maxL-minL+1) * isoLevelH
-	cx := float32(W-1) / 2
-	cz := float32(H-1) / 2
-	target := rl.NewVector3(cx+s.isoTargetX, tall*0.5, cz+s.isoTargetZ)
+	cx := float32(W) * core.TileSize / 2
+	cz := float32(H) * core.TileSize / 2
+	yLow := core.ElevationWorldY(minL)
+	yHigh := core.ElevationWorldY(maxL) + core.LevelStep
+	target := rl.NewVector3(cx+s.isoTargetX, (yLow+yHigh)*0.5, cz+s.isoTargetZ)
 
-	yaw := float64(s.isoYaw)*(math.Pi/2) + math.Pi/4
-	pitch := isoPitchDeg * math.Pi / 180
+	yaw := float64(s.isoYaw)
+	pitch := float64(s.isoPitch)
 	dir := rl.NewVector3(
 		float32(math.Cos(pitch)*math.Cos(yaw)),
 		float32(math.Sin(pitch)),
 		float32(math.Cos(pitch)*math.Sin(yaw)),
 	)
-	radius := 0.5*float32(math.Hypot(float64(W), float64(H))) + tall
-	if radius < 1 {
-		radius = 1
+	spanX := float32(W) * core.TileSize
+	spanZ := float32(H) * core.TileSize
+	radius := 0.5*float32(math.Hypot(float64(spanX), float64(spanZ))) + (yHigh - yLow)
+	if radius < core.TileSize {
+		radius = core.TileSize
 	}
 	dist := radius / float32(math.Sin(float64(isoFovy)*math.Pi/360)) * 1.1
 	if s.isoZoom > 0 {
@@ -144,13 +154,74 @@ func (s *State) isoCamera(minL, maxL int) rl.Camera3D {
 	}
 }
 
-// isoColumnBox is the world-space bounding box of column (x,z); shared by draw
-// and ray-pick so the click target matches the rendered block.
+// isoColumnBox is the world-space bounding box of column (x,z) in real
+// coordinates; shared by the hover highlight and ray-pick so the click target
+// matches the rendered geometry. Spans from a bit below the lowest floor up to
+// the column's top surface (at least one level tall so flat maps stay pickable).
 func (s *State) isoColumnBox(x, z, minL int) (center, size rl.Vector3) {
-	ht := isoColumnHeight(s, x, z, minL)
-	center = rl.NewVector3(float32(x), ht*0.5, float32(z))
-	size = rl.NewVector3(isoTileW*0.98, ht, isoTileW*0.98)
+	yBot := core.ElevationWorldY(minL) - core.LevelStep*0.5
+	yTop := core.ElevationWorldY(s.area.ElevationLevelAt(x, z))
+	if yTop <= yBot {
+		yTop = yBot + core.LevelStep
+	}
+	center = rl.NewVector3(core.TileCenter(x), (yBot+yTop)*0.5, core.TileCenter(z))
+	size = rl.NewVector3(core.TileSize*0.98, yTop-yBot, core.TileSize*0.98)
 	return center, size
+}
+
+// drawIsoBrushPreview outlines the cells the active tool will paint at the hover,
+// on the ACTIVE floor: a multi-tile footprint (gold placeable / red blocked), the
+// brush-size block for grid layers, or a single cell otherwise.
+func drawIsoBrushPreview(s *State) {
+	hx, hz := s.isoHoverX, s.isoHoverZ
+	if fp := activeBrushFootprint(s); fp != nil {
+		col := isoHoverWire
+		if !footprintPlaceable(s, hx, hz, fp) {
+			col = isoBlockedWire
+		}
+		for _, off := range fp {
+			s.drawIsoCellBox(hx+off.DX, hz+off.DZ, col)
+		}
+		return
+	}
+	half := s.brushSize / 2
+	if !isGridLayer(s.layer) || s.brushSize <= 1 {
+		s.drawIsoCellBox(hx, hz, isoHoverWire)
+		return
+	}
+	for dz := -half; dz <= half; dz++ {
+		for dx := -half; dx <= half; dx++ {
+			s.drawIsoCellBox(hx+dx, hz+dz, isoHoverWire)
+		}
+	}
+}
+
+// activeBrushFootprint returns the active Props/Decor brush's multi-tile footprint,
+// or nil (single-tile brush / non-scatter layer).
+func activeBrushFootprint(s *State) []core.MultiTileOffset {
+	c := s.activeBrush().Char
+	switch s.layer {
+	case LayerProps:
+		return core.PropFootprint(c)
+	case LayerDecor:
+		return core.DecorFootprint(c)
+	}
+	return nil
+}
+
+// drawIsoCellBox outlines cell (x,z) at the active floor's height (where a paint
+// lands), skipping off-map cells.
+func (s *State) drawIsoCellBox(x, z int, col rl.Color) {
+	if !s.area.InBounds(x, z) {
+		return
+	}
+	y := core.ElevationWorldY(s.editLevel)
+	center := rl.NewVector3(core.TileCenter(x), y+core.LevelStep*0.5, core.TileCenter(z))
+	size := rl.NewVector3(core.TileSize*0.9, core.LevelStep, core.TileSize*0.9)
+	// Filled translucent slab so the hovered cell reads as a highlight, with the
+	// crisp wire box on top keeping the exact edges legible.
+	rl.DrawCubeV(center, size, withAlpha(col, 70))
+	rl.DrawCubeWiresV(center, size, col)
 }
 
 // isoRayInRect builds the pick ray for a mouse point over `rect` — raylib's
@@ -166,8 +237,11 @@ func isoRayInRect(mp rl.Vector2, rect rl.Rectangle, cam rl.Camera3D) rl.Ray {
 	return rl.NewRay(cam.Position, rl.Vector3Normalize(rl.Vector3Subtract(far, near)))
 }
 
-// isoPick returns the column under the mouse (nearest ray-hit), or (-1,-1) when
-// off-canvas or missing every block. minL is the precomputed level floor.
+// isoPick returns the tile under the mouse, or (-1,-1) when off-canvas / off-map.
+// It first ray-tests the per-column boxes (so the visible surface wins), then
+// falls back to the active floor's ground plane — the column boxes are inset with
+// seams between them, so a grazing ray over flat/low terrain would otherwise slip
+// through and painting would silently miss. minL is the precomputed level floor.
 func (s *State) isoPick(cam rl.Camera3D, mp rl.Vector2, minL int) (int, int) {
 	if !pointIn(mp, s.rect.grid) {
 		return -1, -1
@@ -185,7 +259,36 @@ func (s *State) isoPick(cam rl.Camera3D, mp rl.Vector2, minL int) (int, int) {
 			}
 		}
 	}
-	return bestX, bestZ
+	if bestX >= 0 {
+		return bestX, bestZ
+	}
+	// Fallback: intersect the active floor's horizontal plane so a brush lands
+	// anywhere over the map footprint, not only on a column the ray happened to hit.
+	if ray.Direction.Y != 0 {
+		planeY := core.ElevationWorldY(s.editLevel)
+		if t := (planeY - ray.Position.Y) / ray.Direction.Y; t > 0 {
+			hit := rl.Vector3Add(ray.Position, rl.Vector3Scale(ray.Direction, t))
+			tx := int(math.Floor(float64(hit.X / core.TileSize)))
+			tz := int(math.Floor(float64(hit.Z / core.TileSize)))
+			if s.area.InBounds(tx, tz) {
+				return tx, tz
+			}
+		}
+	}
+	return -1, -1
+}
+
+// ensureIsoPreview returns a preview GameState (chests/doors/crystals/packs made
+// live) for the 3D view's entity + foe draw, rebuilt only when the map content
+// changes (contentEpoch). NewGameState is too heavy to run per frame; caching by
+// epoch runs it once per committed edit.
+func (s *State) ensureIsoPreview() *core.GameState {
+	if s.isoPreview == nil || s.isoPreviewEpoch != s.contentEpoch {
+		g := core.NewGameState(core.CloneArea(s.area))
+		s.isoPreview = &g
+		s.isoPreviewEpoch = s.contentEpoch
+	}
+	return s.isoPreview
 }
 
 // drawGridIso renders extruded 3D blocks off-screen, blits them, then overlays a readout.
@@ -201,15 +304,43 @@ func drawGridIso(s *State, font rl.Font) {
 	}
 	minL, maxL := isoLevelSpan(s)
 	cam := s.isoCamera(minL, maxL)
-	floorHidden := s.layerHidden[LayerFloor]
 
 	rl.BeginTextureMode(s.isoRT)
 	rl.ClearBackground(isoBG)
 	rl.BeginMode3D(cam)
-	for z := 0; z < s.area.Height; z++ {
-		for x := 0; x < s.area.Width; x++ {
-			s.drawIsoColumn(x, z, minL, floorHidden, x == s.isoHoverX && z == s.isoHoverZ)
-		}
+	// Render through the REAL game renderer so the editor shows the actual lit,
+	// textured world (floors/walls/props/decor), not stand-in cubes. Fixed daytime
+	// lighting (stepCount 0). Clear-view cuts the atmospheric fog + gloom (an
+	// authoring surface must SEE); freeze pins sway/flicker unless Object Animation
+	// is on. Both scoped to this render so F5 playtests keep the real look.
+	// defer the resets so a panic mid-draw (e.g. a driver fault in DrawModelEx)
+	// can't leak the editor grade into the in-game render path.
+	render.SetEditorClearView(true)
+	defer render.SetEditorClearView(false)
+	render.SetEditorFreezeAnim(!s.animateObjects)
+	defer render.SetEditorFreezeAnim(false)
+	render.DrawArea(cam, &s.area, frameAssets, 0, nil, s.levelVisibleInIso)
+	// Entities + foes so the 3D view matches play: chests, doors, crystals, packs.
+	// Built from a preview GameState cached per content edit (see ensureIsoPreview).
+	if g := s.ensureIsoPreview(); g != nil {
+		render.DrawChests(cam, g, frameAssets)
+		render.DrawDoors(cam, g, frameAssets)
+		render.DrawCrystals(cam, g, frameAssets)
+		render.DrawEnemies(cam, g, frameAssets)
+	}
+	// Active-floor indicator: a faint translucent slab across the map at the
+	// active editLevel, so the user can see WHICH floor a paint will land on (the
+	// user's "edit one floor, others visible" cue). Drawn before the hover box.
+	ey := core.ElevationWorldY(s.editLevel)
+	mcx := float32(s.area.Width) * core.TileSize / 2
+	mcz := float32(s.area.Height) * core.TileSize / 2
+	rl.DrawCubeV(rl.NewVector3(mcx, ey+0.03, mcz),
+		rl.NewVector3(float32(s.area.Width)*core.TileSize, 0.02, float32(s.area.Height)*core.TileSize),
+		isoActiveFloor)
+	// Brush/footprint preview at the active floor: the exact cells the next paint
+	// will hit (gold), or red when a multi-tile footprint won't fit.
+	if s.isoHoverX >= 0 {
+		drawIsoBrushPreview(s)
 	}
 	rl.EndMode3D()
 	rl.EndTextureMode()
@@ -222,61 +353,81 @@ func drawGridIso(s *State, font rl.Font) {
 	drawIsoReadout(s, font, grid)
 }
 
-// drawIsoColumn paints one column: darker body + brighter top cap, wire edges,
-// optional ramp marker, gold highlight when hovered.
-func (s *State) drawIsoColumn(x, z, minL int, floorHidden, hovered bool) {
-	center, size := s.isoColumnBox(x, z, minL)
-	// Bounds-safe cellAt, not raw Floor[z][x]: a ragged area would panic.
-	top := isoEmptyTop
-	if fb, ok := cellAt(s.area.Floor, x, z); ok {
-		top = rl.Color(floorColor(fb))
-	}
-	if floorHidden {
-		top = isoEmptyTop
-	}
-	// Darker body so the bright cap reads as lit (flat DrawCube is unshaded).
-	rl.DrawCubeV(center, size, render.ShadeColor(top, 0.7))
-	capCenter := rl.NewVector3(center.X, center.Y+size.Y/2-0.01, center.Z)
-	rl.DrawCubeV(capCenter, rl.NewVector3(size.X, 0.02, size.Z), top)
-	rl.DrawCubeWiresV(center, size, isoEdge)
-
-	if _, ok := s.area.RampAt(x, z); ok {
-		// Brass slab marks "there's a ramp here" (direction detail stays top-down).
-		mark := rl.NewVector3(center.X, center.Y+size.Y/2+0.02, center.Z)
-		rl.DrawCubeV(mark, rl.NewVector3(size.X*0.5, 0.06, size.Z*0.5), isoRampMark)
-	}
-	if hovered {
-		hi := rl.NewVector3(size.X+0.04, size.Y+0.04, size.Z+0.04)
-		rl.DrawCubeWiresV(center, hi, isoHoverWire)
-	}
-}
-
 // drawIsoReadout shows the hovered column's coords + signed level, plus a hint.
 func drawIsoReadout(s *State, font rl.Font, grid rl.Rectangle) {
-	hint := "3D · Q/E orbit · wheel zoom · L raise / R lower · I top-down"
+	hint := "3D · right-drag orbit · shift+right pan · wheel zoom · arrows pan · L tool · R-click menu · Q/E snap · PgUp/Dn or Levels = floor · I top-down"
 	rl.DrawTextEx(font, hint, rl.NewVector2(grid.X+8, grid.Y+8), editorFontHint, 1, rl.NewColor(210, 214, 222, 200))
+	// Active floor + brush: the floor a paint lands on (matches the slab) and what
+	// the active tool will stamp — so editing in 3D isn't blind to either.
+	active := fmt.Sprintf("floor %s  ·  %s", signedLevelLabel(s.editLevel), s.activeBrush().Name)
+	rl.DrawTextEx(font, active, rl.NewVector2(grid.X+8, grid.Y+8+editorFontHint+4), editorFontHint, 1, rl.NewColor(150, 210, 255, 235))
 	if s.isoHoverX >= 0 {
 		lvl := s.area.ElevationLevelAt(s.isoHoverX, s.isoHoverZ) - core.ElevationBaseline
-		txt := fmt.Sprintf("%s  level %+d", core.TileCoord(s.isoHoverX, s.isoHoverZ), lvl)
-		rl.DrawTextEx(font, txt, rl.NewVector2(grid.X+8, grid.Y+8+editorFontHint+4), editorFontHint, 1, rl.NewColor(255, 224, 130, 235))
+		txt := fmt.Sprintf("%s  surface %+d", core.TileCoord(s.isoHoverX, s.isoHoverZ), lvl)
+		rl.DrawTextEx(font, txt, rl.NewVector2(grid.X+8, grid.Y+8+2*(editorFontHint+4)), editorFontHint, 1, withAlpha(editorGold, 235))
 	}
 }
 
-// updateIsoCanvas drives the 3D view: orbit (Q/E), zoom, pan, elevation edits.
+// isoPanTarget slides the 3D orbit target by a screen-space delta (dx = right,
+// dy = down), the shared pan rule for Shift+right-drag and arrow-key panning so
+// keyboard and mouse never disagree on direction.
+func (s *State) isoPanTarget(dx, dy float32) {
+	yaw := float64(s.isoYaw)
+	rx, rz := float32(math.Cos(yaw+math.Pi/2)), float32(math.Sin(yaw+math.Pi/2))
+	fx, fz := float32(math.Cos(yaw)), float32(math.Sin(yaw))
+	k := isoPanSpeed / s.isoZoom
+	s.isoTargetX -= (rx*dx + fx*dy) * k
+	s.isoTargetZ -= (rz*dx + fz*dy) * k
+}
+
+// updateIsoCanvas drives the 3D editing surface: the SAME tool/brush/layer/
+// editLevel model as the top-down canvas, fed the ray-picked tile — so every
+// tool paints in 3D. Right-drag orbits (free tumble), Shift+right-drag pans, the
+// wheel zooms, Q/E snap the yaw by 90°, left edits, a right-click (no drag)
+// opens the context menu.
 func updateIsoCanvas(s *State, mp rl.Vector2) {
 	if rl.IsKeyPressed(rl.KeyE) {
-		s.isoYaw = (s.isoYaw + 1) & 3
+		s.isoYaw += math.Pi / 2
 	}
 	if rl.IsKeyPressed(rl.KeyQ) {
-		s.isoYaw = (s.isoYaw + 3) & 3
+		s.isoYaw -= math.Pi / 2
 	}
 
 	minL, maxL := isoLevelSpan(s)
 	cam := s.isoCamera(minL, maxL)
 	s.isoHoverX, s.isoHoverZ = s.isoPick(cam, mp, minL)
+	// Mirror the pick onto hoverX/Z so the shared rect/line/select + finishDrag
+	// code (which reads the hover tile) resolves the right cell in 3D too.
+	s.hoverX, s.hoverZ = s.isoHoverX, s.isoHoverZ
+	hx, hz := s.isoHoverX, s.isoHoverZ
+	shift := rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
+	ctrl := rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl)
+
+	// Camera: right-drag orbits (tumble); Shift+right-drag pans the target. Before
+	// the on-canvas gate so a drag leaving the panel keeps tracking. The mousewheel
+	// BUTTON is intentionally unbound; a right-click without a drag opens the menu.
+	s.updateRightDrag(mp)
+	if rl.IsMouseButtonDown(rl.MouseRightButton) {
+		d := rl.GetMouseDelta()
+		if shift {
+			s.isoPanTarget(d.X, d.Y) // Shift+right-drag pans
+		} else {
+			// Right-drag orbits freely — yaw with horizontal, pitch with vertical.
+			s.isoYaw += d.X * isoOrbitRate
+			s.isoPitch = core.Clamp(s.isoPitch-d.Y*isoOrbitRate, isoMinPitch, isoMaxPitch)
+		}
+	}
+	// A paint/drag commits on release wherever the cursor ends, and an in-progress
+	// stroke keeps painting across picked cells — both ungated by the panel rect.
+	if rl.IsMouseButtonReleased(rl.MouseLeftButton) {
+		finishDrag(s)
+	}
+	if rl.IsMouseButtonDown(rl.MouseLeftButton) && s.drag != dragNone && hx >= 0 {
+		continueDrag(s, hx, hz)
+	}
 
 	if !pointIn(mp, s.rect.grid) {
-		return // orbit keys still applied above; no edit/zoom/pan off-canvas
+		return // camera + release handled above; no new edit/zoom off-canvas
 	}
 
 	if wheel := rl.GetMouseWheelMove(); wheel != 0 {
@@ -287,47 +438,33 @@ func updateIsoCanvas(s *State, mp rl.Vector2) {
 		s.isoZoom *= 1 + canvasZoomWheelRate*wheel
 		s.isoZoom = core.Clamp(s.isoZoom, isoMinZoom, isoMaxZoom)
 	}
-	if rl.IsMouseButtonDown(rl.MouseMiddleButton) {
-		d := rl.GetMouseDelta()
-		yaw := float64(s.isoYaw)*(math.Pi/2) + math.Pi/4
-		rx, rz := float32(math.Cos(yaw+math.Pi/2)), float32(math.Sin(yaw+math.Pi/2))
-		fx, fz := float32(math.Cos(yaw)), float32(math.Sin(yaw))
-		k := isoPanSpeed / s.isoZoom
-		s.isoTargetX -= (rx*d.X + fx*d.Y) * k
-		s.isoTargetZ -= (rz*d.X + fz*d.Y) * k
-	}
 
-	hx, hz := s.isoHoverX, s.isoHoverZ
 	if hx < 0 {
 		return
 	}
-	if s.rampMode {
-		if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
-			placeRamp(s, hx, hz)
-		}
-		if rl.IsMouseButtonPressed(rl.MouseRightButton) {
-			isoClearRamp(s, hx, hz)
-		}
-		return
-	}
+	// Left press starts the active tool's interaction (startDrag dispatches paint /
+	// rect / flood / ramp / entity exactly as top-down). Right opens the context
+	// menu, or clears a ramp in ramp mode.
 	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
-		isoSetColumnLevel(s, hx, hz, +1)
+		startDrag(s, hx, hz, ctrl, shift)
 	}
-	if rl.IsMouseButtonPressed(rl.MouseRightButton) {
-		isoSetColumnLevel(s, hx, hz, -1)
+	if rl.IsMouseButtonReleased(rl.MouseRightButton) && !s.rightDragMoved {
+		if s.rampMode {
+			isoClearRamp(s, hx, hz)
+			return
+		}
+		openContextMenu(s, mp.X, mp.Y, hx, hz)
 	}
 }
 
-// isoSetColumnLevel raises/lowers the column's ground level by delta, clamped to [0, maxEditLevel].
-func isoSetColumnLevel(s *State, x, z, delta int) {
-	cur := s.area.ElevationLevelAt(x, z)
-	next := clampLevel(cur + delta)
-	if next == cur {
-		return
+// levelVisibleInIso reports whether floor L's props/decor should render in the 3D
+// view — honoring the Levels-panel eye toggles so the user can isolate a floor
+// while editing. Out-of-range levels are visible (never hide unexpected content).
+func (s *State) levelVisibleInIso(L int) bool {
+	if L < 0 || L >= len(s.levelHidden) {
+		return true
 	}
-	pushUndo(s)
-	setTileGroundLevel(s, x, z, next)
-	s.dirty = true
+	return !s.levelHidden[L]
 }
 
 // isoClearRamp removes a ramp at (x,z) (floor → auto). No-op when there's none.

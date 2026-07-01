@@ -1,8 +1,6 @@
 package core
 
 import (
-	"slices"
-
 	"crawler/internal/app/core/mapfile"
 )
 
@@ -331,6 +329,18 @@ func (a *AreaDefinition) ResolveStepLanding(fromX, fromL, fromZ, dir int) (landL
 	return a.ElevationLevelAt(fromX+dx, fromZ+dz), a.StepElevationOK(fromX, fromZ, dir)
 }
 
+// resolveEntityLevel returns the standing floor a placed entity should occupy at
+// (x,z): its authored `stored` level when that surface is standable, else the
+// column's ground spawn level. This covers legacy entities (stored 0, before the
+// per-floor @N sections) on a raised-baseline map — a non-standable stored level
+// falls back to the actual ground, so old maps render unchanged.
+func (a *AreaDefinition) resolveEntityLevel(x, z, stored int) int {
+	if a.Standable(x, stored, z) {
+		return stored
+	}
+	return a.GroundSpawnLevel(x, z)
+}
+
 // GroundSpawnLevel is the standing level a unit placed at (x,z) should occupy
 // (lowest standable surface, else column top). For out-of-package placement
 // (door transitions) building a player without a saved level.
@@ -364,9 +374,7 @@ func (a *AreaDefinition) growSolidsTo(n int) {
 // trimTopAir drops trailing all-air planes so height tracks the tallest cube.
 // Never trims below one plane.
 func (a *AreaDefinition) trimTopAir() {
-	for len(a.Solids) > 1 && planeAllAir(a.Solids[len(a.Solids)-1]) {
-		a.Solids = a.Solids[:len(a.Solids)-1]
-	}
+	a.Solids = trimScatterTop(a.Solids, SolidAir)
 }
 
 // setSolidCell writes c at (x,level,z), materializing + growing the stack and
@@ -477,29 +485,10 @@ func canonicalSolids(a AreaDefinition) [][]string {
 	if len(stack) == 0 {
 		stack = BuildSolidsFromElevation(&a)
 	}
-	// Trim trailing all-air planes.
-	hi := len(stack)
-	for hi > 0 && planeAllAir(stack[hi-1]) {
-		hi--
-	}
-	stack = stack[:hi]
-	out := make([][]string, len(stack))
-	for L := range stack {
-		out[L] = normalizeOptionalLayer(stack[L], a.Width, a.Height, SolidAir)
-	}
-	return out
+	return canonicalizeStack(stack, a.Width, a.Height, SolidAir)
 }
 
-func planeAllAir(rows []string) bool {
-	for _, r := range rows {
-		for i := 0; i < len(r); i++ {
-			if r[i] != SolidAir {
-				return false
-			}
-		}
-	}
-	return true
-}
+func planeAllAir(rows []string) bool { return planeAllChar(rows, SolidAir) }
 
 // solidsEqual compares two areas' voxel stacks with absent==derived semantics.
 func solidsEqual(a, b AreaDefinition) bool {
@@ -508,14 +497,5 @@ func solidsEqual(a, b AreaDefinition) bool {
 	if len(a.Solids) == 0 && len(b.Solids) == 0 {
 		return true
 	}
-	ca, cb := canonicalSolids(a), canonicalSolids(b)
-	if len(ca) != len(cb) {
-		return false
-	}
-	for L := range ca {
-		if !slices.Equal(ca[L], cb[L]) {
-			return false
-		}
-	}
-	return true
+	return canonicalStacksEqual(canonicalSolids(a), canonicalSolids(b))
 }

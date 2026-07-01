@@ -6,6 +6,7 @@ import (
 	"crawler/internal/app/core"
 	"crawler/internal/app/render"
 	"fmt"
+	"math"
 	"strconv"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -367,6 +368,28 @@ func layerName(l Layer) string {
 	return layerDisplayNames[l]
 }
 
+// layerAccentColors color-codes each layer (chip + border on the Layer selector
+// and one swatch per dropdown row) so the active layer reads at a glance. Hues
+// echo each layer's palette family: floor=grass, decor=teal, props=wood,
+// ceiling=sky, elevation=stone-tan, entities=amber.
+var layerAccentColors = [layerCount]rl.Color{
+	LayerWalls:     rl.NewColor(150, 148, 142, 255),
+	LayerFloor:     rl.NewColor(120, 184, 110, 255),
+	LayerDecor:     rl.NewColor(110, 186, 170, 255),
+	LayerProps:     rl.NewColor(200, 140, 82, 255),
+	LayerCeiling:   rl.NewColor(96, 150, 208, 255),
+	LayerElevation: rl.NewColor(198, 168, 120, 255),
+	LayerEntities:  rl.NewColor(214, 176, 96, 255),
+}
+
+// layerAccent returns layer l's color-code (falls back to the active-border tint).
+func layerAccent(l Layer) rl.Color {
+	if int(l) < 0 || int(l) >= len(layerAccentColors) {
+		return editorBorderActive
+	}
+	return layerAccentColors[l]
+}
+
 // selectableLayers are the layers the author can make active (Tab-cycle, Alt+N,
 // layer picker). LayerWalls is absent: faces are now a per-tile property set from
 // the right-click context menu, not a paintable layer.
@@ -690,6 +713,11 @@ type State struct {
 
 	// objectViewPage is the current Object Browser page (modalObjectView).
 	objectViewPage int
+	// Object Browser per-item view: drag-rotate (yaw/pitch) + wheel-zoom, keyed by
+	// object index so each thumbnail keeps its own pose. objViewDrag is the index
+	// being drag-rotated (-1 = none).
+	objViewView map[int]objPreview
+	objViewDrag int
 
 	pending pendingAction
 
@@ -739,6 +767,12 @@ type State struct {
 	panX    float32
 	panY    float32
 	panning bool
+	// rightDragStart / rightDragMoved disambiguate a right-button PAN drag from a
+	// right-CLICK (context menu): the press records the start; movement past
+	// panDragThreshold marks it a drag so the release opens no menu. The mousewheel
+	// BUTTON is never bound — right-drag replaced the old middle-drag pan.
+	rightDragStart rl.Vector2
+	rightDragMoved bool
 	// scrollDrag is cross-frame memory for an in-flight scrollbar thumb drag.
 	// Zero value (scrollNone) = no drag. See scrollbar.go.
 	scrollDrag scrollDragState
@@ -759,15 +793,24 @@ type State struct {
 	// isoView swaps to a rotatable 3D block view; suppresses the top-down
 	// screen→tile path (cellAt early-returns). See iso.go.
 	isoView bool
+	// animateObjects toggles foliage sway / torch flicker in the 3D view (View
+	// menu). Default off: a still scene is calmer to author in and cheaper.
+	animateObjects bool
 	// 3D-view camera + pick state (iso.go). isoHoverX/Z is the ray-picked column
 	// (-1 when off-canvas); isoRT is the off-screen render target, isoRTW/H its
-	// size for lazy reallocation.
-	isoYaw                 int
+	// size for lazy reallocation. isoYaw/isoPitch are the continuous orbit angles
+	// in radians (right-drag tumbles; Q/E snap yaw by 90°).
+	isoYaw, isoPitch       float32
 	isoZoom                float32
 	isoTargetX, isoTargetZ float32
 	isoHoverX, isoHoverZ   int
 	isoRT                  rl.RenderTexture2D
 	isoRTW, isoRTH         int32
+	// isoPreview caches a NewGameState(area) powering the 3D view's entity/foe
+	// draw (chests/doors/crystals/packs); rebuilt when contentEpoch changes so
+	// the heavy build runs once per edit, not per frame. See ensureIsoPreview.
+	isoPreview      *core.GameState
+	isoPreviewEpoch uint64
 
 	// Ctrl+F5 "test from cursor": when set, the run loop uses testStartOverrideX/Z
 	// as the playtest start, then resets the flag.
@@ -860,10 +903,23 @@ func (s *State) ClearTestStartOverride() {
 	s.testStartOverride = false
 }
 
-// New starts the editor with a blank default-sized FloorAuto map (title-screen
-// entry; the in-editor New flow goes through modalNew).
+// New starts the editor with a blank default-sized FloorAuto map (the in-editor
+// New flow goes through modalNew).
 func New() State {
 	return freshState(blankArea(core.DefaultNewMapDimension, core.DefaultNewMapDimension, core.FloorAuto))
+}
+
+// NewDefault is the title-screen entry: reopen the last map worked on (per
+// editorprefs), falling back to a blank map when there's no valid last map.
+func NewDefault() State {
+	if path := LastMapPath(); path != "" {
+		if area, err := core.LoadArea(path); err == nil {
+			s := NewFromArea(area)
+			surfaceAreaLevels(&s) // open with the map's full level range + start floor
+			return s
+		}
+	}
+	return New()
 }
 
 // NewFromArea opens the editor on an already-loaded area.
@@ -898,7 +954,10 @@ func freshState(a core.AreaDefinition) State {
 		gridCursorZ:           -1,
 		hoverX:                -1,
 		hoverZ:                -1,
+		isoView:               true, // 3D is the default authoring view
 		isoZoom:               1,
+		isoYaw:                math.Pi / 4,           // 45° default orbit
+		isoPitch:              isoPitchDeg * math.Pi / 180, // tilt above horizon
 		isoHoverX:             -1,
 		isoHoverZ:             -1,
 		dragPackIdx:           -1,

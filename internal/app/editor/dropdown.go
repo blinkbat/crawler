@@ -107,6 +107,9 @@ type dropdownEntry struct {
 	// state; nil = no eye. A row uses the eye OR the ✓ marker, not both.
 	toggle   func(*State)
 	toggleOn func(*State) bool
+	// swatch, when opaque (A>0), draws a small color chip before the label — the
+	// Layer picker color-codes its rows this way.
+	swatch rl.Color
 }
 
 // disabledIn reports whether this entry is a disabled row (enabled set and false).
@@ -185,6 +188,7 @@ func layerSelectEntries(s *State) []dropdownEntry {
 			apply:    func(s *State) { s.layer = l },
 			toggle:   func(s *State) { toggleLayerVisibility(s, int(l), false) },
 			toggleOn: func(s *State) bool { return !s.layerHidden[l] },
+			swatch:   layerAccent(l),
 		})
 	}
 	return out
@@ -548,7 +552,13 @@ func drawDropdown(s *State, font rl.Font, theme render.Theme) {
 		} else if lay.markerW > 0 && e.active != nil && e.active(s) {
 			render.DrawTextWithShadow(font, "✓", rr.X+4, rr.Y+3, editorFontBody, theme.TextPrimary)
 		}
-		render.DrawTextWithShadow(font, e.label, rr.X+6+lay.markerW, rr.Y+3, editorFontBody, col)
+		labelX := rr.X + 6 + lay.markerW
+		if e.swatch.A > 0 {
+			chip := rl.NewRectangle(labelX, rr.Y+5, 13, rr.Height-10)
+			drawSwatch(chip, e.swatch)
+			labelX += chip.Width + 6
+		}
+		render.DrawTextWithShadow(font, e.label, labelX, rr.Y+3, editorFontBody, col)
 		if e.hotkey != "" {
 			hw := render.MeasureRichText(font, e.hotkey, editorFontHint, 1).X
 			render.DrawRichText(font, e.hotkey, rl.NewVector2(rr.X+rr.Width-hw-6, rr.Y+4), editorFontHint, 1, theme.TextHint)

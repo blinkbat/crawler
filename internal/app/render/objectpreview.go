@@ -14,15 +14,30 @@ import (
 // objectPreviewRT is the cached off-screen target shared by every thumbnail (one size per gallery).
 var objectPreviewRT previewRT
 
-// ObjectPreviewItem names one placeable object: layer char, label, and props-vs-decor layer. Char + IsProp is all DrawObjectPreview needs to route.
+// objectPreviewKind routes an item to the right draw + bounds path in the Object
+// Browser: the two paint layers plus the standalone 3D entities.
+type objectPreviewKind uint8
+
+const (
+	previewProp objectPreviewKind = iota
+	previewDecor
+	previewChest
+	previewDoor
+	previewCrystal
+)
+
+// ObjectPreviewItem names one placeable object: its layer char (grid layers only),
+// label, and Kind. Kind (+ Char for grid layers) is all DrawObjectPreview needs to route.
 type ObjectPreviewItem struct {
-	Char   byte
-	Name   string
-	IsProp bool
+	Char byte
+	Name string
+	Kind objectPreviewKind
 }
 
-// ObjectPreviewItems enumerates every placeable object (props then decor). Footprint TAILS are skipped (they draw nothing alone). Derived from the renderer's char lists, so new props/decor appear automatically.
-// objectPreviewItemsCache: lazily built once. Returned slice is read-only.
+// ObjectPreviewItems enumerates every placeable object: props, decor, then the 3D
+// entities (chest / door / crystal). Footprint TAILS are skipped (they draw nothing
+// alone). Grid rows derive from the renderer's char lists, so new props/decor appear
+// automatically. objectPreviewItemsCache: lazily built once; returned slice is read-only.
 var objectPreviewItemsCache []ObjectPreviewItem
 
 func ObjectPreviewItems() []ObjectPreviewItem {
@@ -34,14 +49,20 @@ func ObjectPreviewItems() []ObjectPreviewItem {
 		if isFootprintTail(c) {
 			continue
 		}
-		out = append(out, ObjectPreviewItem{Char: c, Name: core.TileLabel(core.TileLayerProps, c), IsProp: true})
+		out = append(out, ObjectPreviewItem{Char: c, Name: core.TileLabel(core.TileLayerProps, c), Kind: previewProp})
 	}
 	for _, c := range core.DecorTileChars() {
 		if isDecorFootprintTail(c) {
 			continue
 		}
-		out = append(out, ObjectPreviewItem{Char: c, Name: core.TileLabel(core.TileLayerDecor, c), IsProp: false})
+		out = append(out, ObjectPreviewItem{Char: c, Name: core.TileLabel(core.TileLayerDecor, c), Kind: previewDecor})
 	}
+	// Standalone 3D entities (not tile chars): one representative of each.
+	out = append(out,
+		ObjectPreviewItem{Name: "Chest", Kind: previewChest},
+		ObjectPreviewItem{Name: "Door", Kind: previewDoor},
+		ObjectPreviewItem{Name: "Crystal", Kind: previewCrystal},
+	)
 	objectPreviewItemsCache = out
 	return objectPreviewItemsCache
 }
@@ -49,8 +70,15 @@ func ObjectPreviewItems() []ObjectPreviewItem {
 // CloseObjectPreview frees the cached off-screen texture. Idempotent.
 func CloseObjectPreview() { objectPreviewRT.close() }
 
-// objectPreviewDir is the fixed three-quarter view direction (eye = target + dir*distance).
-var objectPreviewDir = rl.Vector3Normalize(rl.NewVector3(0.55, 0.62, 1.0))
+// objectPreviewBaseYaw/Pitch is the default three-quarter view (radians); the
+// Object Browser's per-item drag-rotate adds to these. Pitch is clamped so the
+// object never flips under/over.
+const (
+	objectPreviewBaseYaw   = float32(0.52)
+	objectPreviewBasePitch = float32(0.52)
+	objectPreviewMinPitch  = float32(0.08)
+	objectPreviewMaxPitch  = float32(1.45)
+)
 
 // objectPreviewGroundSize is the thumbnail floor extent (tighter than visualizerGroundSize).
 const objectPreviewGroundSize = float32(12)
@@ -59,8 +87,10 @@ const objectPreviewGroundSize = float32(12)
 // foe/party previews derive their FOV from the battle tuning instead.)
 const previewFovy = float32(46)
 
-// DrawObjectPreview renders item's object (lit, shadowed, animated as in-world) into rect, auto-framed and dollied by zoom (1=fit, >1 closer). Safe per frame; texture is cached.
-func DrawObjectPreview(rect rl.Rectangle, assets Resources, item ObjectPreviewItem, zoom float32) {
+// DrawObjectPreview renders item's object (lit, shadowed, animated as in-world) into
+// rect, framed three-quarter then orbited by (yaw,pitch) and dollied by zoom (1=fit,
+// >1 closer). Safe per frame; texture is cached.
+func DrawObjectPreview(rect rl.Rectangle, assets Resources, item ObjectPreviewItem, yaw, pitch, zoom float32) {
 	w, h := int32(rect.Width), int32(rect.Height)
 	if w <= 0 || h <= 0 {
 		return
@@ -74,7 +104,7 @@ func DrawObjectPreview(rect rl.Rectangle, assets Resources, item ObjectPreviewIt
 	}
 	// Feed the shared sway/flicker clock; without this thumbnails' foliage sway and torch flame freeze.
 	worldFrameClock = float32(rl.GetTime())
-	cam := objectPreviewCamera(objectPreviewBounds(assets, item), zoom)
+	cam := objectPreviewCamera(objectPreviewBounds(assets, item), yaw, pitch, zoom)
 
 	// Shared off-screen scene setup, with the tighter prop floor and no grid.
 	objectPreviewRT.beginVisualizerScene(cam, objectPreviewGroundSize, false)
@@ -92,10 +122,31 @@ func DrawObjectPreview(rect rl.Rectangle, assets Resources, item ObjectPreviewIt
 	objectPreviewRT.blit(rect)
 }
 
-// drawObjectPreviewModel draws one object at center via the same tables drawWorld/drawDecor use. Footprints draw at origin; area-needing inline props get an empty AreaDefinition (torch faces south).
+// drawObjectPreviewModel draws one object at center via the same tables/entities
+// drawWorld uses. Footprints draw at origin; area-needing inline props get an empty
+// AreaDefinition (torch faces south). Entities reuse their in-world draw primitives.
 func drawObjectPreviewModel(assets Resources, item ObjectPreviewItem, center rl.Vector3) {
+	switch item.Kind {
+	case previewChest:
+		drawGroundShadow(center.X, center.Z, chestShadowRadius)
+		assets.chestBody.draw(center, 1, 0)
+		assets.chestLid.draw(rl.NewVector3(center.X, center.Y+chestGeo.BodyHeight, center.Z), 1, 0)
+		return
+	case previewDoor:
+		style := clampTableIndex(core.DoorStyleBuilding, len(assets.doorProps), core.DoorStyleBuilding)
+		assets.doorProps[style].draw(center, 1, 0)
+		return
+	case previewCrystal:
+		// The gem draws unlit (immediate-mode cylinders), as in-world — drop the
+		// lighting shader around it, then restore for any later draws. Static angle
+		// (no idle spin) so the browser's drag-to-rotate is the only rotation.
+		rl.EndShaderMode()
+		drawCrystalGem(rl.NewVector3(center.X, center.Y+crystalGeo.HalfHeight, center.Z), true, 0)
+		rl.BeginShaderMode(assets.lighting.shader)
+		return
+	}
 	char := item.Char
-	if item.IsProp {
+	if item.Kind == previewProp {
 		if handler := inlinePropTable[char]; handler != nil {
 			handler(assets, &core.AreaDefinition{}, 0, 0, center, 0)
 			return
@@ -117,8 +168,10 @@ func drawObjectPreviewModel(assets Resources, item ObjectPreviewItem, center rl.
 	}
 }
 
-// objectPreviewCamera frames bb in three-quarter view: eye pulled back along objectPreviewDir so the bounding sphere fits the FOV with margin. zoom>1 dollies closer.
-func objectPreviewCamera(bb rl.BoundingBox, zoom float32) rl.Camera3D {
+// objectPreviewCamera frames bb, then orbits the eye by (yaw,pitch) added to the
+// default three-quarter view; the pulled-back distance fits the bounding sphere in
+// the FOV with margin. zoom>1 dollies closer.
+func objectPreviewCamera(bb rl.BoundingBox, yaw, pitch, zoom float32) rl.Camera3D {
 	const fovy = previewFovy
 	center := rl.Vector3Scale(rl.Vector3Add(bb.Min, bb.Max), 0.5)
 	radius := 0.5 * rl.Vector3Length(rl.Vector3Subtract(bb.Max, bb.Min))
@@ -130,8 +183,15 @@ func objectPreviewCamera(bb rl.BoundingBox, zoom float32) rl.Camera3D {
 	if zoom > 0 {
 		dist /= zoom
 	}
+	az := float64(objectPreviewBaseYaw + yaw)
+	el := float64(core.Clamp(objectPreviewBasePitch+pitch, objectPreviewMinPitch, objectPreviewMaxPitch))
+	dir := rl.NewVector3(
+		float32(math.Cos(el)*math.Sin(az)),
+		float32(math.Sin(el)),
+		float32(math.Cos(el)*math.Cos(az)),
+	)
 	return rl.Camera3D{
-		Position:   rl.Vector3Add(center, rl.Vector3Scale(objectPreviewDir, dist)),
+		Position:   rl.Vector3Add(center, rl.Vector3Scale(dir, dist)),
 		Target:     center,
 		Up:         worldUp,
 		Fovy:       fovy,
@@ -143,7 +203,17 @@ func objectPreviewCamera(bb rl.BoundingBox, zoom float32) rl.Camera3D {
 func objectPreviewBounds(assets Resources, item ObjectPreviewItem) rl.BoundingBox {
 	char := item.Char
 	unit := rl.NewBoundingBox(rl.NewVector3(-0.5, 0, -0.5), rl.NewVector3(0.5, 1, 0.5))
-	if item.IsProp {
+	switch item.Kind {
+	case previewChest:
+		return rl.NewBoundingBox(rl.NewVector3(-0.4, 0, -0.35), rl.NewVector3(0.4, chestGeo.BodyHeight+chestGeo.LidHeight, 0.35))
+	case previewDoor:
+		style := clampTableIndex(core.DoorStyleBuilding, len(assets.doorProps), core.DoorStyleBuilding)
+		return partsBoundsOr(assets.doorProps[style].models, assets.doorProps[style].parts, 1, unit)
+	case previewCrystal:
+		r, hh := crystalGeo.WaistRadius, crystalGeo.HalfHeight
+		return rl.NewBoundingBox(rl.NewVector3(-r, 0, -r), rl.NewVector3(r, 2*hh+0.2, r))
+	}
+	if item.Kind == previewProp {
 		switch char {
 		case core.TileTree, core.TileTreeXL, core.TileTreeTall, core.TileTreeYoung:
 			return partsBoundsOr(assets.tree.models, assets.tree.parts, treePropScales[char], unit)

@@ -142,6 +142,18 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 			return AreaDefinition{}, err
 		}
 	}
+	// PropStack/DecorStack: same editor-path parity guard as solids so a ragged
+	// plane can't reach PropAt / the renderer.
+	for L, plane := range mf.PropStack {
+		if err := validateLayerDims(fmt.Sprintf("%s plane %d", mapfile.SectionPropStack, L), plane, mf.Width, mf.Height); err != nil {
+			return AreaDefinition{}, err
+		}
+	}
+	for L, plane := range mf.DecorStack {
+		if err := validateLayerDims(fmt.Sprintf("%s plane %d", mapfile.SectionDecorStack, L), plane, mf.Width, mf.Height); err != nil {
+			return AreaDefinition{}, err
+		}
+	}
 	if !mapfile.InBoundsWH(mf.StartX, mf.StartZ, mf.Width, mf.Height) {
 		return AreaDefinition{}, oobErr("start position", mf.StartX, mf.StartZ, mf.Width, mf.Height)
 	}
@@ -177,7 +189,7 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		}
 		// Members decode front-first; stamp rows from trailing back count.
 		ApplyMemberRows(members, p.BackCount)
-		spawns = append(spawns, PackSpawn{TileX: p.X, TileZ: p.Z, Members: members, AI: PackAIFromName(p.AI)})
+		spawns = append(spawns, PackSpawn{TileX: p.X, TileZ: p.Z, Level: p.Level, Members: members, AI: PackAIFromName(p.AI)})
 	}
 	chests := make([]ChestSpawn, 0, len(mf.Chests))
 	for _, c := range mf.Chests {
@@ -197,7 +209,7 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 			}
 			kinds = append(kinds, kind)
 		}
-		chests = append(chests, ChestSpawn{TileX: c.X, TileZ: c.Z, Items: kinds})
+		chests = append(chests, ChestSpawn{TileX: c.X, TileZ: c.Z, Level: c.Level, Items: kinds})
 	}
 	// A same-map portal keeps SelfMapToken (not the concrete map id) so the
 	// self-link survives a rename; expanding it would re-serialize a stale,
@@ -214,6 +226,7 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		doors = append(doors, DoorSpawn{
 			TileX:      d.X,
 			TileZ:      d.Z,
+			Level:      d.Level,
 			Name:       d.Name,
 			TargetMap:  d.TargetMap,
 			TargetDoor: d.TargetDoor,
@@ -223,7 +236,7 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	}
 	crystals := make([]CrystalSpawn, 0, len(mf.Crystals))
 	for _, c := range mf.Crystals {
-		crystals = append(crystals, CrystalSpawn{TileX: c.X, TileZ: c.Z})
+		crystals = append(crystals, CrystalSpawn{TileX: c.X, TileZ: c.Z, Level: c.Level})
 	}
 	dialogs, err := DialogsFromLines(mf.Dialogs)
 	if err != nil {
@@ -253,6 +266,8 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		Solids:           CloneSolids(mf.Solids),
 		PropLevels:       cloneRows(mf.PropLevels),
 		DecorLevels:      cloneRows(mf.DecorLevels),
+		PropStack:        CloneSolids(mf.PropStack),
+		DecorStack:       CloneSolids(mf.DecorStack),
 		FaceOverrides:    faceOverridesFromMap(mf.Faces),
 		Materials:        mat,
 		StartTileX:       mf.StartX,
@@ -332,6 +347,7 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 			BackCount: backCount,
 			X:         s.TileX,
 			Z:         s.TileZ,
+			Level:     s.Level,
 			AI:        PackAIName(s.AI),
 		})
 	}
@@ -345,7 +361,7 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 			}
 			names = append(names, info.Name)
 		}
-		chests = append(chests, mapfile.MapChest{Items: names, X: c.TileX, Z: c.TileZ})
+		chests = append(chests, mapfile.MapChest{Items: names, X: c.TileX, Z: c.TileZ, Level: c.Level})
 	}
 	doors := make([]mapfile.MapDoor, 0, len(a.DoorSpawns))
 	for _, d := range a.DoorSpawns {
@@ -365,13 +381,14 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 			TargetDoor: d.TargetDoor,
 			X:          d.TileX,
 			Z:          d.TileZ,
+			Level:      d.Level,
 			Facing:     faceName,
 			Style:      DoorStyleName(d.Style),
 		})
 	}
 	crystals := make([]mapfile.MapCrystal, 0, len(a.CrystalSpawns))
 	for _, c := range a.CrystalSpawns {
-		crystals = append(crystals, mapfile.MapCrystal{X: c.TileX, Z: c.TileZ})
+		crystals = append(crystals, mapfile.MapCrystal{X: c.TileX, Z: c.TileZ, Level: c.Level})
 	}
 	ceiling := mapfile.OptionalLayerOrBlank(a.Ceiling, a.Width, a.Height, TileCeilingOpen)
 	// Elevation/solids encoding: a gapless area writes ONLY elevation: (byte-
@@ -407,6 +424,11 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 	if err != nil {
 		return mapfile.MapFile{}, err
 	}
+	// Per-floor scatter (props/decor): a nil stack passes the legacy grid through;
+	// a materialized stack projects to grid + *_levels: and emits propstack:/
+	// decorstack: only when a column carries content on more than one floor.
+	propsGrid, propLevels, propStack := a.EncodeScatterLayer(a.PropStack, a.Props, a.PropLevels, TilePropEmpty)
+	decorGrid, decorLevels, decorStack := a.EncodeScatterLayer(a.DecorStack, a.Decor, a.DecorLevels, DecorEmpty)
 	return mapfile.MapFile{
 		Name:            a.Name,
 		Materials:       matName,
@@ -418,13 +440,15 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 		StartFace:       faceName,
 		Walls:           cloneRows(a.Walls),
 		Floor:           cloneRows(a.Floor),
-		Decor:           cloneRows(a.Decor),
-		Props:           cloneRows(a.Props),
+		Decor:           decorGrid,
+		Props:           propsGrid,
 		Ceiling:         cloneRows(ceiling),
 		Elevation:       cloneRows(elevation),
 		Solids:          solids,
-		PropLevels:      levelsForEncode(a.PropLevels, a.Width, a.Height),
-		DecorLevels:     levelsForEncode(a.DecorLevels, a.Width, a.Height),
+		PropLevels:      propLevels,
+		DecorLevels:     decorLevels,
+		PropStack:       propStack,
+		DecorStack:      decorStack,
 		Faces:           mapFacesFromArea(a),
 		Packs:           packs,
 		Chests:          chests,

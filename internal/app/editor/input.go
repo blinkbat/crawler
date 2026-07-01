@@ -210,10 +210,10 @@ func updateHotkeys(s *State) {
 		resetView(s)
 	}
 
-	// R cycles start facing, gated to the player-start brush.
+	// R cycles start facing, gated to the player-start brush. Route through
+	// setStartFacing so it banks undo (+bumps contentEpoch) like the context menu.
 	if !ctrl && rl.IsKeyPressed(rl.KeyR) && s.layer == LayerEntities && s.activeBrush().Entity == entityPlayerStart {
-		s.area.StartFacing = core.NormalizeFacing(s.area.StartFacing + 1)
-		s.dirty = true
+		setStartFacing(s, core.NormalizeFacing(s.area.StartFacing+1))
 	}
 
 	// T cycles the day/night preview phase (seeds StepCount on F5).
@@ -221,7 +221,7 @@ func updateHotkeys(s *State) {
 		cyclePreviewPhase(s)
 	}
 
-	updateGridCursor(s)
+	updateArrowPan(s)
 }
 
 // brushSizeSteps are the brush widths cycled with [ / ]. Keep odd —
@@ -297,6 +297,16 @@ func minAreaLevel(a core.AreaDefinition) int {
 		}
 	}
 	return clampLevel(lo)
+}
+
+// surfaceAreaLevels sets the Levels-panel range to span every level the area
+// uses and puts the active floor on the start tile (not level 0, a pit below the
+// baseline), revealing all levels. Shared by Open and the default-map load.
+func surfaceAreaLevels(s *State) {
+	s.topLevel = maxAreaLevel(s.area)
+	s.bottomLevel = minAreaLevel(s.area)
+	s.editLevel = clampLevel(s.area.ElevationLevelAt(s.area.StartTileX, s.area.StartTileZ))
+	s.levelHidden = [maxEditLevel + 1]bool{}
 }
 
 // handleLevelsPanelClick dispatches a left-click in the Levels panel: range
@@ -394,195 +404,126 @@ func cyclePreviewPhase(s *State) {
 	s.flash("Preview: " + core.PhaseName(s.previewPhase))
 }
 
-// gridCursorDirs pairs each cursor-step delta with its input predicate. Package-level
-// so updateGridCursor doesn't rebuild the slice every frame.
-var gridCursorDirs = [...]struct {
-	pressed func() bool
-	dx, dz  int
-}{
-	{input.ArrowLeftPressed, -1, 0},
-	{input.ArrowRightPressed, 1, 0},
-	{input.ArrowUpPressed, 0, -1},
-	{input.ArrowDownPressed, 0, 1},
-}
+// Navigation tunables. arrowPanStep is the top-down px the map pans per held
+// frame; isoArrowPanPx the equivalent 3D screen-delta fed to isoPanTarget;
+// panDragThreshold the px a right-drag must exceed to count as a drag (vs a
+// context-menu click).
+const (
+	arrowPanStep     = float32(16)
+	isoArrowPanPx    = float32(18)
+	panDragThreshold = float32(4)
+)
 
-func updateGridCursor(s *State) {
-	if s.area.Width == 0 || s.area.Height == 0 {
+// updateArrowPan pans the map while an arrow key is held — the keyboard twin of
+// the mouse pan-drag. A held arrow is treated as a drag in that screen direction
+// and fed through the SAME pan rule as the mouse, so the two never disagree on
+// direction. Replaces the retired arrow→grid-cursor keyboard-paint nav.
+func updateArrowPan(s *State) {
+	left, right := rl.IsKeyDown(rl.KeyLeft), rl.IsKeyDown(rl.KeyRight)
+	up, down := rl.IsKeyDown(rl.KeyUp), rl.IsKeyDown(rl.KeyDown)
+	if !(left || right || up || down) {
 		return
 	}
-	mw := s.area.Width
-	mh := s.area.Height
-	moved := false
-	// Arrow / D-pad / left stick walk the grid cursor (clamp, not wrap).
-	// Table-driven so the four directions share the activate→clamp→moved step.
-	// gridCursorDirs is a package var (not a per-frame slice literal) — updateHotkeys
-	// runs this every steady-state editing frame.
-	for _, dir := range gridCursorDirs {
-		if !dir.pressed() {
-			continue
-		}
-		s.gridCursorX, s.gridCursorZ = activateCursor(s, mw, mh)
-		s.gridCursorX = core.Clamp(s.gridCursorX+dir.dx, 0, mw-1)
-		s.gridCursorZ = core.Clamp(s.gridCursorZ+dir.dz, 0, mh-1)
-		moved = true
+	var dx, dy float32 // screen-space drag equivalent (dx = right, dy = down)
+	if right {
+		dx += 1
 	}
-	if moved && s.gridCursorX >= 0 {
-		s.hoverX, s.hoverZ = s.gridCursorX, s.gridCursorZ
+	if left {
+		dx -= 1
 	}
-	if s.gridCursorX < 0 {
+	if down {
+		dy += 1
+	}
+	if up {
+		dy -= 1
+	}
+	if s.isoView {
+		s.isoPanTarget(dx*isoArrowPanPx, dy*isoArrowPanPx)
 		return
 	}
-	if input.EditorPaintPressed() {
-		keyboardMutate(s, func() { applyToolBrushed(s, s.gridCursorX, s.gridCursorZ) })
-	}
-	if input.EditorErasePressed() {
-		keyboardMutate(s, func() { eraseAt(s, s.gridCursorX, s.gridCursorZ) })
-	}
+	// Top-down pan-drag is panX/panY += delta; mirror it so arrows match dragging.
+	s.panX += dx * arrowPanStep
+	s.panY += dy * arrowPanStep
 }
 
-// keyboardMutate runs a single-cell keyboard paint/erase and banks undo lazily —
-// only when the cell actually changed — repairing applyTool's optimistic dirty
-// flip on a no-op. Mirrors strokePaint's mouse-path guard.
-func keyboardMutate(s *State, apply func()) {
-	wasDirty := s.dirty
-	before := core.CloneArea(s.area)
-	apply()
-	if core.AreaContentEqual(s.area, before) {
-		s.dirty = wasDirty
-		return
+// updateRightDrag arms right-button click-vs-drag discrimination: a press records
+// the start and clears the moved flag; holding past panDragThreshold sets it.
+// Shared by both canvases so the threshold semantics can't drift — a release with
+// rightDragMoved==false is a click (opens the context menu); a drag pans/orbits.
+func (s *State) updateRightDrag(mp rl.Vector2) {
+	if rl.IsMouseButtonPressed(rl.MouseRightButton) {
+		s.rightDragStart = mp
+		s.rightDragMoved = false
 	}
-	commitUndoSnapshot(s, before)
-}
-
-func activateCursor(s *State, mw, mh int) (int, int) {
-	if s.gridCursorX >= 0 {
-		return s.gridCursorX, s.gridCursorZ
+	if rl.IsMouseButtonDown(rl.MouseRightButton) && !s.rightDragMoved &&
+		rl.Vector2Distance(mp, s.rightDragStart) > panDragThreshold {
+		s.rightDragMoved = true
 	}
-	x := core.Clamp(s.area.StartTileX, 0, mw-1)
-	z := core.Clamp(s.area.StartTileZ, 0, mh-1)
-	return x, z
 }
 
 // updateMouse processes top-bar / palette / metadata clicks and grid painting.
 func updateMouse(s *State) {
 	mp := rl.GetMousePosition()
 
-	hx, hz := s.cellAt(mp)
-	s.hoverX, s.hoverZ = hx, hz
+	// Context menu absorbs all input while open (both views).
+	if updateContextMenu(s) {
+		return
+	}
 
-	// 3D view owns the canvas (cellAt returned -1 in iso, so top-down paint is
-	// inert). Side panels are mouse-inert here; `I` returns to top-down.
+	// Screen-space chrome (menu bar, toolbar, layer dropdown, Levels panel,
+	// palette, metadata, minimap, recents) works in BOTH the top-down and 3D
+	// views — only the grid canvas itself differs. Running it here keeps the
+	// Levels panel (active floor), palette and menus fully usable while editing
+	// in 3D, instead of being mouse-inert.
+	if handleChromeInput(s, mp) {
+		return
+	}
+
+	// 3D view: the grid canvas is the orbiting world — updateIsoCanvas owns
+	// ray-picking, camera, and per-tile editing there.
 	if s.isoView {
 		updateIsoCanvas(s, mp)
 		return
 	}
 
-	// Context menu absorbs all input while open.
-	if updateContextMenu(s) {
-		return
-	}
+	// --- Top-down grid canvas ---
+	hx, hz := s.cellAt(mp)
+	s.hoverX, s.hoverZ = hx, hz
 
-	if pointIn(mp, s.rect.grid) {
-		w := rl.GetMouseWheelMove()
-		if w != 0 {
+	inGrid := pointIn(mp, s.rect.grid)
+	if inGrid {
+		if w := rl.GetMouseWheelMove(); w != 0 {
 			zoomBy(s, mp, 1+canvasZoomWheelRate*w)
 		}
-	} else if pointIn(mp, s.rect.palette) {
-		// Wheel scrolls the brush list (~1.5 rows/notch).
-		w := rl.GetMouseWheelMove()
-		if w != 0 {
-			ScrollPalette(s, -w*paletteRowStride*paletteWheelRows)
-		}
-	} else if pointIn(mp, s.rect.metadata) {
-		// Wheel scrolls the MAP panel (~1 row/notch).
-		w := rl.GetMouseWheelMove()
-		if w != 0 {
-			ScrollMetadata(s, -w*metadataRowStride)
-		}
-	} else if pointIn(mp, s.rect.levels) {
-		// Wheel steps the active floor (grows + scrolls the window).
-		if w := rl.GetMouseWheelMove(); w > 0 {
-			stepEditLevel(s, +1)
-		} else if w < 0 {
-			stepEditLevel(s, -1)
-		}
 	}
 
-	// Scrollbars run before paint/pan so grabbing a thumb doesn't bleed into them.
-	if s.updateScrollbars(mp) {
-		return
-	}
-
-	if rl.IsMouseButtonPressed(rl.MouseMiddleButton) && pointIn(mp, s.rect.grid) {
+	// Right-drag pans; a right-click (no drag past the threshold) opens the context
+	// menu on release. The mousewheel BUTTON is intentionally unbound everywhere —
+	// right-drag replaced the old middle-drag pan. Left button stays paint.
+	s.updateRightDrag(mp)
+	if rl.IsMouseButtonPressed(rl.MouseRightButton) && inGrid {
 		s.panning = true
 	}
-	if s.panning && rl.IsMouseButtonDown(rl.MouseMiddleButton) {
+	if s.panning && rl.IsMouseButtonDown(rl.MouseRightButton) {
 		d := rl.GetMouseDelta()
 		s.panX += d.X
 		s.panY += d.Y
 	}
-	if rl.IsMouseButtonReleased(rl.MouseMiddleButton) {
+	if rl.IsMouseButtonReleased(rl.MouseRightButton) {
+		clicked := s.panning && !s.rightDragMoved
 		s.panning = false
-	}
-
-	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
-		if hit := topbarButtonAt(s, mp); hit >= 0 {
-			menuBarBtns[hit].action(s) // opens that menu's pull-down (menus.go)
-			return
-		}
-		// Top-bar layer dropdown: the active-layer picker (rows carry the eye).
-		if pointIn(mp, layerMenuBtnRect(s)) {
-			openDropdownBelow(s, ddLayer, layerMenuBtnRect(s))
-			return
-		}
-		if hit := toolbarButtonAt(s, mp); hit >= 0 {
-			// Disabled buttons swallow the click without firing.
-			if b := toolbarBtns[hit]; b.enabled == nil || b.enabled(s) {
-				b.action(s)
-			}
-			return
-		}
-		// Levels panel, checked before the palette so its column isn't swallowed.
-		if pointIn(mp, s.rect.levels) {
-			handleLevelsPanelClick(s, mp)
-			return
-		}
-		if hit := paletteToolAt(s, mp); hit >= 0 {
-			s.brushIdx[s.layer] = hit
-			recordRecentBrush(s)
-			return
-		}
-		if handleMetadataClick(s, mp) {
-			return
-		}
-	}
-
-	// Minimap click-to-jump recenters the view. Checked before grid-paint since
-	// the minimap overlaps the grid pane.
-	if mr, ok := minimapRect(s); ok && rl.IsMouseButtonPressed(rl.MouseLeftButton) && pointIn(mp, mr) {
-		scale := mr.Width / float32(s.area.Width)
-		tx := core.Clamp(int((mp.X-mr.X)/scale), 0, s.area.Width-1)
-		tz := core.Clamp(int((mp.Y-mr.Y)/scale), 0, s.area.Height-1)
-		centerViewOnTile(s, tx, tz)
-		return
-	}
-
-	// Recent-brush quick-pick: a swatch click jumps to that layer + brush.
-	if brushRecentsVisible(s) && rl.IsMouseButtonPressed(rl.MouseLeftButton) {
-		for i := range s.recentBrushes {
-			if pointIn(mp, brushRecentRect(s, i)) {
-				ref := s.recentBrushes[i]
-				s.layer = ref.layer
-				if ref.idx >= 0 && ref.idx < len(layerBrushes[ref.layer]) {
-					s.brushIdx[ref.layer] = ref.idx
-				}
-				recordRecentBrush(s)
-				return
+		if clicked && inGrid && hx >= 0 {
+			// Ramp mode: a click clears a ramp (floor → auto), keeping the elevation
+			// digit so the cliff stays. Else open the context menu.
+			if s.rampMode {
+				isoClearRamp(s, hx, hz)
+			} else {
+				openContextMenu(s, mp.X, mp.Y, hx, hz)
 			}
 		}
 	}
 
-	if pointIn(mp, s.rect.grid) && hx >= 0 {
+	if inGrid && hx >= 0 {
 		ctrl, shift, alt := modifiers()
 
 		if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
@@ -598,21 +539,99 @@ func updateMouse(s *State) {
 		if rl.IsMouseButtonDown(rl.MouseLeftButton) {
 			continueDrag(s, hx, hz)
 		}
-		if rl.IsMouseButtonPressed(rl.MouseRightButton) {
-			// Ramp mode: right-click clears a ramp (floor → auto), keeping the
-			// elevation digit so the cliff stays. No-op on a non-ramp tile.
-			if s.rampMode {
-				isoClearRamp(s, hx, hz)
-				return
-			}
-			// Right-click opens the context menu (erasing is a selectable brush).
-			openContextMenu(s, mp.X, mp.Y, hx, hz)
-		}
 	}
 
 	if rl.IsMouseButtonReleased(rl.MouseLeftButton) {
 		finishDrag(s)
 	}
+}
+
+// handleChromeInput processes the editor's screen-space chrome — panel wheels,
+// scrollbars, the menu bar / toolbar / layer dropdown, the Levels panel, palette
+// and metadata clicks, minimap jump, and recent-brush swatches. It is identical
+// in the top-down and 3D views (only the grid canvas differs), so both call it;
+// returns true when it consumed the input and the caller should stop.
+func handleChromeInput(s *State, mp rl.Vector2) bool {
+	// Panel wheel (the grid-canvas wheel is view-specific, handled by the caller).
+	if pointIn(mp, s.rect.palette) {
+		if w := rl.GetMouseWheelMove(); w != 0 {
+			ScrollPalette(s, -w*paletteRowStride*paletteWheelRows)
+		}
+	} else if pointIn(mp, s.rect.metadata) {
+		if w := rl.GetMouseWheelMove(); w != 0 {
+			ScrollMetadata(s, -w*metadataRowStride)
+		}
+	} else if pointIn(mp, s.rect.levels) {
+		// Wheel steps the active floor (grows + scrolls the window).
+		if w := rl.GetMouseWheelMove(); w > 0 {
+			stepEditLevel(s, +1)
+		} else if w < 0 {
+			stepEditLevel(s, -1)
+		}
+	}
+
+	// Scrollbars run before clicks so grabbing a thumb doesn't bleed into them.
+	if s.updateScrollbars(mp) {
+		return true
+	}
+
+	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
+		if hit := topbarButtonAt(s, mp); hit >= 0 {
+			menuBarBtns[hit].action(s) // opens that menu's pull-down (menus.go)
+			return true
+		}
+		// Top-bar layer dropdown: the active-layer picker (rows carry the eye).
+		if pointIn(mp, layerMenuBtnRect(s)) {
+			openDropdownBelow(s, ddLayer, layerMenuBtnRect(s))
+			return true
+		}
+		if hit := toolbarButtonAt(s, mp); hit >= 0 {
+			// Disabled buttons swallow the click without firing.
+			if b := toolbarBtns[hit]; b.enabled == nil || b.enabled(s) {
+				b.action(s)
+			}
+			return true
+		}
+		// Levels panel, checked before the palette so its column isn't swallowed.
+		if pointIn(mp, s.rect.levels) {
+			handleLevelsPanelClick(s, mp)
+			return true
+		}
+		if hit := paletteToolAt(s, mp); hit >= 0 {
+			s.brushIdx[s.layer] = hit
+			recordRecentBrush(s)
+			return true
+		}
+		if handleMetadataClick(s, mp) {
+			return true
+		}
+	}
+
+	// Minimap click-to-jump recenters the view. Checked before grid-paint since
+	// the minimap overlaps the grid pane.
+	if mr, ok := minimapRect(s); ok && rl.IsMouseButtonPressed(rl.MouseLeftButton) && pointIn(mp, mr) {
+		scale := mr.Width / float32(s.area.Width)
+		tx := core.Clamp(int((mp.X-mr.X)/scale), 0, s.area.Width-1)
+		tz := core.Clamp(int((mp.Y-mr.Y)/scale), 0, s.area.Height-1)
+		centerViewOnTile(s, tx, tz)
+		return true
+	}
+
+	// Recent-brush quick-pick: a swatch click jumps to that layer + brush.
+	if brushRecentsVisible(s) && rl.IsMouseButtonPressed(rl.MouseLeftButton) {
+		for i := range s.recentBrushes {
+			if pointIn(mp, brushRecentRect(s, i)) {
+				ref := s.recentBrushes[i]
+				s.layer = ref.layer
+				if ref.idx >= 0 && ref.idx < len(layerBrushes[ref.layer]) {
+					s.brushIdx[ref.layer] = ref.idx
+				}
+				recordRecentBrush(s)
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // startDrag picks a drag kind from layer + cell contents + modifiers (grid
@@ -996,9 +1015,10 @@ func activeLayerCharAt(s *State, x, z int) (byte, bool) {
 	case LayerFloor:
 		return cellAt(s.area.Floor, x, z)
 	case LayerDecor:
-		return cellAt(s.area.Decor, x, z)
+		// Per-floor: sample the active floor's decor (legacy single char on nil-stack).
+		return s.area.DecorForDisplay(x, z, s.editLevel), true
 	case LayerProps:
-		return cellAt(s.area.Props, x, z)
+		return s.area.PropForDisplay(x, z, s.editLevel), true
 	case LayerCeiling:
 		return cellAt(s.area.Ceiling, x, z)
 	case LayerElevation:
@@ -2077,16 +2097,12 @@ func openSelectedMap(s *State) Action {
 	s.redo = nil
 	s.dirty = false
 	clearSelection(s) // different map — old selection coords no longer apply
-	// Surface every level the map uses, and open on the start tile's floor (not
-	// level 0, which is now a pit below the baseline).
-	s.topLevel = maxAreaLevel(area)
-	s.bottomLevel = minAreaLevel(area)
-	s.editLevel = clampLevel(area.ElevationLevelAt(area.StartTileX, area.StartTileZ))
-	s.levelHidden = [maxEditLevel + 1]bool{}
+	surfaceAreaLevels(s)
 	// Area replaced wholesale — invalidate content-derived caches (like
 	// performNewMap / undo / redo) or stale reachability/tooltip data lingers.
 	s.reachValid = false
 	s.contentEpoch++
+	rememberLastMap(path) // reopen here next session (NewDefault)
 	closeModal(s)
 	s.flash("Opened " + core.MapIDFromPath(path))
 	return ActionNone

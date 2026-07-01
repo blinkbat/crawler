@@ -123,7 +123,7 @@ func tryAdjacentInteraction(find func() int, act func(idx int)) bool {
 func tryOpenAdjacentChest(g *core.GameState) bool {
 	return tryAdjacentInteraction(
 		func() int {
-			return core.AdjacentInteractableChestIndex(g.Chests, g.Player.TileX, g.Player.TileZ)
+			return core.AdjacentInteractableChestIndexOn(g.Chests, g.Player.TileX, g.Player.TileZ, g.Player.Level, g.Area.IsVoxel())
 		},
 		func(idx int) {
 			g.ChestOpen = idx
@@ -487,7 +487,7 @@ func saveGame(g *core.GameState) {
 func tryUseAdjacentCrystal(g *core.GameState) bool {
 	return tryAdjacentInteraction(
 		func() int {
-			return core.AdjacentChargedCrystalIndex(g.Crystals, g.Player.TileX, g.Player.TileZ)
+			return core.AdjacentChargedCrystalIndexOn(g.Crystals, g.Player.TileX, g.Player.TileZ, g.Player.Level, g.Area.IsVoxel())
 		},
 		func(idx int) {
 			fireHealingCrystal(g, idx)
@@ -840,7 +840,7 @@ func updateAnimation(g *core.GameState, dt float32) float32 {
 // stepped onto a door, rather than transitioning immediately. Doors with an
 // empty TargetMap are ignored (defensive — the validator rejects these on load).
 func tryQueueDoorTransition(g *core.GameState) {
-	idx := core.DoorIndexAt(g.Doors, g.Player.TileX, g.Player.TileZ)
+	idx := core.DoorIndexOn(g.Doors, g.Player.TileX, g.Player.TileZ, g.Player.Level, g.Area.IsVoxel())
 	if idx < 0 {
 		return
 	}

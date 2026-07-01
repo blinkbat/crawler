@@ -14,7 +14,7 @@ import (
 func DrawDoors(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	vc := newViewCull(camera)
 	for _, d := range g.Doors {
-		center := tileWorldPos(d.TileX, d.TileZ, g.Area.StandGroundY(d.TileX, d.TileZ))
+		center := tileWorldPos(d.TileX, d.TileZ, g.Area.StandGroundYAt(d.TileX, d.Level, d.TileZ))
 		if vc.cull(center) {
 			continue
 		}

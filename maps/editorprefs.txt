@@ -1,0 +1,1 @@
+lastMap=maps\forest_path.map

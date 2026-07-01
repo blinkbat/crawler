@@ -36,7 +36,9 @@ func footprintBlocker(s *State, x, z int, footprint []core.MultiTileOffset, chec
 			return "Footprint cell is a wall"
 		}
 		if checkProp {
-			if blkProp(&s.area, fx, fz).fail {
+			// Per-floor: only a prop on the active floor blocks (another floor's
+			// prop in this column is independent — that's the point of per-floor).
+			if core.IsPropChar(s.area.PropAt(fx, s.editLevel, fz)) {
 				return "Footprint cell holds a prop"
 			}
 		}
@@ -152,8 +154,7 @@ func applyDecorBrush(s *State, x, z int, c byte) {
 			if off.DX == 0 && off.DZ == 0 {
 				ch = c
 			}
-			setLayerCell(&s.area.Decor, fx, fz, ch)
-			setTileLevel(s, &s.area.DecorLevels, fx, fz, s.editLevel)
+			setDecorFloor(s, fx, fz, ch)
 		}
 		return
 	}
@@ -161,7 +162,9 @@ func applyDecorBrush(s *State, x, z int, c byte) {
 		s.flash("Decor needs an open cell")
 		return
 	}
-	if blkProp(&s.area, x, z).fail {
+	// Per-floor: only a prop on the SAME floor blocks decor (a prop on another
+	// floor of this column is independent).
+	if core.IsPropChar(s.area.PropAt(x, s.editLevel, z)) {
 		s.flash("Decor cell is occupied by a prop")
 		return
 	}
@@ -169,33 +172,32 @@ func applyDecorBrush(s *State, x, z int, c byte) {
 		s.flash("Cell holds the player start")
 		return
 	}
-	setLayerCell(&s.area.Decor, x, z, c)
-	setTileLevel(s, &s.area.DecorLevels, x, z, s.editLevel)
+	setDecorFloor(s, x, z, c)
 }
 
-// clearPropCell clears the prop at (x,z). A multi-tile prop ANCHOR clears its
-// whole footprint (tail cells included) so no orphan tail glyphs are stranded.
-func clearPropCell(a *core.AreaDefinition, x, z int) {
-	if !a.InBounds(x, z) {
+// clearPropCell clears the prop on the ACTIVE floor at (x,z). A multi-tile prop
+// ANCHOR clears its whole footprint (tail cells included) so no orphan tail
+// glyphs are stranded. Floor-aware: only the active floor's prop is removed.
+func clearPropCell(s *State, x, z int) {
+	if !s.area.InBounds(x, z) {
 		return
 	}
-	propCh, _ := cellAt(a.Props, x, z)
+	propCh := s.area.PropForDisplay(x, z, s.editLevel)
 	if footprint := core.PropFootprint(propCh); footprint != nil {
 		for _, off := range footprint {
 			fx, fz := x+off.DX, z+off.DZ
-			if a.InBounds(fx, fz) {
-				setLayerCell(&a.Props, fx, fz, core.TilePropEmpty)
+			if s.area.InBounds(fx, fz) {
+				setPropFloor(s, fx, fz, core.TilePropEmpty)
 			}
 		}
 		return
 	}
-	setLayerCell(&a.Props, x, z, core.TilePropEmpty)
+	setPropFloor(s, x, z, core.TilePropEmpty)
 }
 
 func applyPropBrush(s *State, x, z int, c byte) {
 	if c == core.TilePropEmpty {
-		clearPropCell(&s.area, x, z)
-		clearTileLevel(&s.area.PropLevels, x, z)
+		clearPropCell(s, x, z)
 		return
 	}
 	// Multi-tile prop anchor: validate the whole footprint, then auto-paint the
@@ -212,9 +214,9 @@ func applyPropBrush(s *State, x, z int, c byte) {
 			if off.DX == 0 && off.DZ == 0 {
 				ch = c
 			}
-			setLayerCell(&s.area.Props, fx, fz, ch)
-			setTileLevel(s, &s.area.PropLevels, fx, fz, s.editLevel)
-			setLayerCell(&s.area.Decor, fx, fz, core.DecorAuto)
+			setPropFloor(s, fx, fz, ch)
+			// A prop occupies its floor square: reset decor + clear entities there.
+			setDecorFloor(s, fx, fz, core.DecorAuto)
 			removeAllEntitiesAt(&s.area, fx, fz)
 		}
 		return
@@ -227,10 +229,9 @@ func applyPropBrush(s *State, x, z int, c byte) {
 		s.flash("Cell holds the player start")
 		return
 	}
-	setLayerCell(&s.area.Props, x, z, c)
-	setTileLevel(s, &s.area.PropLevels, x, z, s.editLevel)
-	// A prop occupies the floor square; clear decor + any entity on it.
-	setLayerCell(&s.area.Decor, x, z, core.DecorAuto)
+	setPropFloor(s, x, z, c)
+	// A prop occupies the floor square (on its floor); reset decor + clear entities.
+	setDecorFloor(s, x, z, core.DecorAuto)
 	removeAllEntitiesAt(&s.area, x, z)
 }
 
@@ -293,6 +294,57 @@ func ensureLevelGrid(grid *[]string, w, h int) {
 		}
 	}
 	*grid = out
+}
+
+// propUsesStack / decorUsesStack report whether a prop/decor paint on the active
+// floor of column (x,z) must route through the per-floor stack: a stack already
+// exists, OR the column holds content on a DIFFERENT floor (so a legacy single-
+// grid write would overwrite it). A pure single-floor column stays on the legacy
+// path, so single-floor maps never materialize a stack (byte-identical saves).
+func propUsesStack(s *State, x, z int) bool {
+	if len(s.area.PropStack) > 0 {
+		return true
+	}
+	lvl := s.area.PropColumnLevel(x, z)
+	return lvl >= 0 && lvl != s.editLevel
+}
+
+func decorUsesStack(s *State, x, z int) bool {
+	if len(s.area.DecorStack) > 0 {
+		return true
+	}
+	lvl := s.area.DecorColumnLevel(x, z)
+	return lvl >= 0 && lvl != s.editLevel
+}
+
+// setPropFloor places prop char c on the ACTIVE floor of column (x,z): through
+// the per-floor stack when the column is multi-floor, else the legacy single grid
+// + PropLevels tag. TilePropEmpty clears the active floor.
+func setPropFloor(s *State, x, z int, c byte) {
+	if propUsesStack(s, x, z) {
+		s.area.SetProp(x, s.editLevel, z, c)
+		return
+	}
+	setLayerCell(&s.area.Props, x, z, c)
+	if c == core.TilePropEmpty {
+		clearTileLevel(&s.area.PropLevels, x, z)
+		return
+	}
+	setTileLevel(s, &s.area.PropLevels, x, z, s.editLevel)
+}
+
+// setDecorFloor is the decor analogue of setPropFloor.
+func setDecorFloor(s *State, x, z int, c byte) {
+	if decorUsesStack(s, x, z) {
+		s.area.SetDecor(x, s.editLevel, z, c)
+		return
+	}
+	setLayerCell(&s.area.Decor, x, z, c)
+	if c == core.DecorAuto || c == core.DecorEmpty {
+		clearTileLevel(&s.area.DecorLevels, x, z)
+		return
+	}
+	setTileLevel(s, &s.area.DecorLevels, x, z, s.editLevel)
 }
 
 func applyEntityBrush(s *State, x, z int, kind entityKind) {
@@ -365,7 +417,10 @@ func blkWall(a *core.AreaDefinition, x, z int, noun string) blockerCheck {
 	return blockerCheck{a.WallAt(x, z), noun + " needs an open cell (remove the wall first)"}
 }
 func blkProp(a *core.AreaDefinition, x, z int) blockerCheck {
-	ch, _ := cellAt(a.Props, x, z)
+	// Column-level: an entity/start can't share a tile with a prop on ANY floor.
+	// PropForDisplay returns the legacy single-grid char on a nil-stack map, so
+	// this is unchanged for single-floor maps.
+	ch := a.PropForDisplay(x, z, 0)
 	return blockerCheck{core.IsPropChar(ch), "Cell already holds a prop — clear it first"}
 }
 func blkDeepWater(a *core.AreaDefinition, x, z int, noun string) blockerCheck {
@@ -470,6 +525,7 @@ func placeDoorAt(s *State, x, z int) {
 	s.area.DoorSpawns = append(s.area.DoorSpawns, core.DoorSpawn{
 		TileX:      x,
 		TileZ:      z,
+		Level:      s.editLevel,
 		Name:       name,
 		TargetMap:  core.SelfMapToken,
 		TargetDoor: name,
@@ -544,6 +600,7 @@ func placeChestAt(s *State, x, z int) {
 	s.area.ChestSpawns = append(s.area.ChestSpawns, core.ChestSpawn{
 		TileX: x,
 		TileZ: z,
+		Level: s.editLevel,
 		Items: defaultChestItems(),
 	})
 	s.dirty = true
@@ -562,7 +619,7 @@ func placeCrystalAt(s *State, x, z int) {
 		s.flash(msg)
 		return
 	}
-	s.area.CrystalSpawns = append(s.area.CrystalSpawns, core.CrystalSpawn{TileX: x, TileZ: z})
+	s.area.CrystalSpawns = append(s.area.CrystalSpawns, core.CrystalSpawn{TileX: x, TileZ: z, Level: s.editLevel})
 	s.dirty = true
 }
 
@@ -597,11 +654,9 @@ func eraseAt(s *State, x, z int) {
 	s.layerHidden[s.layer] = false // reveal so an erase isn't invisible
 	switch s.layer {
 	case LayerProps:
-		clearPropCell(&s.area, x, z)
-		clearTileLevel(&s.area.PropLevels, x, z)
+		clearPropCell(s, x, z)
 	case LayerDecor:
-		setLayerCell(&s.area.Decor, x, z, eraseSentinel(LayerDecor))
-		clearTileLevel(&s.area.DecorLevels, x, z)
+		setDecorFloor(s, x, z, eraseSentinel(LayerDecor))
 	case LayerElevation:
 		// Remove the tile at (x, editLevel, z) — voxel inverse of a paint; the gap
 		// under a higher tile makes a walk-under bridge. Clear any ramp too.
@@ -693,6 +748,7 @@ func addPackMember(s *State, x, z int, kind core.EnemyKind) {
 	s.area.PackSpawns = append(s.area.PackSpawns, core.PackSpawn{
 		TileX:   x,
 		TileZ:   z,
+		Level:   s.editLevel,
 		Members: []core.PackMemberRef{core.BuiltinPackMember(kind)},
 	})
 	s.dirty = true
@@ -860,6 +916,14 @@ func resize(s *State, w, h int) {
 	// Resize every voxel plane in lockstep (new cells = air) or the stack desyncs.
 	for L := range s.area.Solids {
 		s.area.Solids[L] = resizeLayer(s.area.Solids[L], s.area.Width, s.area.Height, w, h, core.SolidAir)
+	}
+	// Per-floor scatter stacks resize in lockstep too (new cells = blank), exactly
+	// like Solids — otherwise the planes keep the old dims and desync from W/H.
+	for L := range s.area.PropStack {
+		s.area.PropStack[L] = resizeLayer(s.area.PropStack[L], s.area.Width, s.area.Height, w, h, core.TilePropEmpty)
+	}
+	for L := range s.area.DecorStack {
+		s.area.DecorStack[L] = resizeLayer(s.area.DecorStack[L], s.area.Width, s.area.Height, w, h, core.DecorEmpty)
 	}
 	// Per-tile level grids resize in lockstep too (auto-fill new cells).
 	if len(s.area.PropLevels) > 0 {
@@ -1030,6 +1094,7 @@ func writeAreaTo(s *State, path string) error {
 	s.area.Path = path
 	s.baseline = core.CloneArea(s.area)
 	s.dirty = false
+	rememberLastMap(path) // reopen here next session (NewDefault)
 	return nil
 }
 
@@ -1147,6 +1212,15 @@ func floodFill(s *State, x, z int, b byte, erase bool) {
 	if layer == nil {
 		return
 	}
+	// Per-floor scatter: once a column stacks prop/decor across floors, the single
+	// grid is frozen and readers use the stack — a grid flood would be invisible.
+	// Guard it (the brush/rect/line tools ARE per-floor). Single-floor maps (nil
+	// stack) never hit this, so flood on them is unchanged.
+	if (s.layer == LayerProps && len(s.area.PropStack) > 0) ||
+		(s.layer == LayerDecor && len(s.area.DecorStack) > 0) {
+		s.flash("Flood fill isn't available for per-floor props/decor — use the brush")
+		return
+	}
 	if !s.area.InBounds(x, z) {
 		return
 	}
@@ -1252,6 +1326,28 @@ func fillEntireLayer(s *State) {
 		s.flash("Pick a brush to Fill (the eraser fills nothing)")
 		return
 	}
+	// Per-floor scatter: once props/decor stack across floors the legacy grid is
+	// frozen (readers use the stack), so a grid fill would be invisible — refuse,
+	// mirroring floodFill. Single-floor maps (nil stack) fill normally below.
+	if (s.layer == LayerProps && len(s.area.PropStack) > 0) ||
+		(s.layer == LayerDecor && len(s.area.DecorStack) > 0) {
+		s.flash("Fill all isn't available for per-floor props/decor — use the brush")
+		return
+	}
+	// Voxel elevation: the Elevation string is dead once Solids is explicit, so a
+	// grid fill wouldn't show. Lift every column to the brush's level via SetColumnTop.
+	if s.layer == LayerElevation && len(s.area.Solids) > 0 {
+		lvl := core.ElevationLevelFromChar(brush.Char)
+		pushUndo(s)
+		for z := 0; z < s.area.Height; z++ {
+			for x := 0; x < s.area.Width; x++ {
+				s.area.SetColumnTop(x, z, lvl)
+			}
+		}
+		s.dirty = true
+		s.flash("Filled " + layerName(s.layer))
+		return
+	}
 	pushUndo(s)
 	rewriteLayerRows(layer, func(rows [][]byte) {
 		for z := 0; z < s.area.Height && z < len(rows); z++ {
@@ -1289,6 +1385,15 @@ func fillEntireLayer(s *State) {
 // centerViewOnTile recenters the view so (tx, tz) sits in the middle of the grid
 // pane (G "center on start"). Zoom untouched.
 func centerViewOnTile(s *State, tx, tz int) {
+	// 3D view pans the orbit target (not panX/panY): offset the target from the
+	// map center so tile (tx,tz) sits under the camera focus. Keeps minimap click,
+	// G, and Center-on-Start working in the default 3D view.
+	if s.isoView {
+		s.isoTargetX = core.TileCenter(tx) - float32(s.area.Width)*core.TileSize/2
+		s.isoTargetZ = core.TileCenter(tz) - float32(s.area.Height)*core.TileSize/2
+		s.flash("Centered on " + core.TileCoord(tx, tz))
+		return
+	}
 	if s.rect.cellPx <= 0 {
 		return
 	}

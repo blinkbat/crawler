@@ -209,6 +209,7 @@ func placeDoors(a AreaDefinition) []Door {
 		out = append(out, Door{
 			TileX:      sp.TileX,
 			TileZ:      sp.TileZ,
+			Level:      a.resolveEntityLevel(sp.TileX, sp.TileZ, sp.Level),
 			Name:       sp.Name,
 			TargetMap:  sp.TargetMap,
 			TargetDoor: sp.TargetDoor,
@@ -222,6 +223,27 @@ func placeDoors(a AreaDefinition) []Door {
 // DoorIndexAt returns the index of the door at (x,z), or -1. Mirrors ChestIndexAt.
 func DoorIndexAt(doors []Door, x, z int) int {
 	return SpawnIndexAt(doors, x, z)
+}
+
+// DoorIndexOn is the level-aware door lookup: on a voxel map only a door on
+// `level` matches (so a door on another floor of the same column doesn't fire /
+// block through the floor), else tile-only. Mirrors PackIndexAtLanding.
+func DoorIndexOn(doors []Door, x, z, level int, isVoxel bool) int {
+	if !isVoxel {
+		return SpawnIndexAt(doors, x, z)
+	}
+	for i, d := range doors {
+		if d.TileX == x && d.TileZ == z && d.Level == level {
+			return i
+		}
+	}
+	return -1
+}
+
+// doorIndexOn is DoorIndexOn's blocker-tail spelling (levelAware flag matches the
+// chest/crystal helpers so canEnterRuntimeBlockersAt reads uniformly).
+func doorIndexOn(doors []Door, x, z, level int, levelAware bool) int {
+	return DoorIndexOn(doors, x, z, level, levelAware)
 }
 
 // DoorByName returns the named door, or nil. Used at transition resolution to
@@ -259,6 +281,7 @@ func placeChests(a AreaDefinition) []Chest {
 		out = append(out, Chest{
 			TileX:  sp.TileX,
 			TileZ:  sp.TileZ,
+			Level:  a.resolveEntityLevel(sp.TileX, sp.TileZ, sp.Level),
 			Items:  stacks,
 			Looted: len(stacks) == 0,
 		})
@@ -277,7 +300,7 @@ func placeCrystals(a AreaDefinition) []Crystal {
 	}
 	out := make([]Crystal, 0, len(spawns))
 	for _, c := range spawns {
-		out = append(out, Crystal{TileX: c.TileX, TileZ: c.TileZ, Charge: CrystalRechargeSteps, Charged: true})
+		out = append(out, Crystal{TileX: c.TileX, TileZ: c.TileZ, Level: a.resolveEntityLevel(c.TileX, c.TileZ, c.Level), Charge: CrystalRechargeSteps, Charged: true})
 	}
 	return out
 }
@@ -334,12 +357,37 @@ func CrystalIndexAt(crystals []Crystal, x, z int) int {
 	return SpawnIndexAt(crystals, x, z)
 }
 
+// crystalIndexOn is the level-aware crystal lookup for the blocker tail: when
+// levelAware, only a crystal on `level` blocks; else tile-only.
+func crystalIndexOn(crystals []Crystal, x, z, level int, levelAware bool) int {
+	for i, c := range crystals {
+		if c.TileX == x && c.TileZ == z && (!levelAware || c.Level == level) {
+			return i
+		}
+	}
+	return -1
+}
+
 // AdjacentChargedCrystalIndex returns a CHARGED crystal within Manhattan
 // distance 1 of (x,z) (on or beside the player), or -1. Dormant ones ignored.
 func AdjacentChargedCrystalIndex(crystals []Crystal, x, z int) int {
+	return adjacentChargedCrystalIndex(crystals, x, z, 0, false)
+}
+
+// AdjacentChargedCrystalIndexOn is the level-aware variant: on a voxel map a
+// crystal only rests when it shares the player's floor (`level`), so one on
+// another deck at the same/adjacent (x,z) isn't triggered through the floor.
+func AdjacentChargedCrystalIndexOn(crystals []Crystal, x, z, level int, isVoxel bool) int {
+	return adjacentChargedCrystalIndex(crystals, x, z, level, isVoxel)
+}
+
+func adjacentChargedCrystalIndex(crystals []Crystal, x, z, level int, levelAware bool) int {
 	for i := range crystals {
 		c := crystals[i]
 		if !c.Charged {
+			continue
+		}
+		if levelAware && c.Level != level {
 			continue
 		}
 		if ManhattanDistance(c.TileX, c.TileZ, x, z) <= 1 {

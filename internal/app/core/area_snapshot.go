@@ -57,6 +57,11 @@ func AreaContentEqual(a, b AreaDefinition) bool {
 		!optionalLayerEqual(a.DecorLevels, b.DecorLevels, a.Width, a.Height, PropLevelAuto) {
 		return false
 	}
+	// PropStack/DecorStack (per-floor scatter) compared with absent==derived, so a
+	// legacy area and its materialized-but-identical form aren't falsely dirty.
+	if !scatterStacksEqual(a, b) {
+		return false
+	}
 	if !faceOverridesEqual(a.FaceOverrides, b.FaceOverrides) {
 		return false
 	}
@@ -173,7 +178,7 @@ func normalizeOptionalLayer(layer []string, width, height int, blank byte) []str
 func packSpawnsEqual(a, b []PackSpawn) bool {
 	return slices.EqualFunc(a, b, func(ap, bp PackSpawn) bool {
 		return ap.TileX == bp.TileX && ap.TileZ == bp.TileZ &&
-			ap.AI == bp.AI &&
+			ap.Level == bp.Level && ap.AI == bp.AI &&
 			slices.Equal(ap.Members, bp.Members)
 	})
 }
@@ -181,7 +186,7 @@ func packSpawnsEqual(a, b []PackSpawn) bool {
 func chestSpawnsEqual(a, b []ChestSpawn) bool {
 	return slices.EqualFunc(a, b, func(ap, bp ChestSpawn) bool {
 		return ap.TileX == bp.TileX && ap.TileZ == bp.TileZ &&
-			slices.Equal(ap.Items, bp.Items)
+			ap.Level == bp.Level && slices.Equal(ap.Items, bp.Items)
 	})
 }
 
@@ -215,6 +220,9 @@ func CloneArea(a AreaDefinition) AreaDefinition {
 	if len(a.DecorLevels) > 0 {
 		out.DecorLevels = cloneRows(a.DecorLevels)
 	}
+	// Per-floor scatter stacks: nil-safe deep copy (nil for a legacy area).
+	out.PropStack = CloneSolids(a.PropStack)
+	out.DecorStack = CloneSolids(a.DecorStack)
 	if len(a.FaceOverrides) > 0 {
 		out.FaceOverrides = append([]FaceOverride(nil), a.FaceOverrides...)
 	}
@@ -226,6 +234,7 @@ func CloneArea(a AreaDefinition) AreaDefinition {
 		out.PackSpawns[i] = PackSpawn{
 			TileX:   sp.TileX,
 			TileZ:   sp.TileZ,
+			Level:   sp.Level,
 			Members: append([]PackMemberRef(nil), sp.Members...),
 			AI:      sp.AI,
 		}
@@ -235,6 +244,7 @@ func CloneArea(a AreaDefinition) AreaDefinition {
 		out.ChestSpawns[i] = ChestSpawn{
 			TileX: sp.TileX,
 			TileZ: sp.TileZ,
+			Level: sp.Level,
 			Items: append([]ItemKind(nil), sp.Items...),
 		}
 	}

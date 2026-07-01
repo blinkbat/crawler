@@ -57,7 +57,7 @@ func DrawChests(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	vc := newViewCull(camera)
 	for i := range g.Chests {
 		ch := g.Chests[i]
-		base := tileWorldPos(ch.TileX, ch.TileZ, g.Area.StandGroundY(ch.TileX, ch.TileZ))
+		base := tileWorldPos(ch.TileX, ch.TileZ, g.Area.StandGroundYAt(ch.TileX, ch.Level, ch.TileZ))
 		if vc.cull(base) {
 			continue
 		}
@@ -87,13 +87,14 @@ func DrawChestPrompt(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if g.ChestOpen >= 0 {
 		return
 	}
-	idx := core.AdjacentInteractableChestIndex(g.Chests, g.Player.TileX, g.Player.TileZ)
+	// Level-aware so the cue matches the interaction gate (movement.go) on voxel maps.
+	idx := core.AdjacentInteractableChestIndexOn(g.Chests, g.Player.TileX, g.Player.TileZ, g.Player.Level, g.Area.IsVoxel())
 	if idx < 0 {
 		return
 	}
 	ch := g.Chests[idx]
 	// Anchor above the lid; must add StandGroundY (body draws there) or it detaches on raised tiles.
-	world := tileWorldPos(ch.TileX, ch.TileZ, g.Area.StandGroundY(ch.TileX, ch.TileZ)+chestGeo.BodyHeight+chestGeo.LidHeight+chestGeo.PromptHeadroom)
+	world := tileWorldPos(ch.TileX, ch.TileZ, g.Area.StandGroundYAt(ch.TileX, ch.Level, ch.TileZ)+chestGeo.BodyHeight+chestGeo.LidHeight+chestGeo.PromptHeadroom)
 	drawFloatingInteractPrompt(camera, world, "Open", assets)
 }
 

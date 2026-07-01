@@ -32,7 +32,9 @@ var editorMenus = []menuGroup{
 	{label: "View", items: []dropdownEntry{
 		{label: "Center on Start", apply: func(s *State) { centerViewOnTile(s, s.area.StartTileX, s.area.StartTileZ) }, desc: "Scroll the canvas to the player start tile."},
 		{label: "Reset View", apply: resetView, desc: "Reset zoom to 100% and re-center the canvas."},
-		{label: "Isometric View", apply: toggleIsoView, hotkey: "I", desc: "Tilt the canvas into a read-only isometric block view that shows elevation.", active: func(s *State) bool { return s.isoView }},
+		{label: "Isometric View", apply: func(s *State) { setIsoView(s, true) }, hotkey: "I", desc: "3D block view showing elevation (default). I toggles.", active: func(s *State) bool { return s.isoView }},
+		{label: "Top Down View", apply: func(s *State) { setIsoView(s, false) }, desc: "Flat top-down grid view.", active: func(s *State) bool { return !s.isoView }},
+		{label: "Object Animation", apply: func(s *State) { s.animateObjects = !s.animateObjects }, desc: "Animate foliage sway & torch flicker in 3D (off = still, faster).", active: func(s *State) bool { return s.animateObjects }},
 		{label: "Tile Glyphs", apply: toggleTileGlyphs, desc: "Overlay each tile's letter code on the canvas.", active: func(s *State) bool { return s.showTileGlyphs }},
 		{label: "Door Links", apply: func(s *State) { s.showDoorLinks = !s.showDoorLinks }, desc: "Draw lines connecting linked doors.", active: func(s *State) bool { return s.showDoorLinks }},
 		{label: "Cycle Day Phase", apply: cyclePreviewPhase, hotkey: "T", desc: "Preview the map lit at the next time of day."},

@@ -67,7 +67,9 @@ func (s *State) scrollbarGeom(id scrollbarID) (gutter rl.Rectangle, vertical boo
 		return gutter, true, contentLen, viewLen, true
 
 	case scrollCanvasV:
-		if s.rect.cellPx <= 0 || s.rect.gridH <= s.rect.grid.Height {
+		// Canvas bars pan the top-down plot (panX/panY); the 3D view scrolls by
+		// orbit/right-drag, so suppress them there rather than show a dead bar.
+		if s.isoView || s.rect.cellPx <= 0 || s.rect.gridH <= s.rect.grid.Height {
 			return
 		}
 		trackLen := s.rect.grid.Height
@@ -81,7 +83,7 @@ func (s *State) scrollbarGeom(id scrollbarID) (gutter rl.Rectangle, vertical boo
 		return gutter, true, s.rect.gridH, s.rect.grid.Height, true
 
 	case scrollCanvasH:
-		if s.rect.cellPx <= 0 || s.rect.gridW <= s.rect.grid.Width {
+		if s.isoView || s.rect.cellPx <= 0 || s.rect.gridW <= s.rect.grid.Width {
 			return
 		}
 		trackLen := s.rect.grid.Width
@@ -164,10 +166,11 @@ func (s *State) updateScrollbars(mp rl.Vector2) bool {
 		s.setScrollbarOffset(id, nv)
 		consumed = consumed || c
 	}
-	// A right/middle-click on a gutter must NOT fall through to the erase /
-	// context-menu / pan-start handlers behind the bar. Swallow only the press,
-	// not a held button, so a left paint-drag sweeping across isn't interrupted.
-	if overGutter && (rl.IsMouseButtonPressed(rl.MouseRightButton) || rl.IsMouseButtonPressed(rl.MouseMiddleButton)) {
+	// A right-click on a gutter must NOT fall through to the context-menu /
+	// pan-start handlers behind the bar. Swallow only the press, not a held
+	// button, so a left paint-drag sweeping across isn't interrupted. (The
+	// mousewheel BUTTON is never bound, so there's nothing else to guard.)
+	if overGutter && rl.IsMouseButtonPressed(rl.MouseRightButton) {
 		consumed = true
 	}
 	return consumed

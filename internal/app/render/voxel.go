@@ -47,7 +47,7 @@ func voxelNeighborSolid(m *core.AreaDefinition, nx, nz, L int) bool {
 var voxelSolidScratch []bool
 
 // drawVoxelColumn renders column (x,z): a floor on each standable surface, one face quad per exposed level on each visible edge, and a downward face under each floating run. Returns the face count.
-func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets Resources, m *core.AreaDefinition, x, z int, cx, cz float32) int {
+func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets Resources, m *core.AreaDefinition, x, z int, cx, cz float32, levelVisible func(int) bool) int {
 	h := m.SolidStackHeight()
 
 	// Resolve each level's solidity ONCE into scratch; the passes below would otherwise re-read SolidAt per level (~5×h redundant self-column reads/frame). standable(L) = cube L solid AND L+1 air.
@@ -65,8 +65,12 @@ func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets 
 			continue
 		}
 		topY := core.ElevationWorldY(L)
-		if !lowestDone {
-			lowestDone = true
+		isGround := !lowestDone
+		lowestDone = true // resolve ground-vs-deck regardless of hiding, so the char stays stable
+		if !levelShown(levelVisible, L) {
+			continue // editor hid this level: skip its surface floor
+		}
+		if isGround {
 			// Authored ground surface keeps its floor char; reuse the heightfield floor path.
 			drawFloorTile(material, assets, m.Floor[z][x], x, z, cx, cz, topY)
 		} else {
@@ -94,6 +98,9 @@ func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets 
 			if !solid[L] || voxelNeighborSolid(m, nx, nz, L) {
 				continue
 			}
+			if !levelShown(levelVisible, L) {
+				continue // editor hid this level: skip its side faces
+			}
 			if !skinResolved {
 				skinResolved = true
 				if sc := m.FaceSkinForDir(x, z, d); assets.faceVariantTable.present[sc] {
@@ -112,6 +119,9 @@ func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets 
 		}
 		if solid[L-1] {
 			continue // resting on the cube beneath — not floating
+		}
+		if !levelShown(levelVisible, L) {
+			continue // editor hid this level: skip its underside
 		}
 		drawTileCube(assets.underModel, cx, core.ElevationWorldY(L-1), cz, 0)
 	}

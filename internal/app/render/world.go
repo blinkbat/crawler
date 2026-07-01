@@ -486,9 +486,17 @@ func (v viewCull) cullXZ(px, pz float32) bool {
 
 func (v viewCull) cull(p rl.Vector3) bool { return v.cullXZ(p.X, p.Z) }
 
-// DrawWorld draws the full lit environment pass — see drawWorld.
+// DrawWorld draws the full lit environment pass for the live game — see drawAreaWorld.
 func DrawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
-	drawWorld(camera, g, assets)
+	drawAreaWorld(camera, &g.Area, assets, g.StepCount, g.Crystals, g, nil)
+}
+
+// DrawArea draws the same static lit environment as DrawWorld but from an
+// AreaDefinition alone (no GameState) — the map editor's 3D render path. stepCount
+// drives the day/night lighting dial; crystals (may be nil) light any placed
+// healing crystals. Live-game-only diagnostics are skipped.
+func DrawArea(camera rl.Camera3D, m *core.AreaDefinition, assets Resources, stepCount int, crystals []core.Crystal, levelVisible func(int) bool) {
+	drawAreaWorld(camera, m, assets, stepCount, crystals, nil, levelVisible)
 }
 
 // worldFrameClock is rl.GetTime() sampled once at the top of the world render
@@ -497,18 +505,77 @@ func DrawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 // prop draw on every path, so it's never stale.
 var worldFrameClock float32
 
+// drawDecorFloor draws the decor char anchored to floor L of column (x,z),
+// reporting whether anything drew (for the diagnostics counter). No-op on empty.
+// Shared by the nil-stack fast path and the per-floor stacked loop.
+func drawDecorFloor(assets Resources, m *core.AreaDefinition, decor byte, x, z int, cx, cz float32, L int) bool {
+	if decor == core.DecorEmpty {
+		return false
+	}
+	decorCenter := rl.NewVector3(cx, m.StandGroundYAt(x, L, z), cz)
+	drawDecor(assets, decor, x, z, cx, cz, decorCenter)
+	return true
+}
+
+// drawPropFloor draws the prop char anchored to floor L of column (x,z) via the
+// inline/footprint/model dispatch, reporting whether a model actually drew.
+func drawPropFloor(assets Resources, m *core.AreaDefinition, prop byte, x, z int, cx, cz float32, L int) bool {
+	if prop == core.TilePropEmpty {
+		return false
+	}
+	propYaw := propYawDeg(x, z)
+	propCenter := rl.NewVector3(cx, m.StandGroundYAt(x, L, z), cz)
+	if handler := inlinePropTable[prop]; handler != nil {
+		handler(assets, m, x, z, propCenter, propYaw)
+		return true
+	}
+	if footprint := core.PropFootprint(prop); footprint != nil {
+		if pm := &assets.propModelTable[prop]; pm.registered() {
+			anchor := footprintAnchor(propCenter, footprint)
+			if r := propShadowRadiusTable[prop]; r > 0 {
+				drawGroundShadowElev(anchor.X, anchor.Z, anchor.Y, r)
+			}
+			pm.draw(anchor, propWorldScale, propYaw)
+			return true
+		}
+		return false
+	}
+	if pm := &assets.propModelTable[prop]; pm.registered() {
+		if r := propShadowRadiusTable[prop]; r > 0 {
+			drawGroundShadowElev(propCenter.X, propCenter.Z, propCenter.Y, r)
+		}
+		pm.draw(propCenter, propWorldScale, propYaw)
+		return true
+	}
+	return false
+}
+
+// levelShown reports whether elevation level L should render: a nil filter
+// (in-game) shows everything; the editor passes its per-level eye state. One
+// spelling so the gate can't drift in polarity across the floor/ceiling/cliff/
+// voxel/decor/prop call sites.
+func levelShown(levelVisible func(int) bool, L int) bool {
+	return levelVisible == nil || levelVisible(L)
+}
+
 // drawWorld rasterizes the sky-less environment geometry, uploads lighting
 // uniforms, and (when the render log is on) gathers per-tile diagnostics.
-func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
-	worldFrameClock = float32(rl.GetTime())
-	m := &g.Area
+func drawAreaWorld(camera rl.Camera3D, m *core.AreaDefinition, assets Resources, stepCount int, crystals []core.Crystal, g *core.GameState, levelVisible func(int) bool) {
+	if editorFreezeAnim {
+		worldFrameClock = 0 // editor still-scene: freeze sway/flicker
+	} else {
+		worldFrameClock = float32(rl.GetTime())
+	}
 	material := assets.worldMaterial(m.Materials)
-	profile := applyTimeOfDay(lightingFor(m.Materials), timeProfileAt(g.StepCount), areaIsEnclosed(m))
+	profile := applyTimeOfDay(lightingFor(m.Materials), timeProfileAt(stepCount), areaIsEnclosed(m))
+	if editorClearView {
+		profile = clarifyForEditor(profile)
+	}
 	cacheLightingProfile(profile)
 	assets.lighting.applyUniforms(camera, profile)
 	// Torch point lights: collect nearest braziers, flicker, upload. Must run
 	// after applyUniforms (same shader) and before the tile loop draws.
-	torches := collectTorches(m, g.Crystals, camera)
+	torches := collectTorches(m, crystals, camera)
 	assets.lighting.uploadTorches(torches)
 
 	camPos := camera.Position
@@ -527,6 +594,15 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	// so the hot loop reads ints/bytes instead of re-decoding ~5× per tile per pass.
 	gw, gh := m.Width, m.Height
 	grid := elevGrid(m, gw, gh)
+	// Per-floor scatter: a legacy (nil-stack) column holds at most one prop + one
+	// decor, each on its cached placed level (te.decorLevel/propLevel) — drawn ONCE
+	// below, the pre-voxel cost. Only a materialized stack walks every floor, and
+	// only then do we pay ScatterStackHeight's grid scan.
+	hasScatter := len(m.PropStack) > 0 || len(m.DecorStack) > 0
+	scatterH := 1
+	if hasScatter {
+		scatterH = m.ScatterStackHeight()
+	}
 
 	rl.BeginShaderMode(assets.lighting.shader)
 	for z := 0; z < m.Height; z++ {
@@ -547,7 +623,11 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 			// step (drawCliffFaces), not a solid tile.
 			te := grid[z*gw+x]
 			elevY := core.ElevationWorldY(te.level)
-			if m.CeilingAt(x, z) {
+			// Editor per-level hiding: an eye-toggled-off floor hides its TERRAIN
+			// (floor slab, ramp wedge, cliff faces, ceiling) too — not just its
+			// props/decor. levelVisible is nil in-game, so everything shows there.
+			terrainVisible := levelShown(levelVisible, te.level)
+			if m.CeilingAt(x, z) && terrainVisible {
 				drawTileCube(material.ceilingModel, cx, core.LevelStep+elevY, cz, tileYawDeg(x, z))
 				if logActive {
 					stats.CeilingsDrawn++
@@ -555,13 +635,14 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 			}
 			if len(m.Solids) > 0 {
 				// Voxel path (gapped maps only): floors per standable surface, side
-				// faces per solid run, floating-cube undersides.
-				n := drawVoxelColumn(camPos, material, assets, m, x, z, cx, cz)
+				// faces per solid run, floating-cube undersides. Per-level hiding is
+				// resolved inside, cube by cube (a column spans many levels).
+				n := drawVoxelColumn(camPos, material, assets, m, x, z, cx, cz, levelVisible)
 				if logActive {
 					stats.FloorsDrawn++
 					stats.WallsDrawn += n
 				}
-			} else {
+			} else if terrainVisible {
 				drawFloorTile(material, assets, m.Floor[z][x], x, z, cx, cz, elevY)
 				if logActive {
 					stats.FloorsDrawn++
@@ -571,41 +652,33 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 					stats.WallsDrawn += n
 				}
 			}
-			// Decor anchors to its placed level (DecorLevelAt). Guard on non-empty
-			// so the anchor math is skipped for the common empty tiles.
-			if decor := m.Decor[z][x]; decor != core.DecorEmpty {
-				decorCenter := rl.NewVector3(cx, m.StandGroundYAt(x, te.decorLevel, z), cz)
-				drawDecor(assets, decor, x, z, cx, cz, decorCenter)
-				if logActive {
-					stats.DecorDrawn++
-				}
-			}
-			if prop := m.Props[z][x]; prop != core.TilePropEmpty {
-				propYaw := propYawDeg(x, z)
-				// Prop anchors to its placed level (PropLevelAt).
-				propCenter := rl.NewVector3(cx, m.StandGroundYAt(x, te.propLevel, z), cz)
-				drawn := false
-				if handler := inlinePropTable[prop]; handler != nil {
-					handler(assets, m, x, z, propCenter, propYaw)
-					drawn = true
-				} else if footprint := core.PropFootprint(prop); footprint != nil {
-					if pm := &assets.propModelTable[prop]; pm.registered() {
-						anchor := footprintAnchor(propCenter, footprint)
-						if r := propShadowRadiusTable[prop]; r > 0 {
-							drawGroundShadowElev(anchor.X, anchor.Z, anchor.Y, r)
-						}
-						pm.draw(anchor, propWorldScale, propYaw)
-						drawn = true
+			// Decor + props. A nil-stack column draws its single prop/decor once at
+			// the cached placed level (fast path, identical to the pre-voxel cost);
+			// a materialized stack walks every floor drawing each floor's content.
+			if !hasScatter {
+				if levelShown(levelVisible, te.decorLevel) {
+					if drawDecorFloor(assets, m, m.DecorAt(x, te.decorLevel, z), x, z, cx, cz, te.decorLevel) && logActive {
+						stats.DecorDrawn++
 					}
-				} else if pm := &assets.propModelTable[prop]; pm.registered() {
-					if r := propShadowRadiusTable[prop]; r > 0 {
-						drawGroundShadowElev(propCenter.X, propCenter.Z, propCenter.Y, r)
-					}
-					pm.draw(propCenter, propWorldScale, propYaw)
-					drawn = true
 				}
-				if logActive && drawn {
-					stats.PropsDrawn++
+				if levelShown(levelVisible, te.propLevel) {
+					if drawPropFloor(assets, m, m.PropAt(x, te.propLevel, z), x, z, cx, cz, te.propLevel) && logActive {
+						stats.PropsDrawn++
+					}
+				}
+			} else {
+				for L := 0; L < scatterH; L++ {
+					// Editor per-floor visibility: an eye-toggled-off floor hides its
+					// props/decor (levelVisible is nil in-game — everything shows).
+					if !levelShown(levelVisible, L) {
+						continue
+					}
+					if drawDecorFloor(assets, m, m.DecorAt(x, L, z), x, z, cx, cz, L) && logActive {
+						stats.DecorDrawn++
+					}
+					if drawPropFloor(assets, m, m.PropAt(x, L, z), x, z, cx, cz, L) && logActive {
+						stats.PropsDrawn++
+					}
 				}
 			}
 		}
@@ -618,17 +691,20 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		stats.CamPos = camera.Position
 		stats.CamDir = rl.NewVector3(camera.Target.X-camera.Position.X, camera.Target.Y-camera.Position.Y, camera.Target.Z-camera.Position.Z)
 		stats.CamFOV = camera.Fovy
-		stats.PlayerYaw = g.Player.Yaw
-		stats.PlayerLookYaw = g.Player.LookYaw
-		stats.PlayerLookPitch = g.Player.LookPitch
-		stats.StepCount = g.StepCount
+		stats.StepCount = stepCount
 		stats.LightingShaderID = assets.lighting.shader.ID
 		stats.BillboardFogID = assets.billboardFog.shader.ID
 		stats.FogDensity = profile.FogDensity
 		stats.FogColor = profile.FogColor
 		stats.AmbientColor = profile.AmbientColor
 		stats.SunColor = profile.SunColor
-		stats.BattleActive = g.Battle.Active()
+		// Player/battle diagnostics only exist for the live game (nil in the editor).
+		if g != nil {
+			stats.PlayerYaw = g.Player.Yaw
+			stats.PlayerLookYaw = g.Player.LookYaw
+			stats.PlayerLookPitch = g.Player.LookPitch
+			stats.BattleActive = g.Battle.Active()
+		}
 		LogRenderFrame(stats)
 	}
 }

@@ -230,7 +230,9 @@ func placePacks(a *AreaDefinition) []Pack {
 		packs = append(packs, Pack{
 			TileX:     snap.TileX,
 			TileZ:     snap.TileZ,
-			Level:     spawnLevel(a, snap.TileX, snap.TileZ),
+			// Honor the authored floor when standable at the snapped tile; else fall
+			// back to the ground surface (covers legacy spawns with Level 0).
+			Level:     a.resolveEntityLevel(snap.TileX, snap.TileZ, spawn.Level),
 			HomeX:     snap.TileX,
 			HomeZ:     snap.TileZ,
 			X:         TileCenter(snap.TileX),
@@ -738,13 +740,20 @@ func (a *AreaDefinition) DecorLevelAt(x, z int) int { return a.levelGridAt(a.Dec
 // `level` — it roots at PropLevelAt and rises PropBlockHeight. On a gapped column
 // it blocks only those levels, so you can walk under a deck past a ground tree.
 func (a *AreaDefinition) PropBlocksStanding(x, level, z int) bool {
-	c, ok := a.layerByteAt(a.Props, x, z)
-	if !ok || !IsPropChar(c) || PropIsNonBlocking(c) {
-		return false
+	// Per-floor: any prop rooted on floor `base` occupies [base, base+height). Scan
+	// the floors that could reach `level`. On a legacy (nil-stack) column PropAt is
+	// non-empty only on the tile's single PropLevelAt floor, so this reduces to the
+	// old single-prop test; a stacked column blocks each floor's own prop.
+	for base := 0; base <= level; base++ {
+		c := a.PropAt(x, base, z)
+		if c == TilePropEmpty || !IsPropChar(c) || PropIsNonBlocking(c) {
+			continue
+		}
+		if level < base+PropBlockHeight(c) {
+			return true
+		}
 	}
-	base := a.PropLevelAt(x, z)
-	h := PropBlockHeight(c)
-	return level >= base && level < base+h
+	return false
 }
 
 // EnterOpts parameterizes CanEnterTile. Zero value = strictest (forbid doors,
@@ -788,7 +797,7 @@ func CanEnterTileAtLevel(g *GameState, tx, tz, level int, opts EnterOpts) bool {
 	if g.Area.PropBlocksStanding(tx, level, tz) {
 		return false
 	}
-	return canEnterRuntimeBlockers(g, tx, tz, opts)
+	return canEnterRuntimeBlockersAt(g, tx, tz, level, true, opts)
 }
 
 // CanEnterLanding picks the right entry check for the landing surface: the
@@ -806,13 +815,21 @@ func CanEnterLanding(g *GameState, tx, tz, level int, opts EnterOpts, isVoxel bo
 // PlayerTileX/Z is gated on AllowPlayerTile/OccupiedPacks, else the zero-default
 // (0,0) would falsely block every step toward tile (0,0).
 func canEnterRuntimeBlockers(g *GameState, tx, tz int, opts EnterOpts) bool {
-	if ChestIndexAt(g.Chests, tx, tz) >= 0 {
+	return canEnterRuntimeBlockersAt(g, tx, tz, 0, false, opts)
+}
+
+// canEnterRuntimeBlockersAt is canEnterRuntimeBlockers with optional LEVEL-aware
+// entity blocking: on a voxel map (levelAware) a chest/crystal/door blocks only
+// its own floor, so a unit can walk under a deck that holds one. Flat maps pass
+// levelAware=false and block the whole column (unchanged).
+func canEnterRuntimeBlockersAt(g *GameState, tx, tz, level int, levelAware bool, opts EnterOpts) bool {
+	if chestIndexOn(g.Chests, tx, tz, level, levelAware) >= 0 {
 		return false
 	}
-	if CrystalIndexAt(g.Crystals, tx, tz) >= 0 {
+	if crystalIndexOn(g.Crystals, tx, tz, level, levelAware) >= 0 {
 		return false
 	}
-	if !opts.AllowDoorTile && DoorIndexAt(g.Doors, tx, tz) >= 0 {
+	if !opts.AllowDoorTile && doorIndexOn(g.Doors, tx, tz, level, levelAware) >= 0 {
 		return false
 	}
 	if opts.AllowPlayerTile || opts.OccupiedPacks != nil {
@@ -849,23 +866,45 @@ func ChestIndexAt(chests []Chest, x, z int) int {
 	return SpawnIndexAt(chests, x, z)
 }
 
+// chestIndexOn is the level-aware chest lookup for the blocker tail: when
+// levelAware, only a chest on `level` blocks (walk-under-deck); else tile-only.
+func chestIndexOn(chests []Chest, x, z, level int, levelAware bool) int {
+	for i, c := range chests {
+		if c.TileX == x && c.TileZ == z && (!levelAware || c.Level == level) {
+			return i
+		}
+	}
+	return -1
+}
+
 // AdjacentChestIndex returns the index of a chest one cardinal step from (x,z),
 // or -1. Includes looted chests (lid still blocks the tile); no diagonals.
 func AdjacentChestIndex(chests []Chest, x, z int) int {
-	return adjacentChestIndex(chests, x, z, false)
+	return adjacentChestIndex(chests, x, z, false, 0, false)
 }
 
 // AdjacentInteractableChestIndex is the openable-only variant (skips looted chests).
 func AdjacentInteractableChestIndex(chests []Chest, x, z int) int {
-	return adjacentChestIndex(chests, x, z, true)
+	return adjacentChestIndex(chests, x, z, true, 0, false)
+}
+
+// AdjacentInteractableChestIndexOn is the level-aware openable-chest lookup: on a
+// voxel map only a chest one cardinal step away ON `level` opens (so a deck chest
+// isn't reached through the floor), else tile-only. Mirrors PackIndexAtLanding.
+func AdjacentInteractableChestIndexOn(chests []Chest, x, z, level int, isVoxel bool) int {
+	return adjacentChestIndex(chests, x, z, true, level, isVoxel)
 }
 
 // adjacentChestIndex scans for a chest one cardinal step from (x,z). When
 // openableOnly, skips looted chests inside the scan: post-filtering the first hit
 // would miss an openable chest whenever a looted chest sits earlier in the slice.
-func adjacentChestIndex(chests []Chest, x, z int, openableOnly bool) int {
+// When levelAware, also requires the chest's floor to equal `level`.
+func adjacentChestIndex(chests []Chest, x, z int, openableOnly bool, level int, levelAware bool) int {
 	for i, c := range chests {
 		if openableOnly && c.Looted {
+			continue
+		}
+		if levelAware && c.Level != level {
 			continue
 		}
 		if ManhattanDistance(c.TileX, c.TileZ, x, z) == 1 {
@@ -1373,6 +1412,12 @@ func init() {
 	// desync the two — if this fires, update mapfile.MaxLevelChar to match.
 	if c := ElevationChar(MaxElevationLevel); c != mapfile.MaxLevelChar {
 		panic(fmt.Sprintf("core: ElevationChar(MaxElevationLevel)=%q but mapfile.MaxLevelChar=%q — bump them together", c, rune(mapfile.MaxLevelChar)))
+	}
+	// mapfile.MaxFloorLevel bounds an entity's @N floor with a second literal (it
+	// can't import core); pin it to MaxElevationLevel so the two can't drift and
+	// silently reject entities on the top floors after an elevation-range bump.
+	if MaxElevationLevel != mapfile.MaxFloorLevel {
+		panic(fmt.Sprintf("core: MaxElevationLevel=%d but mapfile.MaxFloorLevel=%d — bump them together", MaxElevationLevel, mapfile.MaxFloorLevel))
 	}
 	// FaceOverride.Skins ([FacingCount]byte) and mapfile.MapFace.Skins are copied
 	// whole to each other in faceOverridesFromMap / mapFacesFromArea; their lengths

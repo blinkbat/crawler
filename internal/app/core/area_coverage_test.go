@@ -22,6 +22,7 @@ func TestAreaDefinitionFieldsTracked(t *testing.T) {
 		"Walls": true, "Floor": true, "Decor": true, "Props": true,
 		"Ceiling": true, "Elevation": true, "Solids": true,
 		"PropLevels": true, "DecorLevels": true, "FaceOverrides": true,
+		"PropStack": true, "DecorStack": true,
 		"Materials":  true,
 		"StartTileX": true, "StartTileZ": true, "StartFacing": true,
 		"PackSpawns": true, "ChestSpawns": true, "DoorSpawns": true,

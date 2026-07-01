@@ -145,7 +145,7 @@ func updateTitleScene(state *appState) {
 		state.game = game
 		state.scene = sceneAdventure
 	case title.ActionOpenEditor:
-		state.editor = editor.New()
+		state.editor = editor.NewDefault()
 		state.scene = sceneEditor
 	case title.ActionQuit:
 		state.quit = true

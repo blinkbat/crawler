@@ -551,6 +551,56 @@ var (
 	}
 )
 
+// editorClearView, when set, makes drawAreaWorld render with editor-friendly
+// clarity — distance fog cut, ambient/sun floored — instead of the atmospheric
+// game grade. The editor's 3D view sets it only around its own DrawArea call, so
+// the in-game and playtest paths are never touched. See editor drawGridIso.
+var editorClearView bool
+
+// SetEditorClearView toggles the editor 3D view's clarity override (see above).
+func SetEditorClearView(on bool) { editorClearView = on }
+
+// editorFreezeAnim, when set, pins the world sway/flicker clock to 0 so the
+// editor's 3D view renders a STILL scene (calmer to author, cheaper). Scoped
+// like editorClearView — set only around the editor's own DrawArea call.
+var editorFreezeAnim bool
+
+// SetEditorFreezeAnim toggles the still-scene override for drawAreaWorld.
+func SetEditorFreezeAnim(on bool) { editorFreezeAnim = on }
+
+// Editor clear-view tunables: fog cut to a sliver (depth cue only) and ambient/
+// sun floored so an enclosed dungeon's gloom can't black out the authoring view.
+var (
+	editorFogScale     = float32(0.12)
+	editorAmbientFloor = rl.NewVector3(0.55, 0.58, 0.64)
+	editorSunFloor     = rl.NewVector3(0.90, 0.88, 0.82)
+)
+
+// clarifyForEditor lifts a lighting profile toward flat, near-fogless visibility
+// for the editor's 3D view — an authoring surface must SEE geometry, not mood.
+func clarifyForEditor(p lightingProfile) lightingProfile {
+	p.FogDensity *= editorFogScale
+	p.AmbientColor = liftVec3(p.AmbientColor, editorAmbientFloor)
+	p.SunColor = liftVec3(p.SunColor, editorSunFloor)
+	p.ShadowStrength *= 0.5
+	p.Mood = 0 // drop the night grade so tile colors read true
+	return p
+}
+
+// liftVec3 raises each channel of v to at least the matching channel of floor.
+func liftVec3(v, floor rl.Vector3) rl.Vector3 {
+	if v.X < floor.X {
+		v.X = floor.X
+	}
+	if v.Y < floor.Y {
+		v.Y = floor.Y
+	}
+	if v.Z < floor.Z {
+		v.Z = floor.Z
+	}
+	return v
+}
+
 // attachShader binds the lighting shader to every material on the model.
 // GetMaterials aliases the model's underlying material memory, so mutating the
 // slice elements writes back through the C pointer.

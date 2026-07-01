@@ -22,6 +22,10 @@ type PackMemberRef struct {
 type PackSpawn struct {
 	TileX   int
 	TileZ   int
+	// Level is the voxel floor the pack stands on. Zero = ground (auto on a flat
+	// or single-floor map); a deck spawn carries its surface level so it doesn't
+	// collide with whatever sits at the same (x,z) on another floor.
+	Level   int
 	Members []PackMemberRef
 	// AI selects per-pack movement. Zero value PackAINone = stationary until
 	// stepped into.
@@ -53,6 +57,8 @@ const (
 type ChestSpawn struct {
 	TileX int
 	TileZ int
+	// Level is the voxel floor the chest rests on (zero = ground/auto). See PackSpawn.Level.
+	Level int
 	Items []ItemKind
 }
 
@@ -73,6 +79,8 @@ const (
 type DoorSpawn struct {
 	TileX      int
 	TileZ      int
+	// Level is the voxel floor the door sits on (zero = ground/auto). See PackSpawn.Level.
+	Level      int
 	Name       string
 	TargetMap  string
 	TargetDoor string
@@ -91,6 +99,8 @@ func (d DoorSpawn) HasTarget() bool {
 type CrystalSpawn struct {
 	TileX int
 	TileZ int
+	// Level is the voxel floor the crystal sits on (zero = ground/auto). See PackSpawn.Level.
+	Level int
 }
 
 // TileXZ is implemented by the authored spawn types (PackSpawn / ChestSpawn /
@@ -113,6 +123,8 @@ func (c Crystal) Tile() (int, int)      { return c.TileX, c.TileZ }
 type Door struct {
 	TileX int
 	TileZ int
+	// Level is the voxel floor the door sits on (resolved from DoorSpawn.Level).
+	Level int
 	Name  string
 	// TargetMap is the destination map id (bare name); "self" is resolved to the
 	// local map id by AreaFromMapFile.
@@ -233,6 +245,9 @@ func (g *GameState) JournalRowCount() int {
 type Chest struct {
 	TileX  int
 	TileZ  int
+	// Level is the voxel floor the chest rests on (resolved from ChestSpawn.Level),
+	// so it renders on its deck rather than the column ground. See resolveEntityLevel.
+	Level  int
 	Items  []ItemStack
 	Looted bool
 }
@@ -244,6 +259,8 @@ type Chest struct {
 type Crystal struct {
 	TileX   int
 	TileZ   int
+	// Level is the voxel floor the crystal sits on (resolved from CrystalSpawn.Level).
+	Level   int
 	Charge  int
 	Charged bool
 	// SpinBurst is the touch-armed fast-spin countdown (from CrystalSpinBurstDuration),
@@ -284,6 +301,15 @@ type AreaDefinition struct {
 	// DecorLevels: decor analogue of PropLevels, '.' = auto. nil = all auto. See
 	// DecorLevelAt.
 	DecorLevels []string
+	// PropStack / DecorStack are the per-FLOOR scatter grids superseding the single
+	// Props/Decor grid + PropLevels/DecorLevels tag, exactly as Solids supersedes
+	// Elevation. Stack[level][z] is a width-wide row, one char per x. They let a
+	// column hold a DIFFERENT prop/decor on each floor (a barrel on level 2, a tree
+	// on level 6) so per-floor content never collides. nil = derive from the legacy
+	// single grid (the prop/decor sits only on its PropLevelAt/DecorLevelAt floor),
+	// so a single-floor map keeps Stack==nil and round-trips byte-identical. See floors.go.
+	PropStack  [][]string
+	DecorStack [][]string
 	// FaceOverrides holds per-tile, per-direction cliff-face skin overrides (the
 	// top-down editor can't paint a vertical face, so faces are a tile property).
 	// No entry = base FaceSkinAt skin on every face. Sorted by (Z,X) for

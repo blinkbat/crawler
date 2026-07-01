@@ -87,6 +87,13 @@ type MapFile struct {
 	PropLevels []string
 	// DecorLevels is the decor analogue of PropLevels.
 	DecorLevels []string
+	// PropStack / DecorStack are the optional per-FLOOR scatter stacks (the cube
+	// analogue of Solids for placed content): Stack[level] is a Height×Width grid
+	// of prop/decor chars, planes lowest-first. Written ONLY when a column carries
+	// content on more than one floor (inexpressible as the single grid + level
+	// tag); a single-floor map omits them, byte-identical. See core/floors.go.
+	PropStack  [][]string
+	DecorStack [][]string
 	// Faces holds per-tile cliff-face skin overrides (N/E/S/W), one line per
 	// overridden tile; empty for maps using only base/whole-tile skins.
 	Faces []MapFace
@@ -131,6 +138,9 @@ type MapPack struct {
 	BackCount int
 	X         int
 	Z         int
+	// Level is the voxel floor this pack belongs to (the section's @N suffix; 0 =
+	// the plain `enemies:` section / a single-floor map). See sectionFor.
+	Level int
 	// AI is the on-disk movement style (see PackAINames); empty ⇒ PackAINone
 	// (stationary).
 	AI string
@@ -232,6 +242,9 @@ type MapChest struct {
 	Items []string
 	X     int
 	Z     int
+	// Level is the voxel floor this chest belongs to (section @N suffix; 0 = plain
+	// `chests:`). See sectionFor.
+	Level int
 }
 
 // EmptyChestToken is the placeholder for a chest with no items (kept out of the
@@ -253,6 +266,9 @@ type MapDoor struct {
 	TargetDoor string
 	X          int
 	Z          int
+	// Level is the voxel floor this door belongs to (section @N suffix; 0 = plain
+	// `doors:`). See sectionFor.
+	Level      int
 	Facing     string
 	Style      string
 }
@@ -262,6 +278,9 @@ type MapDoor struct {
 type MapCrystal struct {
 	X int
 	Z int
+	// Level is the voxel floor this crystal belongs to (section @N suffix; 0 =
+	// plain `crystals:`). See sectionFor.
+	Level int
 }
 
 // MapFace is one tile's per-direction cliff-face skin override. Skins is indexed
@@ -402,6 +421,8 @@ const (
 	slotPropLevels
 	slotDecorLevels
 	slotFaces
+	slotPropStack
+	slotDecorStack
 )
 
 // Section header names — on-disk labels (header line is name+colon); sectionFor
@@ -425,6 +446,8 @@ const (
 	SectionPropLevels    = "prop_levels"
 	SectionDecorLevels   = "decor_levels"
 	SectionFaces         = "faces"
+	SectionPropStack     = "propstack"
+	SectionDecorStack    = "decorstack"
 )
 
 // Header-line keys — the preamble's "key: value" lines. parseHeaderLine reads,
@@ -471,6 +494,10 @@ var layerSections = []layerSection{
 	{SectionDecorLevels, slotDecorLevels, nil},
 	// faces: sparse entity-style section (one line per overridden tile).
 	{SectionFaces, slotFaces, nil},
+	// propstack: / decorstack: multi-plane scatter stacks (per-floor props/decor),
+	// nil field + bespoke code like solids:; excluded from GridLayerCount.
+	{SectionPropStack, slotPropStack, nil},
+	{SectionDecorStack, slotDecorStack, nil},
 }
 
 // GridLayerCount is the number of grid layers (layerSections rows with a field
@@ -491,7 +518,7 @@ func init() {
 			GridLayerCount++
 		}
 	}
-	for slot := slotWalls; slot <= slotFaces; slot++ {
+	for slot := slotWalls; slot <= slotDecorStack; slot++ {
 		if !seen[slot] {
 			panic(fmt.Sprintf("mapfile: layerSections missing slot %d — add a row", slot))
 		}
@@ -541,14 +568,18 @@ func Parse(r io.Reader) (MapFile, error) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)
 	state := slotNone
+	stateLevel := 0 // floor (@N) of the current entity section; 0 for grids/legacy
 	lineNo := 0
 	for sc.Scan() {
 		lineNo++
 		raw := strings.TrimRight(sc.Text(), "\r")
 
 		// Section headers can appear anywhere and switch state — check first.
-		if next, ok := sectionFor(raw); ok {
-			state = next
+		if next, level, ok := sectionFor(raw); ok {
+			if level != 0 && !slotSupportsLevel(next) {
+				return mf, fmt.Errorf("line %d: section %q does not take an @floor suffix", lineNo, strings.TrimSpace(raw))
+			}
+			state, stateLevel = next, level
 			// An empty crystals: section means "zero crystals", not
 			// "unspecified" (see MapFile.CrystalsDefined).
 			if next == slotCrystals {
@@ -599,7 +630,7 @@ func Parse(r io.Reader) (MapFile, error) {
 					return mf, fmt.Errorf("line %d: unknown pack AI %q (expected one of %v)", lineNo, fields[3], PackAINames)
 				}
 			}
-			mf.Packs = append(mf.Packs, MapPack{Members: members, BackCount: backCount, X: x, Z: z, AI: ai})
+			mf.Packs = append(mf.Packs, MapPack{Members: members, BackCount: backCount, X: x, Z: z, Level: stateLevel, AI: ai})
 			continue
 		}
 
@@ -634,6 +665,7 @@ func Parse(r io.Reader) (MapFile, error) {
 				TargetDoor: fields[2],
 				X:          x,
 				Z:          z,
+				Level:      stateLevel,
 				Facing:     face,
 				Style:      style,
 			})
@@ -668,7 +700,7 @@ func Parse(r io.Reader) (MapFile, error) {
 					items = append(items, name)
 				}
 			}
-			mf.Chests = append(mf.Chests, MapChest{Items: items, X: x, Z: z})
+			mf.Chests = append(mf.Chests, MapChest{Items: items, X: x, Z: z, Level: stateLevel})
 			continue
 		}
 
@@ -686,7 +718,7 @@ func Parse(r io.Reader) (MapFile, error) {
 			if err != nil {
 				return mf, err
 			}
-			mf.Crystals = append(mf.Crystals, MapCrystal{X: x, Z: z})
+			mf.Crystals = append(mf.Crystals, MapCrystal{X: x, Z: z, Level: stateLevel})
 			continue
 		}
 
@@ -718,19 +750,15 @@ func Parse(r io.Reader) (MapFile, error) {
 			continue
 		}
 
-		if state == slotSolids {
+		if stack := planeStackFor(&mf, state); stack != nil {
 			// N planes of Height rows each, lowest-first; rows arrive contiguously
 			// (blanks already skipped), so start a new plane when the current fills
 			// to Height. Height is 0 only if size: is misordered after a grid —
 			// fail pointedly rather than splitting every row into its own plane.
 			if mf.Height == 0 {
-				return mf, fmt.Errorf("line %d: solids: section appears before size: (grid dimensions unknown)", lineNo)
+				return mf, fmt.Errorf("line %d: a multi-plane section appears before size: (grid dimensions unknown)", lineNo)
 			}
-			if len(mf.Solids) == 0 || len(mf.Solids[len(mf.Solids)-1]) >= mf.Height {
-				mf.Solids = append(mf.Solids, []string{})
-			}
-			last := len(mf.Solids) - 1
-			mf.Solids[last] = append(mf.Solids[last], raw)
+			appendPlaneRow(stack, raw, mf.Height)
 			continue
 		}
 
@@ -809,20 +837,67 @@ func appendGridRow(target *[]string, raw string, height, lineNo int, section str
 	return nil
 }
 
-// sectionFor maps a section-header line ("walls:", …) to its slot. The trailing
-// colon is required (a bare "walls" is not a header).
-func sectionFor(raw string) (layerSlot, bool) {
+// sectionFor maps a section-header line ("walls:", "enemies@3:", …) to its slot
+// and voxel level. The trailing colon is required (a bare "walls" is not a
+// header). An optional "@N" before the colon names the floor (level N) for a
+// level-aware entity section; absent / "@0" = level 0 (the plain section). A
+// malformed "@<non-int>" is treated as not-a-header (falls through to content).
+func sectionFor(raw string) (slot layerSlot, level int, ok bool) {
 	trimmed := strings.TrimSpace(raw)
 	if !strings.HasSuffix(trimmed, ":") {
-		return slotNone, false
+		return slotNone, 0, false
 	}
 	name := trimmed[:len(trimmed)-1]
+	if at := strings.IndexByte(name, '@'); at >= 0 {
+		lv, err := strconv.Atoi(name[at+1:])
+		if err != nil || lv < 0 {
+			return slotNone, 0, false
+		}
+		level = lv
+		name = name[:at]
+	}
 	for _, s := range layerSections {
 		if s.name == name {
-			return s.slot, true
+			return s.slot, level, true
 		}
 	}
-	return slotNone, false
+	return slotNone, 0, false
+}
+
+// slotSupportsLevel reports whether a section may carry an "@N" floor suffix —
+// the positional entity sections (one tile per row). Grid layers are still a
+// single per-map plane in this schema, so a "@N" on one is an authoring error.
+func slotSupportsLevel(slot layerSlot) bool {
+	switch slot {
+	case slotEnemies, slotChests, slotDoors, slotCrystals:
+		return true
+	}
+	return false
+}
+
+// planeStackFor returns the MapFile multi-plane stack field for a stack slot
+// (solids / propstack / decorstack), or nil for any other slot. The single
+// name→field map behind the shared multi-plane parse arm.
+func planeStackFor(mf *MapFile, slot layerSlot) *[][]string {
+	switch slot {
+	case slotSolids:
+		return &mf.Solids
+	case slotPropStack:
+		return &mf.PropStack
+	case slotDecorStack:
+		return &mf.DecorStack
+	}
+	return nil
+}
+
+// appendPlaneRow appends raw to a multi-plane stack, starting a new plane when
+// the current one has filled to height. Shared by the solids/propstack/decorstack arms.
+func appendPlaneRow(stack *[][]string, raw string, height int) {
+	if len(*stack) == 0 || len((*stack)[len(*stack)-1]) >= height {
+		*stack = append(*stack, []string{})
+	}
+	last := len(*stack) - 1
+	(*stack)[last] = append((*stack)[last], raw)
 }
 
 // layerSlice returns the MapFile grid field for a grid-layer slot, or nil for
@@ -909,6 +984,18 @@ func (mf *MapFile) oobErr(what string, x, z int) error {
 	return fmt.Errorf("%s at (%d,%d) outside map %dx%d", what, x, z, mf.Width, mf.Height)
 }
 
+// MaxFloorLevel is the highest floor an entity's @N section may name — the level
+// MaxLevelChar ('K') encodes (0..20), the same alphabet as elevation/prop levels.
+const MaxFloorLevel = 20
+
+// validateFloor bounds-checks an entity's @N floor; what is the entity label.
+func (mf *MapFile) validateFloor(what string, level, x, z int) error {
+	if level < 0 || level > MaxFloorLevel {
+		return fmt.Errorf("%s at (%d,%d) has floor %d outside 0..%d", what, x, z, level, MaxFloorLevel)
+	}
+	return nil
+}
+
 // isLevelChar reports whether b is a level char: '0'..'9' then 'A'..'K' (10..20).
 // The 'K' upper bound == core's MaxElevationLevel (core/map.go init pins this), so
 // the elevation and prop/decor-level grids share one alphabet definition.
@@ -964,6 +1051,17 @@ func (mf *MapFile) validate() error {
 			return err
 		}
 	}
+	// propstack / decorstack: same per-plane dimension check as solids.
+	for L, plane := range mf.PropStack {
+		if err := mf.validateGridDims(fmt.Sprintf("%s plane %d", SectionPropStack, L), plane); err != nil {
+			return err
+		}
+	}
+	for L, plane := range mf.DecorStack {
+		if err := mf.validateGridDims(fmt.Sprintf("%s plane %d", SectionDecorStack, L), plane); err != nil {
+			return err
+		}
+	}
 	// prop_levels / decor_levels: optional per-tile level grids; dimension-check only.
 	if err := mf.validateOptionalGrid(SectionPropLevels, mf.PropLevels); err != nil {
 		return err
@@ -991,6 +1089,9 @@ func (mf *MapFile) validate() error {
 		if !InBoundsWH(p.X, p.Z, mf.Width, mf.Height) {
 			return mf.oobErr("pack", p.X, p.Z)
 		}
+		if err := mf.validateFloor("pack", p.Level, p.X, p.Z); err != nil {
+			return err
+		}
 		// Members encode comma/semicolon-joined (',' within a row, ';' splits the
 		// front/back rows) and re-split on those, so a member name containing either —
 		// or whitespace, which the row decoder also splits on — would re-parse as
@@ -1006,6 +1107,9 @@ func (mf *MapFile) validate() error {
 		if !InBoundsWH(c.X, c.Z, mf.Width, mf.Height) {
 			return mf.oobErr("chest", c.X, c.Z)
 		}
+		if err := mf.validateFloor("chest", c.Level, c.X, c.Z); err != nil {
+			return err
+		}
 		// Items encode comma-joined and re-split on ',', so an item name containing a
 		// comma would silently re-parse as two items. Reject at the data-model boundary
 		// (mirrors the door-name whitespace guard) so it fails loudly at save.
@@ -1020,6 +1124,9 @@ func (mf *MapFile) validate() error {
 		if !InBoundsWH(c.X, c.Z, mf.Width, mf.Height) {
 			return mf.oobErr("crystal", c.X, c.Z)
 		}
+		if err := mf.validateFloor("crystal", c.Level, c.X, c.Z); err != nil {
+			return err
+		}
 	}
 	// Doors: bounds, non-empty name + target, no duplicate names (runtime resolves
 	// by name, so duplicates would be ambiguous).
@@ -1027,6 +1134,9 @@ func (mf *MapFile) validate() error {
 	for _, d := range mf.Doors {
 		if !InBoundsWH(d.X, d.Z, mf.Width, mf.Height) {
 			return mf.oobErr(fmt.Sprintf("door %q", d.Name), d.X, d.Z)
+		}
+		if err := mf.validateFloor(fmt.Sprintf("door %q", d.Name), d.Level, d.X, d.Z); err != nil {
+			return err
 		}
 		if d.Name == "" {
 			return fmt.Errorf("door at (%d,%d) has empty name", d.X, d.Z)
@@ -1354,6 +1464,51 @@ func parseCustomEnemyLine(line string, lineNo int) (MapCustomEnemy, error) {
 	return ce, nil
 }
 
+// leveledSectionName returns a section's on-disk header for a given floor: the
+// plain name at level 0 (byte-identical to a single-floor map), else "name@N".
+// Inverse of the @N parse in sectionFor.
+func leveledSectionName(name string, level int) string {
+	if level == 0 {
+		return name
+	}
+	return name + "@" + strconv.Itoa(level)
+}
+
+// entityLevels returns the distinct floor levels present across count entities
+// (levelAt(i) is entity i's level), sorted ascending. includeZero forces level 0
+// into the set so an "always emit the base section" rule (enemies/chests, or a
+// defined-but-empty crystals:) still writes its header when no entity sits there.
+func entityLevels(count int, levelAt func(i int) int, includeZero bool) []int {
+	seen := make(map[int]bool)
+	if includeZero {
+		seen[0] = true
+	}
+	for i := 0; i < count; i++ {
+		seen[levelAt(i)] = true
+	}
+	out := make([]int, 0, len(seen))
+	for l := range seen {
+		out = append(out, l)
+	}
+	sort.Ints(out)
+	return out
+}
+
+// writePlaneStack emits a multi-plane section ("name:" + every plane's rows,
+// lowest-first, contiguous), but ONLY when the stack is non-empty (byte-identical
+// otherwise). Shared by solids/propstack/decorstack. The parser re-splits by Height.
+func writePlaneStack(bw *bufio.Writer, name string, stack [][]string) {
+	if len(stack) == 0 {
+		return
+	}
+	fmt.Fprintln(bw, name+":")
+	for _, plane := range stack {
+		for _, row := range plane {
+			fmt.Fprintln(bw, row)
+		}
+	}
+}
+
 // writeVerbatimSection emits "name:" + each row verbatim, but ONLY when rows is
 // non-empty (byte-identical otherwise). Shared by prop_levels/decor_levels/dialogs/triggers.
 func writeVerbatimSection(bw *bufio.Writer, name string, rows []string) {
@@ -1387,14 +1542,12 @@ func (mf MapFile) Encode(w io.Writer) error {
 	}
 	// solids: appended only for a gapped map (heightfield omits it, byte-identical).
 	// Planes emit lowest-first as contiguous Height-row blocks; parser re-splits by Height.
-	if len(mf.Solids) > 0 {
-		fmt.Fprintln(bw, SectionSolids+":")
-		for _, plane := range mf.Solids {
-			for _, row := range plane {
-				fmt.Fprintln(bw, row)
-			}
-		}
-	}
+	writePlaneStack(bw, SectionSolids, mf.Solids)
+	// propstack / decorstack: appended only for a multi-floor map (a single-floor
+	// map projects content into props:/decor: + *_levels: and omits these, staying
+	// byte-identical).
+	writePlaneStack(bw, SectionPropStack, mf.PropStack)
+	writePlaneStack(bw, SectionDecorStack, mf.DecorStack)
 	// prop_levels / decor_levels: appended only when some entity sits above its
 	// auto surface (handled in writeVerbatimSection).
 	writeVerbatimSection(bw, SectionPropLevels, mf.PropLevels)
@@ -1406,30 +1559,47 @@ func (mf MapFile) Encode(w io.Writer) error {
 			fmt.Fprintf(bw, facesEncodeFormat, f.X, f.Z, string(f.Skins[:]))
 		}
 	}
-	fmt.Fprintln(bw, SectionEnemies+":")
-	for _, p := range mf.Packs {
-		// Single-member packs encode as the legacy "kind X Z" line; the AI column
-		// is appended only when non-default, so stationary packs stay 3 fields.
-		members := encodePackMembers(p.Members, p.BackCount)
-		ai := strings.ToLower(strings.TrimSpace(p.AI))
-		if ai == "" || ai == PackAINoneName {
-			fmt.Fprintf(bw, packEncodeFormatLegacy, members, p.X, p.Z)
-		} else {
-			fmt.Fprintf(bw, packEncodeFormat, members, p.X, p.Z, ai)
+	// enemies/chests: base section ALWAYS emitted (level 0, possibly empty); each
+	// higher floor with packs/chests appends an "@N" section. Single-floor maps
+	// have only level-0 entities, so output is byte-identical to the legacy form.
+	for _, lvl := range entityLevels(len(mf.Packs), func(i int) int { return mf.Packs[i].Level }, true) {
+		fmt.Fprintln(bw, leveledSectionName(SectionEnemies, lvl)+":")
+		for _, p := range mf.Packs {
+			if p.Level != lvl {
+				continue
+			}
+			// Single-member packs encode as the legacy "kind X Z" line; the AI column
+			// is appended only when non-default, so stationary packs stay 3 fields.
+			members := encodePackMembers(p.Members, p.BackCount)
+			ai := strings.ToLower(strings.TrimSpace(p.AI))
+			if ai == "" || ai == PackAINoneName {
+				fmt.Fprintf(bw, packEncodeFormatLegacy, members, p.X, p.Z)
+			} else {
+				fmt.Fprintf(bw, packEncodeFormat, members, p.X, p.Z, ai)
+			}
 		}
 	}
-	fmt.Fprintln(bw, SectionChests+":")
-	for _, c := range mf.Chests {
-		token := EmptyChestToken
-		if len(c.Items) > 0 {
-			token = strings.Join(c.Items, ",")
+	for _, lvl := range entityLevels(len(mf.Chests), func(i int) int { return mf.Chests[i].Level }, true) {
+		fmt.Fprintln(bw, leveledSectionName(SectionChests, lvl)+":")
+		for _, c := range mf.Chests {
+			if c.Level != lvl {
+				continue
+			}
+			token := EmptyChestToken
+			if len(c.Items) > 0 {
+				token = strings.Join(c.Items, ",")
+			}
+			fmt.Fprintf(bw, chestEncodeFormat, token, c.X, c.Z)
 		}
-		fmt.Fprintf(bw, chestEncodeFormat, token, c.X, c.Z)
 	}
-	// doors: appended only when present (missing ⇒ zero-doors, byte-identical).
-	if len(mf.Doors) > 0 {
-		fmt.Fprintln(bw, SectionDoors+":")
+	// doors: appended only for floors that have a door (missing ⇒ zero-doors,
+	// byte-identical). Level 0 is NOT forced — a door-free map writes nothing.
+	for _, lvl := range entityLevels(len(mf.Doors), func(i int) int { return mf.Doors[i].Level }, false) {
+		fmt.Fprintln(bw, leveledSectionName(SectionDoors, lvl)+":")
 		for _, d := range mf.Doors {
+			if d.Level != lvl {
+				continue
+			}
 			// Refuse a door without a complete destination — it would emit a row the
 			// parser collapses to too few fields and rejects on reload. validate()
 			// already enforces HasTarget(); mirror it here so a direct Encode (which
@@ -1444,11 +1614,15 @@ func (mf MapFile) Encode(w io.Writer) error {
 			fmt.Fprintf(bw, doorEncodeFormat, d.Name, d.TargetMap, d.TargetDoor, d.X, d.Z, d.Facing, style)
 		}
 	}
-	// crystals: emits when defined at all (rows OR CrystalsDefined); a legacy map
-	// stays byte-identical. Rows are position-only; charge state lives in SaveData.
-	if mf.CrystalsDefined || len(mf.Crystals) > 0 {
-		fmt.Fprintln(bw, SectionCrystals+":")
+	// crystals: base section emits when defined at all (CrystalsDefined OR a row),
+	// so a legacy map stays byte-identical; higher floors append "@N". Rows are
+	// position-only; charge state lives in SaveData.
+	for _, lvl := range entityLevels(len(mf.Crystals), func(i int) int { return mf.Crystals[i].Level }, mf.CrystalsDefined) {
+		fmt.Fprintln(bw, leveledSectionName(SectionCrystals, lvl)+":")
 		for _, c := range mf.Crystals {
+			if c.Level != lvl {
+				continue
+			}
 			fmt.Fprintf(bw, crystalEncodeFormat, c.X, c.Z)
 		}
 	}

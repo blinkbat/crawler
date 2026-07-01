@@ -60,6 +60,9 @@ const (
 	metadataW   = float32(360)
 	gridMargin  = float32(8)
 	layerTabH   = float32(32)
+	// layerSelectH is the left-column strip that holds the active-layer dropdown,
+	// sitting directly above the Levels panel. Tall so the big color-coded label reads.
+	layerSelectH = float32(54)
 )
 
 // Entity-list (chest/pack contents) geometry, shared by entityModalLayoutFor
@@ -80,8 +83,8 @@ func (s *State) layout() {
 	// Action toolbar beneath the menu bar; everything below derives from contentTop.
 	s.rect.toolbar = rl.NewRectangle(0, topbarH, w, toolbarH)
 	contentTop := topbarH + toolbarH
-	// Layer selection lives on the top-bar dropdown now, so no tab strip.
-	tabsHeight := float32(0)
+	// Layer select sits in the left column directly above the Levels panel.
+	tabsHeight := layerSelectH
 	s.rect.layerTabs = rl.NewRectangle(0, contentTop, paletteW, tabsHeight)
 	// Levels panel: a header row (label + −/+) then one row per level 0..topLevel
 	// (capped to maxVisibleLevelRows).
@@ -174,6 +177,8 @@ func Draw(s *State, assets render.Resources) {
 	rl.ClearBackground(bgWindow)
 	drawTopbar(s, font, theme)
 	drawToolbar(s, font, theme)
+	// Layer select: left-column strip directly above the Levels panel.
+	drawLayerMenuButton(s, font, theme)
 	drawLevelsPanel(s, font, theme)
 	drawPalette(s, font, theme)
 	drawMetadata(s, font, theme)
@@ -565,7 +570,6 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 	rl.DrawLineEx(rl.NewVector2(0, topbarH), rl.NewVector2(s.rect.topbar.Width, topbarH), 1, outlineHard)
 
 	drawButtonStrip(font, s, menuBarBtns, menuBarBtnY, menuBarBtnH)
-	drawLayerMenuButton(s, font, theme)
 
 	key := topbarInfoKey{
 		epoch:     s.contentEpoch,
@@ -615,41 +619,39 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 	render.DrawTextWithShadow(font, topbarInfoLabel, infoX, (topbarH-topbarInfoMeasure.Y)/2, editorFontLabel, theme.TextHint)
 }
 
-// layerMenuBtn* geometry for the active-layer dropdown button right of the menu
-// strip. Deliberately ~1-2px off the strip's shared tokens (buttonStripStartX=8,
-// menuBarBtnY=6, menuBarBtnH=topbarH-12) — kept as distinct NAMED values to
-// preserve the current pixels rather than nudge this button to match neighbors.
-const (
-	layerMenuBtnStartX = float32(6)
-	layerMenuBtnY      = float32(5)
-	layerMenuBtnW      = float32(172)
-	layerMenuBtnGap    = float32(16) // gap from the menu groups
-	layerMenuBtnH      = topbarH - 10
-)
-
-// layerMenuBtnRect is the active-layer dropdown button, right of the menu strip.
-// Single source for draw + hit-test + dropdown anchor.
+// layerMenuBtnRect is the active-layer dropdown button — the left column's top
+// strip (s.rect.layerTabs), directly above the Levels panel. Single source for
+// draw + hit-test + dropdown anchor.
 func layerMenuBtnRect(s *State) rl.Rectangle {
-	x := layerMenuBtnStartX
-	for i := range menuBarBtns {
-		x += buttonWidth(menuBarBtns[i].label) + tightBtnGap
-	}
-	x += layerMenuBtnGap
-	return rl.NewRectangle(x, layerMenuBtnY, layerMenuBtnW, layerMenuBtnH)
+	t := s.rect.layerTabs
+	const pad = float32(5)
+	return rl.NewRectangle(t.X+pad, t.Y+pad, t.Width-2*pad, t.Height-2*pad)
 }
 
-// drawLayerMenuButton paints the active-layer dropdown trigger (accent-bordered).
-// Click opens ddLayer, whose rows carry the per-layer hide/show eye.
+// drawLayerMenuButton paints the active-layer dropdown trigger: a big label, a
+// color chip + border in the active layer's accent (color-coded so the layer
+// reads at a glance). Click opens ddLayer, whose rows carry the per-layer eye.
 func drawLayerMenuButton(s *State, font rl.Font, theme render.Theme) {
 	r := layerMenuBtnRect(s)
+	accent := layerAccent(s.layer)
 	bg := bgActive
 	if pointIn(frameMouse, r) {
 		bg = bgEntryHover
 	}
 	rl.DrawRectangleRec(r, bg)
-	rl.DrawRectangleLinesEx(r, 2, editorBorderActive)
+	rl.DrawRectangleLinesEx(r, 3, accent)
+	// Color chip in the accent, then the big label beside it.
+	chip := rl.NewRectangle(r.X+8, r.Y+8, 16, r.Height-16)
+	drawSwatch(chip, accent)
 	label := "Layer: " + layerName(s.layer) + dropdownArrowSuffix
-	render.DrawTextWithShadow(font, label, r.X+10, r.Y+(r.Height-bodyLineH)/2, editorFontBody, theme.TextPrimary)
+	render.DrawTextWithShadow(font, label, chip.X+chip.Width+10, r.Y+(r.Height-editorFontTopbar)/2, editorFontTopbar, theme.TextPrimary)
+}
+
+// drawSwatch paints a color chip — a filled rect with the dim editor outline.
+// Shared by the layer-accent chrome (Layer button + dropdown rows) so they match.
+func drawSwatch(rect rl.Rectangle, fill rl.Color) {
+	rl.DrawRectangleRec(rect, fill)
+	rl.DrawRectangleLinesEx(rect, 1, editorBorderDim)
 }
 
 // approxTextWidth estimates a label's pixel width without a font handle (~0.5px
@@ -1007,7 +1009,7 @@ func stepperRow(x, y, valueW, gap float32) (value, minus, plus rl.Rectangle) {
 
 // Door-link overlay colors.
 var (
-	doorLinkColor         = rl.NewColor(120, 200, 255, 220) // resolved same-map link
+	doorLinkColor         = withAlpha(editorCyan, 220) // resolved same-map link
 	doorLinkWarnColor     = rl.NewColor(255, 90, 90, 235)   // dangling: target_door doesn't resolve
 	doorLinkExternalColor = rl.NewColor(186, 162, 255, 205) // cross-map link (target in another file)
 )
@@ -2124,11 +2126,13 @@ func drawGrid(s *State, font rl.Font) {
 				// nothing (matters only once elevation exposes a face).
 				rl.DrawRectangleRec(r, fadeAlpha(tileColor(LayerWalls, w), wallAlpha*levelFade))
 			}
-			if d, ok := cellAt(s.area.Decor, x, z); ok && !s.layerHidden[LayerDecor] && d != core.DecorAuto {
+			// Per-floor: show the active floor's decor/prop (falls back to any floor's
+			// content). On a legacy nil-stack map these resolve to the single grid char.
+			if d := s.area.DecorForDisplay(x, z, s.editLevel); !s.layerHidden[LayerDecor] && d != core.DecorAuto && d != core.DecorEmpty {
 				df := levelDistanceFade(s, s.area.DecorLevelAt(x, z))
 				rl.DrawRectangleRec(insetRect(r, cell*decorCellInsetFrac), fadeAlpha(decorColor(d), decorAlpha*df))
 			}
-			if p, ok := cellAt(s.area.Props, x, z); ok && !s.layerHidden[LayerProps] && core.IsPropChar(p) {
+			if p := s.area.PropForDisplay(x, z, s.editLevel); !s.layerHidden[LayerProps] && core.IsPropChar(p) {
 				// A prop fades by ITS OWN level, not the column top.
 				pf := levelDistanceFade(s, s.area.PropLevelAt(x, z))
 				rl.DrawCircle(int32(r.X+cell/2), int32(r.Y+cell/2), cell*propCellRadiusFrac, fadeAlpha(propColor(p), propAlpha*pf))
@@ -2575,8 +2579,16 @@ func levelDistanceFade(s *State, lvl int) float32 {
 	return core.DistanceFade(lvl-s.editLevel, levelFadeTable[:], levelFadeMin)
 }
 
+// Editor accent bases — one RGB per accent so the alpha variants used across the
+// 2D canvas and 3D view can't drift when the accent is retuned. Build a variant
+// with withAlpha.
+var (
+	editorGold = rl.NewColor(255, 224, 130, 255) // active-level / hover / placeable preview
+	editorCyan = rl.NewColor(120, 200, 255, 255) // active-floor slab / resolved door link
+)
+
 // currentLevelOutlineColor is the gold stroke around active-level tile groups.
-var currentLevelOutlineColor = rl.NewColor(255, 224, 130, 235)
+var currentLevelOutlineColor = withAlpha(editorGold, 235)
 
 // currentLevelOutlineUnderlay is the dark halo under the gold core, for contrast
 // over pale active-level floors.
@@ -2786,11 +2798,11 @@ func currentLayerGlyph(s *State, x, z, lvl int) (byte, bool) {
 			return f, true
 		}
 	case LayerDecor:
-		if d := s.area.Decor[z][x]; d != core.DecorAuto && d != core.DecorEmpty {
+		if d := s.area.DecorForDisplay(x, z, s.editLevel); d != core.DecorAuto && d != core.DecorEmpty {
 			return d, true
 		}
 	case LayerProps:
-		if p := s.area.Props[z][x]; core.IsPropChar(p) {
+		if p := s.area.PropForDisplay(x, z, s.editLevel); core.IsPropChar(p) {
 			return p, true
 		}
 	case LayerCeiling:

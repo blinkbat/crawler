@@ -70,49 +70,56 @@ func DrawCrystals(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	vc := newViewCull(camera)
 	t := worldFrameClock // cached world clock (set by drawWorld), shared by every in-world prop
 	for _, c := range g.Crystals {
-		base := tileWorldPos(c.TileX, c.TileZ, g.Area.StandGroundY(c.TileX, c.TileZ))
+		base := tileWorldPos(c.TileX, c.TileZ, g.Area.StandGroundYAt(c.TileX, c.Level, c.TileZ))
 		if vc.cull(base) {
 			continue
 		}
-		// Float above floor with a slow vertical bob.
+		// Float above floor with a slow vertical bob, then draw the spun gem.
 		bob := float32(math.Sin(float64(t)*2.0)) * 0.05
 		midY := base.Y + crystalGeo.FloatY + bob
-		col := crystalColor(c.Charged)
-		r := crystalGeo.WaistRadius
-		hh := crystalGeo.HalfHeight
-		// Build the gem around a local origin and spin it about Y via the rlgl matrix
-		// stack (idle spin + touch burst). Light comes from collectTorches, not here.
-		mid := rl.NewVector3(0, 0, 0)
-		top := rl.NewVector3(0, hh, 0)
-		bot := rl.NewVector3(0, -hh, 0)
-		rl.PushMatrix()
-		rl.Translatef(base.X, midY, base.Z)
-		rl.Rotatef(crystalSpinAngle(t, c), 0, 1, 0)
-		// Two stacked cones tip-to-tip form the gem.
-		rl.DrawCylinderEx(mid, top, r, 0.0, crystalFacets, col)
-		rl.DrawCylinderEx(bot, mid, 0.0, r, crystalFacets, col)
-		// Faceted wire outline so it reads as cut crystal.
-		rl.DrawCylinderWiresEx(mid, top, r, 0.0, crystalFacets, crystalEdge(c.Charged))
-		rl.DrawCylinderWiresEx(bot, mid, 0.0, r, crystalFacets, crystalEdge(c.Charged))
-		// Bright glint spike off the top tip — a moving shine that sells "shiny".
-		if c.Charged {
-			glintTip := rl.NewVector3(0, hh+0.14, 0)
-			rl.DrawCylinderEx(top, glintTip, 0.07, 0.0, crystalFacets, crystalCoreColor())
-		}
-		rl.PopMatrix()
+		drawCrystalGem(rl.NewVector3(base.X, midY, base.Z), c.Charged, crystalSpinAngle(t, c))
 	}
+}
+
+// drawCrystalGem draws the bipyramid gem centered at pos (its mid-point), spun
+// angleDeg about Y. Shared by DrawCrystals (in-world) and the Object Browser
+// preview. Light comes from collectTorches, not here (drawn with the bound shader).
+func drawCrystalGem(pos rl.Vector3, charged bool, angleDeg float32) {
+	col := crystalColor(charged)
+	r := crystalGeo.WaistRadius
+	hh := crystalGeo.HalfHeight
+	// Build the gem around a local origin and spin it about Y via the rlgl matrix stack.
+	mid := rl.NewVector3(0, 0, 0)
+	top := rl.NewVector3(0, hh, 0)
+	bot := rl.NewVector3(0, -hh, 0)
+	rl.PushMatrix()
+	rl.Translatef(pos.X, pos.Y, pos.Z)
+	rl.Rotatef(angleDeg, 0, 1, 0)
+	// Two stacked cones tip-to-tip form the gem.
+	rl.DrawCylinderEx(mid, top, r, 0.0, crystalFacets, col)
+	rl.DrawCylinderEx(bot, mid, 0.0, r, crystalFacets, col)
+	// Faceted wire outline so it reads as cut crystal.
+	rl.DrawCylinderWiresEx(mid, top, r, 0.0, crystalFacets, crystalEdge(charged))
+	rl.DrawCylinderWiresEx(bot, mid, 0.0, r, crystalFacets, crystalEdge(charged))
+	// Bright glint spike off the top tip — a moving shine that sells "shiny".
+	if charged {
+		glintTip := rl.NewVector3(0, hh+0.14, 0)
+		rl.DrawCylinderEx(top, glintTip, 0.07, 0.0, crystalFacets, crystalCoreColor())
+	}
+	rl.PopMatrix()
 }
 
 // DrawCrystalPrompt paints the "rest" cue over the adjacent charged crystal
 // (only charged ones are interactable). Drawn AFTER rl.EndMode3D (screen space).
 func DrawCrystalPrompt(camera rl.Camera3D, g *core.GameState, assets Resources) {
-	idx := core.AdjacentChargedCrystalIndex(g.Crystals, g.Player.TileX, g.Player.TileZ)
+	// Level-aware so the cue matches the interaction gate (movement.go) on voxel maps.
+	idx := core.AdjacentChargedCrystalIndexOn(g.Crystals, g.Player.TileX, g.Player.TileZ, g.Player.Level, g.Area.IsVoxel())
 	if idx < 0 {
 		return
 	}
 	c := g.Crystals[idx]
 	// Anchor above the gem's top point plus headroom (bob-free rest pose).
-	world := tileWorldPos(c.TileX, c.TileZ, g.Area.StandGroundY(c.TileX, c.TileZ)+crystalGeo.FloatY+crystalGeo.HalfHeight+crystalGeo.PromptHeadroom)
+	world := tileWorldPos(c.TileX, c.TileZ, g.Area.StandGroundYAt(c.TileX, c.Level, c.TileZ)+crystalGeo.FloatY+crystalGeo.HalfHeight+crystalGeo.PromptHeadroom)
 	drawFloatingInteractPrompt(camera, world, "Rest", assets)
 }
 
