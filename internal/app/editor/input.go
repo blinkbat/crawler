@@ -415,9 +415,10 @@ const (
 )
 
 // updateArrowPan pans the map while an arrow key is held — the keyboard twin of
-// the mouse pan-drag. A held arrow is treated as a drag in that screen direction
-// and fed through the SAME pan rule as the mouse, so the two never disagree on
-// direction. Replaces the retired arrow→grid-cursor keyboard-paint nav.
+// the mouse pan-drag. A held arrow is treated as a drag in that screen direction;
+// top-down shares the mouse pan rule outright, and 3D shares it horizontally but
+// inverts vertical (arrows push the camera, not grab the world — see below).
+// Replaces the retired arrow→grid-cursor keyboard-paint nav.
 func updateArrowPan(s *State) {
 	left, right := rl.IsKeyDown(rl.KeyLeft), rl.IsKeyDown(rl.KeyRight)
 	up, down := rl.IsKeyDown(rl.KeyUp), rl.IsKeyDown(rl.KeyDown)
@@ -438,7 +439,9 @@ func updateArrowPan(s *State) {
 		dy -= 1
 	}
 	if s.isoView {
-		s.isoPanTarget(dx*isoArrowPanPx, dy*isoArrowPanPx)
+		// Vertical is negated vs. the mouse drag-pan: Up/Down move the CAMERA over
+		// the map (push the view up/down), the opposite sense from grab-and-drag.
+		s.isoPanTarget(dx*isoArrowPanPx, -dy*isoArrowPanPx)
 		return
 	}
 	// Top-down pan-drag is panX/panY += delta; mirror it so arrows match dragging.

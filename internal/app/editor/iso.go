@@ -24,7 +24,7 @@ const (
 	isoFovy     = float32(46)
 	isoPitchDeg = 38.0           // default camera tilt above the horizon
 	isoPanSpeed = float32(0.05)  // shift+middle-drag pan: screen px → world units (real scale)
-	isoOrbitRate = float32(0.008) // middle-drag tumble: radians per screen px
+	isoOrbitRate = float32(0.004) // right-drag tumble: radians per screen px (kept gentle — full-speed felt twitchy)
 	isoMinPitch = float32(0.12)  // tumble pitch clamp (near-horizon)
 	isoMaxPitch = float32(1.50)  // tumble pitch clamp (near top-down)
 	isoMinZoom  = float32(0.3)   // 3D-view zoom clamp (parallels minZoom/maxZoom for the canvas)
@@ -224,17 +224,15 @@ func (s *State) drawIsoCellBox(x, z int, col rl.Color) {
 	rl.DrawCubeWiresV(center, size, col)
 }
 
-// isoRayInRect builds the pick ray for a mouse point over `rect` — raylib's
-// GetScreenToWorldRay assumes a full window, so this unprojects with rect's dims.
+// isoRayInRect builds the pick ray for a mouse point over `rect` (the off-screen
+// grid panel). raylib's GetScreenToWorldRay assumes a full window, so we offset
+// the mouse into the panel's local space and use the viewport-aware -Ex variant
+// with the panel's dims — matching the projection the RT was rendered with. (A
+// prior hand-rolled Unproject produced a Z-flipped ray under raylib-go's matrix
+// conventions, so nothing ever picked; see iso_pick_debug_test.go.)
 func isoRayInRect(mp rl.Vector2, rect rl.Rectangle, cam rl.Camera3D) rl.Ray {
-	ndcX := 2*(mp.X-rect.X)/rect.Width - 1
-	ndcY := 1 - 2*(mp.Y-rect.Y)/rect.Height
-	aspect := rect.Width / rect.Height
-	proj := rl.MatrixPerspective(cam.Fovy*math.Pi/180, aspect, 0.01, 1000)
-	view := rl.MatrixLookAt(cam.Position, cam.Target, cam.Up)
-	near := rl.Vector3Unproject(rl.NewVector3(ndcX, ndcY, 0), proj, view)
-	far := rl.Vector3Unproject(rl.NewVector3(ndcX, ndcY, 1), proj, view)
-	return rl.NewRay(cam.Position, rl.Vector3Normalize(rl.Vector3Subtract(far, near)))
+	local := rl.NewVector2(mp.X-rect.X, mp.Y-rect.Y)
+	return rl.GetScreenToWorldRayEx(local, cam, int32(rect.Width), int32(rect.Height))
 }
 
 // isoPick returns the tile under the mouse, or (-1,-1) when off-canvas / off-map.
