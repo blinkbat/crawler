@@ -90,10 +90,19 @@ func (s *State) freeIsoRT() {
 	}
 }
 
-// ensureIsoRT (re)allocates the off-screen target to the grid panel size (resize only).
+// ensureIsoRT (re)allocates the off-screen target to the grid panel size. To avoid
+// the intermittent DrawModelEx crash from reallocating the GPU FBO mid-resize, the
+// realloc is DEFERRED while the requested size is still changing frame-to-frame
+// (an active window drag): the existing RT is reused (blitted to fit) until the
+// size settles. The first allocation (no RT yet) always proceeds.
 func (s *State) ensureIsoRT(w, h int32) {
+	changing := w != s.isoReqW || h != s.isoReqH
+	s.isoReqW, s.isoReqH = w, h
 	if s.isoRT.ID != 0 && s.isoRTW == w && s.isoRTH == h {
-		return
+		return // already the right size
+	}
+	if s.isoRT.ID != 0 && changing {
+		return // mid-resize: reuse the current RT this frame, realloc once it settles
 	}
 	s.freeIsoRT()
 	s.isoRT = rl.LoadRenderTexture(w, h)
@@ -402,12 +411,17 @@ func drawGridIso(s *State, font rl.Font) {
 	rl.EndMode3D()
 	rl.EndTextureMode()
 
-	// RenderTextures are bottom-up; negate source height to blit upright.
-	rl.DrawTextureRec(s.isoRT.Texture,
-		rl.NewRectangle(0, 0, float32(w), -float32(h)),
-		rl.NewVector2(grid.X, grid.Y), rl.White)
+	// Blit the RT scaled to the panel. Source is the RT's ACTUAL size (not the
+	// requested w/h) so a deferred-realloc frame during a resize scales the old
+	// target to fit instead of sampling past its bounds. Negative source height
+	// flips the bottom-up RenderTexture upright.
+	rl.DrawTexturePro(s.isoRT.Texture,
+		rl.NewRectangle(0, 0, float32(s.isoRTW), -float32(s.isoRTH)),
+		rl.NewRectangle(grid.X, grid.Y, float32(w), float32(h)),
+		rl.NewVector2(0, 0), 0, rl.White)
 
 	drawIsoReadout(s, font, grid)
+	drawEditorCompass(s, font)
 }
 
 // drawIsoReadout shows the hovered column's coords + signed level, plus a hint.
@@ -423,6 +437,81 @@ func drawIsoReadout(s *State, font rl.Font, grid rl.Rectangle) {
 		txt := fmt.Sprintf("%s  surface %+d", core.TileCoord(s.isoHoverX, s.isoHoverZ), lvl)
 		rl.DrawTextEx(font, txt, rl.NewVector2(grid.X+8, grid.Y+8+2*(editorFontHint+4)), editorFontHint, 1, withAlpha(editorGold, 235))
 	}
+}
+
+// drawEditorCompass paints a compass at the grid panel's top-right. In the 3D view
+// it rotates with the orbit yaw (Q/E snap + right-drag tumble); in top-down it's
+// fixed north-up. World cardinals: N=-Z, E=+X, S=+Z, W=-X (core facing table).
+func drawEditorCompass(s *State, font rl.Font) {
+	grid := s.rect.grid
+	const r = float32(22)
+	boxHalf := r + 16 // rose radius + room for the cardinal letters outside the ring
+	if grid.Width < 2*boxHalf+40 || grid.Height < 2*boxHalf+40 {
+		return // panel too cramped to place the compass without covering the canvas
+	}
+	// Inset from the reserved vertical-scrollbar gutter (harmless in 3D, which has none).
+	cx := grid.X + grid.Width - scrollbarThickness - boxHalf - 6
+	cy := grid.Y + boxHalf + 6
+
+	// Dark circular overlay container so the compass is legible over any terrain/lighting.
+	rl.DrawCircle(int32(cx), int32(cy), boxHalf, rl.NewColor(14, 16, 22, 225))
+	rl.DrawCircleLines(int32(cx), int32(cy), boxHalf, withAlpha(editorGold, 90))
+
+	// project maps a world horizontal dir (wx,wz) to a screen offset (x right, y down).
+	// 3D: rotate into the camera basis (screen-right=(-sin,cos), screen-down=(cos,sin)
+	// in world XZ). Top-down: identity (N up, E right).
+	var project func(wx, wz float32) (float32, float32)
+	if s.isoView {
+		sin := float32(math.Sin(float64(s.isoYaw)))
+		cos := float32(math.Cos(float64(s.isoYaw)))
+		project = func(wx, wz float32) (float32, float32) { return -wx*sin + wz*cos, wx*cos + wz*sin }
+	} else {
+		project = func(wx, wz float32) (float32, float32) { return wx, wz }
+	}
+
+	// Gilt bezel ring around the rose (inside the dark container).
+	rl.DrawCircleLines(int32(cx), int32(cy), r+4, withAlpha(editorGold, 130))
+
+	// Cardinal ticks just inside the ring.
+	for _, d := range [4][2]float32{{0, -1}, {1, 0}, {0, 1}, {-1, 0}} {
+		ox, oy := project(d[0], d[1])
+		rl.DrawLineEx(rl.NewVector2(cx+ox*(r-5), cy+oy*(r-5)),
+			rl.NewVector2(cx+ox*r, cy+oy*r), 1.5, withAlpha(editorGold, 150))
+	}
+
+	// Needle: north half red, south half pale — a diamond split at the hub.
+	nx, ny := project(0, -1) // north on screen
+	px, py := project(1, 0)  // perpendicular (east) sets the needle width
+	tip := rl.NewVector2(cx+nx*(r-2), cy+ny*(r-2))
+	tail := rl.NewVector2(cx-nx*(r-2), cy-ny*(r-2))
+	wingA := rl.NewVector2(cx+px*4, cy+py*4)
+	wingB := rl.NewVector2(cx-px*4, cy-py*4)
+	fillTri(tip, wingA, wingB, rl.NewColor(232, 92, 74, 255))
+	fillTri(tail, wingA, wingB, rl.NewColor(206, 212, 222, 235))
+	rl.DrawCircle(int32(cx), int32(cy), 2.5, withAlpha(editorGold, 230))
+
+	// Cardinal letters (N brightest), placed outside the ring.
+	for _, L := range [4]struct {
+		name   string
+		wx, wz float32
+		bright bool
+	}{{"N", 0, -1, true}, {"E", 1, 0, false}, {"S", 0, 1, false}, {"W", -1, 0, false}} {
+		ox, oy := project(L.wx, L.wz)
+		m := render.MeasureRichText(font, L.name, editorFontTick, 1)
+		col := rl.NewColor(212, 216, 224, 235)
+		if L.bright {
+			col = editorGold
+		}
+		render.DrawRichText(font, L.name,
+			rl.NewVector2(cx+ox*(r+8)-m.X/2, cy+oy*(r+8)-m.Y/2), editorFontTick, 1, col)
+	}
+}
+
+// fillTri draws a filled triangle regardless of vertex winding (raylib's
+// DrawTriangle culls one order); the needle rotates a full 360° so either can occur.
+func fillTri(a, b, c rl.Vector2, col rl.Color) {
+	rl.DrawTriangle(a, b, c, col)
+	rl.DrawTriangle(a, c, b, col)
 }
 
 // isoPanTarget slides the 3D orbit target by a screen-space delta (dx = right,

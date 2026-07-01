@@ -810,6 +810,11 @@ type State struct {
 	isoHoverX, isoHoverZ   int
 	isoRT                  rl.RenderTexture2D
 	isoRTW, isoRTH         int32
+	// isoReqW/H is the size ensureIsoRT was asked for LAST frame. While the request
+	// keeps changing (window drag-resize), the realloc is deferred and the existing
+	// RT reused — reallocating the GPU FBO mid-resize then rendering into it is the
+	// intermittent DrawModelEx crash. Realloc only fires once the size settles.
+	isoReqW, isoReqH int32
 	// isoPreview caches a NewGameState(area) powering the 3D view's entity/foe
 	// draw (chests/doors/crystals/packs); rebuilt when contentEpoch changes so
 	// the heavy build runs once per edit, not per frame. See ensureIsoPreview.

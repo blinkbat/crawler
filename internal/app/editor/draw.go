@@ -2418,6 +2418,9 @@ func drawGrid(s *State, font rl.Font) {
 	if s.hoverX >= 0 && s.drag == dragNone {
 		drawHoverTooltip(s, font)
 	}
+
+	// Compass (top-right). Top-down is fixed north-up; the 3D view's rotates.
+	drawEditorCompass(s, font)
 }
 
 // drawHoverTooltip paints the entity contents at (hoverX, hoverZ) near the
