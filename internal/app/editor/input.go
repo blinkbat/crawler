@@ -361,6 +361,12 @@ func handleLevelsPanelClick(s *State, mp rl.Vector2) {
 func resetView(s *State) {
 	s.zoom = 1
 	s.panX, s.panY = 0, 0
+	// Home must also re-home the 3D orbit (yaw/pitch/zoom/target) — else it's inert
+	// in the default iso view. Shares the freshState camera defaults.
+	s.isoYaw = isoDefaultYaw
+	s.isoPitch = isoDefaultPitch
+	s.isoZoom = 1
+	s.isoTargetX, s.isoTargetZ = 0, 0
 }
 
 // toggleTileGlyphs flips the per-tile glyph overlay.
@@ -409,8 +415,8 @@ func cyclePreviewPhase(s *State) {
 // panDragThreshold the px a right-drag must exceed to count as a drag (vs a
 // context-menu click).
 const (
-	arrowPanStep     = float32(16)
-	isoArrowPanPx    = float32(18)
+	arrowPanStep     = float32(40)
+	isoArrowPanPx    = float32(58)
 	panDragThreshold = float32(4)
 )
 

@@ -6,7 +6,6 @@ import (
 	"crawler/internal/app/core"
 	"crawler/internal/app/render"
 	"fmt"
-	"math"
 	"strconv"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -956,8 +955,8 @@ func freshState(a core.AreaDefinition) State {
 		hoverZ:                -1,
 		isoView:               true, // 3D is the default authoring view
 		isoZoom:               1,
-		isoYaw:                math.Pi / 4,           // 45° default orbit
-		isoPitch:              isoPitchDeg * math.Pi / 180, // tilt above horizon
+		isoYaw:                isoDefaultYaw,
+		isoPitch:              isoDefaultPitch,
 		isoHoverX:             -1,
 		isoHoverZ:             -1,
 		dragPackIdx:           -1,

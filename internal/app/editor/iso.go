@@ -29,6 +29,11 @@ const (
 	isoMaxPitch = float32(1.50)  // tumble pitch clamp (near top-down)
 	isoMinZoom  = float32(0.3)   // 3D-view zoom clamp (parallels minZoom/maxZoom for the canvas)
 	isoMaxZoom  = float32(6)
+
+	// Default orbit, shared by freshState (initial camera) and resetView (Home) so
+	// the two can't drift.
+	isoDefaultYaw   = float32(math.Pi / 4)              // 45° default orbit
+	isoDefaultPitch = float32(isoPitchDeg * math.Pi / 180) // tilt above horizon
 )
 
 var (
@@ -135,13 +140,48 @@ func (s *State) isoCamera(minL, maxL int) rl.Camera3D {
 		float32(math.Sin(pitch)),
 		float32(math.Cos(pitch)*math.Sin(yaw)),
 	)
+	// Fit-to-view distance: size the orbit radius so the map's bounding box fills
+	// the panel AT THE CURRENT view angle + panel aspect. The old bounding-sphere
+	// fit was angle/aspect-blind, so a non-square map at steep top-down shrank to a
+	// thin off-centre strip (looked like a rendering fail). We project the 8 AABB
+	// corners onto the camera basis and take the distance that keeps every corner
+	// inside the frustum in both axes. dir points target→camera; the frustum opens
+	// along -dir, so a corner's depth from the camera is (dist - rel·dir).
 	spanX := float32(W) * core.TileSize
 	spanZ := float32(H) * core.TileSize
-	radius := 0.5*float32(math.Hypot(float64(spanX), float64(spanZ))) + (yHigh - yLow)
-	if radius < core.TileSize {
-		radius = core.TileSize
+	halfH := (yHigh - yLow) * 0.5
+	right := rl.Vector3Normalize(rl.Vector3CrossProduct(dir, rl.NewVector3(0, 1, 0)))
+	if rl.Vector3Length(right) < 1e-4 { // near-vertical view: dir ∥ up, pick a stable axis
+		right = rl.NewVector3(1, 0, 0)
 	}
-	dist := radius / float32(math.Sin(float64(isoFovy)*math.Pi/360)) * 1.1
+	camUp := rl.Vector3CrossProduct(right, dir)
+	tanV := float32(math.Tan(float64(isoFovy) * math.Pi / 360))
+	aspect := float32(1)
+	if s.rect.grid.Height > 0 && s.rect.grid.Width > 0 {
+		aspect = s.rect.grid.Width / s.rect.grid.Height
+	}
+	tanH := tanV * aspect
+	var dist float32
+	for _, sx := range []float32{-0.5, 0.5} {
+		for _, sy := range []float32{-1, 1} {
+			for _, sz := range []float32{-0.5, 0.5} {
+				rel := rl.NewVector3(sx*spanX, sy*halfH, sz*spanZ)
+				fwd := rl.Vector3DotProduct(rel, dir) // + = toward camera (nearer)
+				lat := float32(math.Abs(float64(rl.Vector3DotProduct(rel, right))))
+				vert := float32(math.Abs(float64(rl.Vector3DotProduct(rel, camUp))))
+				if d := lat/tanH + fwd; d > dist {
+					dist = d
+				}
+				if d := vert/tanV + fwd; d > dist {
+					dist = d
+				}
+			}
+		}
+	}
+	dist *= 1.06 // small breathing margin so edge tiles aren't flush to the panel
+	if dist < core.TileSize {
+		dist = core.TileSize
+	}
 	if s.isoZoom > 0 {
 		dist /= s.isoZoom
 	}
@@ -169,14 +209,29 @@ func (s *State) isoColumnBox(x, z, minL int) (center, size rl.Vector3) {
 	return center, size
 }
 
+// isoWrongLevel reports whether painting at (x,z) would land on a floor that is
+// NOT the visible top surface there — the active edit floor (editLevel) differs
+// from the column's surface level. The Elevation layer is exempt: it's how you
+// CHANGE a column's level, so gating it would make raising/lowering impossible.
+// Drives the red "set the right floor first" hover + the blocked paint in the 3D
+// view, where the floor-vs-surface mismatch is otherwise invisible.
+func (s *State) isoWrongLevel(x, z int) bool {
+	if s.layer == LayerElevation || !s.area.InBounds(x, z) {
+		return false
+	}
+	return s.area.ElevationLevelAt(x, z) != s.editLevel
+}
+
 // drawIsoBrushPreview outlines the cells the active tool will paint at the hover,
 // on the ACTIVE floor: a multi-tile footprint (gold placeable / red blocked), the
-// brush-size block for grid layers, or a single cell otherwise.
+// brush-size block for grid layers, or a single cell otherwise. Turns red when the
+// hover sits on a wrong-level column (isoWrongLevel) — painting is blocked there.
 func drawIsoBrushPreview(s *State) {
 	hx, hz := s.isoHoverX, s.isoHoverZ
+	wrong := s.isoWrongLevel(hx, hz)
 	if fp := activeBrushFootprint(s); fp != nil {
 		col := isoHoverWire
-		if !footprintPlaceable(s, hx, hz, fp) {
+		if wrong || !footprintPlaceable(s, hx, hz, fp) {
 			col = isoBlockedWire
 		}
 		for _, off := range fp {
@@ -184,14 +239,18 @@ func drawIsoBrushPreview(s *State) {
 		}
 		return
 	}
+	col := isoHoverWire
+	if wrong {
+		col = isoBlockedWire
+	}
 	half := s.brushSize / 2
 	if !isGridLayer(s.layer) || s.brushSize <= 1 {
-		s.drawIsoCellBox(hx, hz, isoHoverWire)
+		s.drawIsoCellBox(hx, hz, col)
 		return
 	}
 	for dz := -half; dz <= half; dz++ {
 		for dx := -half; dx <= half; dx++ {
-			s.drawIsoCellBox(hx+dx, hz+dz, isoHoverWire)
+			s.drawIsoCellBox(hx+dx, hz+dz, col)
 		}
 	}
 }
@@ -420,8 +479,8 @@ func updateIsoCanvas(s *State, mp rl.Vector2) {
 	if rl.IsMouseButtonReleased(rl.MouseLeftButton) {
 		finishDrag(s)
 	}
-	if rl.IsMouseButtonDown(rl.MouseLeftButton) && s.drag != dragNone && hx >= 0 {
-		continueDrag(s, hx, hz)
+	if rl.IsMouseButtonDown(rl.MouseLeftButton) && s.drag != dragNone && hx >= 0 && !s.isoWrongLevel(hx, hz) {
+		continueDrag(s, hx, hz) // skip wrong-level cells mid-stroke (see isoWrongLevel)
 	}
 
 	if !pointIn(mp, s.rect.grid) {
@@ -443,8 +502,8 @@ func updateIsoCanvas(s *State, mp rl.Vector2) {
 	// Left press starts the active tool's interaction (startDrag dispatches paint /
 	// rect / flood / ramp / entity exactly as top-down). Right opens the context
 	// menu, or clears a ramp in ramp mode.
-	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
-		startDrag(s, hx, hz, ctrl, shift)
+	if rl.IsMouseButtonPressed(rl.MouseLeftButton) && !s.isoWrongLevel(hx, hz) {
+		startDrag(s, hx, hz, ctrl, shift) // block starting a paint/place on a wrong-level column
 	}
 	if rl.IsMouseButtonReleased(rl.MouseRightButton) && !s.rightDragMoved {
 		if s.rampMode {
