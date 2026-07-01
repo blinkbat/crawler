@@ -126,9 +126,10 @@ func AwardBattleLoot(g *GameState) (gold int, drops []ItemKind) {
 	}
 	rng := g.Rand()
 	for _, m := range members {
-		// Dead by EITHER measure pays out; the HP guard is belt-and-suspenders
-		// so a degenerate "alive corpse" (HP<=0 yet Alive) still yields loot.
-		if m.Alive && m.HP > 0 {
+		// Only defeated members pay out — shared with bestiary credit via
+		// EnemyDefeated so a degenerate "alive corpse" (HP<=0 yet Alive) is
+		// treated identically by both.
+		if !EnemyDefeated(m) {
 			continue
 		}
 		def := EnemyInfoFor(m)

@@ -30,18 +30,13 @@ var (
 	lastWindowedH = int32(core.InitialWindowHeight)
 )
 
-// CurrentDisplayMode reports the window's mode. Fullscreen requires BOTH monitor-
-// size framebuffer AND the FlagBorderlessWindowedMode bit, so a snapped bordered
-// window still reads Windowed.
+// CurrentDisplayMode reports the window's mode, keyed purely on the
+// FlagBorderlessWindowedMode bit — SetDisplayMode sets that flag ONLY on the
+// fullscreen path, so it's the authoritative signal. (The old size>=monitor
+// cross-check misread a genuine fullscreen window as Windowed on DPI-scaled
+// monitors that report the borderless framebuffer a pixel under monitor size.)
 func CurrentDisplayMode() DisplayMode {
-	if !rl.IsWindowState(rl.FlagBorderlessWindowedMode) {
-		return DisplayWindowed
-	}
-	mw, mh, ok := currentMonitorSize()
-	if !ok {
-		return DisplayWindowed
-	}
-	if rl.GetScreenWidth() >= mw && rl.GetScreenHeight() >= mh {
+	if rl.IsWindowState(rl.FlagBorderlessWindowedMode) {
 		return DisplayFullscreen
 	}
 	return DisplayWindowed

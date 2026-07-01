@@ -42,6 +42,7 @@ var (
 type minimapClassKey struct {
 	path                string
 	tileX, tileZ, level int
+	revealGen           int // fog reveal counter; busts the cache on a non-moving reveal
 	valid               bool
 }
 
@@ -109,7 +110,7 @@ func drawMinimap(m *core.AreaDefinition, g *core.GameState, assets Resources) {
 	// Reclassify only when the fingerprint changes (player moved / changed level /
 	// area changed); otherwise the cached grids from last frame still hold. The draw
 	// calls below always run — only the ~vc² MapSurfaceAt classifications are skipped.
-	key := minimapClassKey{path: m.Path, tileX: p.TileX, tileZ: p.TileZ, level: p.Level, valid: true}
+	key := minimapClassKey{path: m.Path, tileX: p.TileX, tileZ: p.TileZ, level: p.Level, revealGen: g.RevealGen, valid: true}
 	if key != minimapClassCache {
 		for localZ := -1; localZ <= vc; localZ++ {
 			for localX := -1; localX <= vc; localX++ {
@@ -535,7 +536,11 @@ func drawMinimapTimeOfDay(font rl.Font, stepCount int, x, y, width int32) {
 	// sky tint toward wood so the strip reads as brass-on-wood, not a rainbow).
 	for i := int32(0); i < ph; i++ {
 		e0, e1 := segEdge(i), segEdge(i+1)
-		rl.DrawRectangle(e0, trackY, e1-e0-1, trackH, woodenPhaseColor(phaseColors[i]))
+		// -1 trims a hairline seam; guard >0 so a <=1px segment can't pass raylib a
+		// negative width (renders as a wrong/oversized fill) — matches the curW guard below.
+		if w := e1 - e0 - 1; w > 0 {
+			rl.DrawRectangle(e0, trackY, w, trackH, woodenPhaseColor(phaseColors[i]))
+		}
 	}
 	segL, segR := segEdge(ph), segEdge(ph+1)
 	curW := int32(float32(segR-segL) * progress)

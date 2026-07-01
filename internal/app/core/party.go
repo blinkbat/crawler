@@ -596,21 +596,29 @@ func HealWholeParty(g *GameState, amount int) {
 // RestorePartyFully fully restores every member to MaxHP + MaxMP, REVIVING the
 // dead — the healing crystal's full party reset. Sets HP/MP directly (HealMember
 // never revives). Returns the number restored. Crystal-use is out of combat, so
-// no member is Ingested here. STARVING members are skipped: crystals can't cure
-// starving (only food can), so a starving member gets nothing here. A revived
-// member also sheds leftover Poison: poison persists through death
-// (ClearMemberTransientStatuses spares it), so without this the corpse's DoT
-// resumes and bleeds the revived member out again next step. The living keep theirs.
+// no member is Ingested here. STARVING members get NO HP/MP top-off (crystals
+// can't cure starving — only food can), but a starving CORPSE is still REVIVED to
+// 1 HP: otherwise a downed+starving member is unrevivable outside the Cleric's
+// Resurrect, soft-locking the party. A revived member also sheds leftover Poison:
+// poison persists through death (ClearMemberTransientStatuses spares it), so
+// without this the corpse's DoT resumes and bleeds them out again next step.
 func RestorePartyFully(g *GameState) int {
 	if g == nil {
 		return 0
 	}
 	n := 0
 	for i := range g.Party {
+		revived := g.Party[i].HP <= 0
 		if MemberStarving(g.Party[i]) {
+			// No top-off, but break the revival soft-lock: bring a corpse back at
+			// 1 HP (food is still needed to lift starving).
+			if revived {
+				g.Party[i].HP = 1
+				g.Party[i].PoisonTurns = 0
+				n++
+			}
 			continue
 		}
-		revived := g.Party[i].HP <= 0
 		g.Party[i].HP = g.Party[i].MaxHP
 		g.Party[i].MP = g.Party[i].MaxMP
 		if revived {

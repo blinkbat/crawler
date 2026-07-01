@@ -95,7 +95,7 @@ func withFadeAlpha(alpha float32, draw func()) {
 		return
 	}
 	sw, sh := screenSize()
-	if !fadeRT.ensure(sw, sh) {
+	if !fadeRT.ensureStable(sw, sh) {
 		draw() // allocation failed — full-opacity draw beats a blank frame
 		return
 	}

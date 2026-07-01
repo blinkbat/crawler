@@ -501,7 +501,10 @@ func RevealRadius(g *GameState, cx, cz, radius int) {
 			if !g.Area.InBounds(x, z) || x < 0 || x >= len(row) {
 				continue
 			}
-			row[x] = true
+			if !row[x] {
+				row[x] = true
+				g.RevealGen++ // bust the fog-dependent minimap / Map-tab caches
+			}
 		}
 	}
 }

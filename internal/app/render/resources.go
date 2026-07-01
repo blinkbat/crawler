@@ -762,9 +762,12 @@ func loadEnemySpriteFile(name string, owned *[]rl.Texture2D) (rl.Texture2D, bool
 func enemyVisualsToSlice(m map[core.EnemyKind]enemyVisual) []enemyVisual {
 	out := make([]enemyVisual, core.EnemyKindCount())
 	for kind, v := range m {
-		if int(kind) >= 0 && int(kind) < len(out) {
-			out[kind] = v
+		if int(kind) < 0 || int(kind) >= len(out) {
+			// A kind whose iota value falls outside EnemyKindCount would silently
+			// render as the fallback rat — panic instead so the drift is caught.
+			panic("render: EnemyKind out of range for dense visual slice — EnemyKindCount() disagrees with the enum")
 		}
+		out[kind] = v
 	}
 	return out
 }
@@ -1057,9 +1060,18 @@ func setModelTexture(model *rl.Model, texture rl.Texture2D) {
 }
 
 func loadTexture(pixels []color.RGBA, width, height int, filter rl.TextureFilterMode) rl.Texture2D {
+	// UpdateTexture reads width*height*4 bytes from pixels' backing array — an
+	// under-sized slice would read out of bounds into GL memory. Guard the size
+	// (and a failed GPU upload) rather than trust the caller.
+	if width <= 0 || height <= 0 || len(pixels) < width*height {
+		return rl.Texture2D{}
+	}
 	img := rl.GenImageColor(width, height, rl.White)
 	texture := rl.LoadTextureFromImage(img)
 	rl.UnloadImage(img)
+	if texture.ID == 0 {
+		return rl.Texture2D{}
+	}
 	rl.UpdateTexture(texture, pixels)
 	rl.SetTextureFilter(texture, filter)
 	rl.SetTextureWrap(texture, rl.WrapRepeat)

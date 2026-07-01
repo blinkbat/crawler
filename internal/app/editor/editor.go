@@ -662,6 +662,11 @@ type State struct {
 	// dialogNumBuf is the shared edit buffer for the focused numeric dialog field
 	// (only one numeric field is ever focused).
 	dialogNumBuf string
+	// dialogNumUndoBefore / dialogNumSnapDone give a focused numeric dialog field
+	// the same lazy single-step undo as a paint stroke: snapshot the area on focus,
+	// bank ONE step on the first real edit (focusDialogNumeric / pumpDialogNumeric).
+	dialogNumUndoBefore core.AreaDefinition
+	dialogNumSnapDone   bool
 	// New-map dialog state (in-progress dims + default floor char), committed by
 	// blankArea on confirm — not the area until then.
 	modalNewWidth  int

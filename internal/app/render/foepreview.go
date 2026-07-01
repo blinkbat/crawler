@@ -40,6 +40,21 @@ func (p *previewRT) ensure(w, h int32) bool {
 	return true
 }
 
+// ensureStable is ensure for FULL-SCREEN capture targets (menu fade + retro
+// filter), whose requested size tracks the window and so changes every frame
+// during a resize drag. It reuses the existing target unchanged while the window
+// is mid-resize, deferring the Unload+Load realloc until the size settles:
+// reallocating a GPU RenderTexture while the OS is still streaming resize events
+// is the intermittent DrawModelEx crash. During the drag the stale-sized target is
+// simply blitted to fit (a transient, drag-only cosmetic imperfection). Once there
+// is no target yet, or the size has held for a frame, it falls through to ensure.
+func (p *previewRT) ensureStable(w, h int32) bool {
+	if p.init && windowResizing {
+		return true
+	}
+	return p.ensure(w, h)
+}
+
 // close unloads the cached texture. Idempotent.
 func (p *previewRT) close() {
 	if !p.init {

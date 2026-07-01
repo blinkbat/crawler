@@ -100,6 +100,11 @@ func partyAlive(m PartyMember) bool     { return m.HP > 0 }
 func partyAvailable(m PartyMember) bool { return MemberAvailable(m) }
 func enemyAlive(e Enemy) bool           { return e.Alive }
 
+// EnemyDefeated is the shared "counts as killed" test behind both loot payout and
+// bestiary credit: dead by EITHER the Alive flag or a drained HP bar, so a
+// degenerate "alive corpse" (HP<=0 yet Alive) counts once, consistently across both.
+func EnemyDefeated(e Enemy) bool { return !e.Alive || e.HP <= 0 }
+
 // MemberAvailable reports whether a member can act / be targeted — alive AND not
 // ingested. The one home for "ingested counts as unavailable"; call sites must use
 // this rather than re-inlining `HP <= 0 || Ingested`.

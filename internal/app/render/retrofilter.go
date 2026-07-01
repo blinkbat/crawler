@@ -241,12 +241,14 @@ func ensureRetroShader() bool {
 	return true
 }
 
-// ensureRetroRT lazily (re)creates the capture texture at the screen size.
+// ensureRetroRT lazily (re)creates the capture texture at the screen size. Uses
+// ensureStable so a resize drag doesn't realloc the RT mid-frame (crash risk); the
+// stale-sized capture is blitted to fit until the window size settles.
 func ensureRetroRT(w, h int32) bool {
 	if w <= 0 || h <= 0 {
 		return false
 	}
-	return retroRT.ensure(w, h)
+	return retroRT.ensureStable(w, h)
 }
 
 // BeginRetroCapture redirects drawing into the capture texture when a filter is

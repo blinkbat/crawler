@@ -524,20 +524,30 @@ func dialogNumericTarget(s *State) *int {
 	return nil
 }
 
-// focusDialogNumeric focuses a numeric field and seeds the edit buffer from its value.
+// focusDialogNumeric focuses a numeric field and seeds the edit buffer from its
+// value. Snapshots the pre-edit area for pumpDialogNumeric's lazy undo step.
 func focusDialogNumeric(s *State, focus focusField, value int) {
 	s.focus = focus
 	s.dialogNumBuf = strconv.Itoa(value)
+	s.dialogNumUndoBefore = core.CloneArea(s.area)
+	s.dialogNumSnapDone = false
 }
 
 // pumpDialogNumeric routes typed digits into the focused numeric field (empty = 0).
-// Returns true while a numeric field owns input.
+// Returns true while a numeric field owns input. Banks ONE undo step on the first
+// keystroke that changes the buffer (lazy, like a paint stroke) so Ctrl+Z steps
+// back to the pre-edit value instead of skipping past it.
 func pumpDialogNumeric(s *State) bool {
 	target := dialogNumericTarget(s)
 	if target == nil {
 		return false
 	}
+	before := s.dialogNumBuf
 	pumpFocusField(s, &s.dialogNumBuf)
+	if s.dialogNumBuf != before && !s.dialogNumSnapDone {
+		commitUndoSnapshot(s, s.dialogNumUndoBefore)
+		s.dialogNumSnapDone = true
+	}
 	v, _ := strconv.Atoi(s.dialogNumBuf)
 	*target = v
 	return true

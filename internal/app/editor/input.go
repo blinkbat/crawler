@@ -190,12 +190,15 @@ func updateHotkeys(s *State) {
 		s.testRequested = true
 	}
 
-	// Brush size cycling (grid layers only).
-	if !ctrl && rl.IsKeyPressed(rl.KeyLeftBracket) {
-		stepBrushSize(s, -1)
-	}
-	if !ctrl && rl.IsKeyPressed(rl.KeyRightBracket) {
-		stepBrushSize(s, +1)
+	// Brush size cycling (grid layers only — entity/multi-tile brushes ignore
+	// brushSize, so let the keys pass through rather than silently mutate it).
+	if !ctrl && isGridLayer(s.layer) {
+		if rl.IsKeyPressed(rl.KeyLeftBracket) {
+			stepBrushSize(s, -1)
+		}
+		if rl.IsKeyPressed(rl.KeyRightBracket) {
+			stepBrushSize(s, +1)
+		}
 	}
 
 	// PgUp/PgDn step the active level (toolbar Lvl -/+ accelerators).
@@ -751,12 +754,16 @@ func beginPaintStroke(s *State) {
 // applyTool's optimistic dirty flip when the brush refused the cell.
 func strokePaint(s *State, x, z int) {
 	wasDirty := s.dirty
+	wasHidden := s.layerHidden[s.layer]
 	applyToolBrushed(s, x, z)
 	if s.dragSnapshotDone {
 		return // already banked this stroke's snapshot
 	}
 	if core.AreaContentEqual(s.area, s.dragUndoBefore) {
-		s.dirty = wasDirty // refused / no-op cell: undo the optimistic dirty flip
+		// Refused / no-op cell: undo applyTool's optimistic dirty AND layer-reveal
+		// flips (matches the context-menu erase path) so nothing changed visibly.
+		s.dirty = wasDirty
+		s.layerHidden[s.layer] = wasHidden
 		return
 	}
 	commitUndoSnapshot(s, s.dragUndoBefore)

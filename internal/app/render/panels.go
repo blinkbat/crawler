@@ -259,13 +259,14 @@ var (
 )
 
 // panelsMapClassKey fingerprints everything the Map-tab cell classification + tiling depends on: area (Path),
-// player tile/level, pan offset, and the cell-grid dimensions (zoom). Like the minimap, fog reveals land on the
-// step that moves the player, so the player tile covers fog freshness. The pixel rects are re-drawn every frame
-// regardless (cheap); only the mapSliceCell classifications are gated on this key.
+// player tile/level, pan offset, the cell-grid dimensions (zoom), and the fog reveal generation (so a reveal
+// that doesn't move the player still busts the cache). The pixel rects are re-drawn every frame regardless
+// (cheap); only the mapSliceCell classifications are gated on this key.
 type panelsMapClassKey struct {
 	path                       string
 	tileX, tileZ, level        int
 	panX, panZ, cellsX, cellsY int
+	revealGen                  int // fog reveal counter; busts the cache on a non-moving reveal
 	valid                      bool
 }
 
@@ -1340,7 +1341,8 @@ func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 	// area changed); otherwise last frame's grids still hold and the window+border mapSliceCell pass is skipped.
 	key := panelsMapClassKey{
 		path: m.Path, tileX: g.Player.TileX, tileZ: g.Player.TileZ, level: g.Player.Level,
-		panX: g.PanelsMapPanX, panZ: g.PanelsMapPanZ, cellsX: cellsX, cellsY: cellsY, valid: true,
+		panX: g.PanelsMapPanX, panZ: g.PanelsMapPanZ, cellsX: cellsX, cellsY: cellsY,
+		revealGen: g.RevealGen, valid: true,
 	}
 	if key != panelsMapClassCache {
 		for localZ := -1; localZ <= cellsY; localZ++ {

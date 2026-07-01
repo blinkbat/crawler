@@ -15,6 +15,10 @@ var (
 	cachedScreenW int32
 	cachedScreenH int32
 	uiFrameTime   float64
+	// windowResizing is true on any frame whose window size differs from the prior
+	// frame's — i.e. the window is mid-resize. Full-screen capture targets read it
+	// to DEFER their Unload+Load realloc until the size settles (see ensureStable).
+	windowResizing bool
 )
 
 // BeginFrame samples the window size and wall-clock once at the top of each frame.
@@ -23,8 +27,12 @@ var (
 // BeginFrame hasn't run yet (tests, pre-first-frame) — the getters fall back to a
 // live query so they stay correct.
 func BeginFrame() {
-	cachedScreenW = int32(rl.GetScreenWidth())
-	cachedScreenH = int32(rl.GetScreenHeight())
+	w := int32(rl.GetScreenWidth())
+	h := int32(rl.GetScreenHeight())
+	// A size change vs the prior frame means the window is being dragged-resized.
+	// Skip the very first frame (cachedScreenW==0) so a cold start isn't flagged.
+	windowResizing = cachedScreenW != 0 && (w != cachedScreenW || h != cachedScreenH)
+	cachedScreenW, cachedScreenH = w, h
 	uiFrameTime = rl.GetTime()
 }
 

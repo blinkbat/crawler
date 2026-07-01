@@ -590,6 +590,11 @@ type GameState struct {
 	// Visited tracks stepped-on tiles for the Map fog-of-war reveal; indexed
 	// Visited[z][x]. Start tile pre-marked; updated on every successful step.
 	Visited [][]bool
+	// RevealGen bumps whenever RevealRadius flips a tile newly-visited. The minimap
+	// and Map-tab classification caches fold it into their keys so a reveal that
+	// does NOT move the player (e.g. a future Scan/reveal effect) still busts the
+	// cache — without relying on the "fog only reveals on a step" invariant.
+	RevealGen int
 	// DialogOpen gates the conversation overlay (see dialog.go); Dialog holds the
 	// live conversation. Highest-priority explore modal, opened by StartDialog,
 	// dismissed by CloseDialog. Transient (not in SaveData).

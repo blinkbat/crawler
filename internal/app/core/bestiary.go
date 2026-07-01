@@ -101,7 +101,9 @@ func RecordBattleKills(g *GameState) {
 		return
 	}
 	for _, m := range BattleMembers(g) {
-		if !m.Alive {
+		// Same defeat test as loot payout (EnemyDefeated) so a killed member can't
+		// yield gold/drops without also crediting a bestiary kill.
+		if EnemyDefeated(m) {
 			g.Bestiary.RecordKill(m.Kind)
 		}
 	}

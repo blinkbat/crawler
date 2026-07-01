@@ -177,6 +177,11 @@ func samplesFor(duration float64) int {
 	if math.IsNaN(duration) || math.IsInf(duration, 0) {
 		return 1
 	}
+	// Cap length here so EVERY synth path (Click, Chime, ShapeParams) is bounded —
+	// a corrupt/huge duration can't drive a giant alloc (SynthChime doubles this).
+	if duration > maxDuration {
+		duration = maxDuration
+	}
 	samples := int(duration * SampleRate)
 	if samples <= 0 {
 		samples = 1
