@@ -1583,29 +1583,9 @@ func drawBrushSwatchRow(font rl.Font, r rl.Rectangle, label string, layer Layer,
 
 // isSentinelBrush reports whether (layer, char) is a "semantic" brush (Auto /
 // Force-empty / None) that paints no visible tile — the palette hatches those.
-// Every layer must be enumerated (panics on a missing case) so a new layer can't
-// silently fall through to false and mislead the author.
+// Per layer via layerDefs in layerdef.go.
 func isSentinelBrush(layer Layer, char byte) bool {
-	switch layer {
-	case LayerFloor:
-		return char == core.FloorAuto
-	case LayerDecor:
-		return char == core.DecorAuto || char == core.DecorEmpty
-	case LayerProps:
-		return char == core.TilePropEmpty
-	case LayerWalls:
-		return char == core.TileOpen
-	case LayerCeiling:
-		// '.' = "no slab" (sky shows through) — a sentinel, not a paintable look.
-		return char == core.TileCeilingOpen
-	case LayerElevation:
-		// Ground ('0') is the implicit flat default — the palette no-op level.
-		return char == core.ElevationGround
-	case LayerEntities:
-		// Entities aren't tile chars.
-		return false
-	}
-	panic(fmt.Sprintf("editor: isSentinelBrush missing case for layer %d", int(layer)))
+	return layerDefs[layer].isSentinel(char)
 }
 
 // drawSentinelHatch overlays diagonal stripes onto a swatch so it reads as
@@ -2652,39 +2632,9 @@ func insetRect(r rl.Rectangle, inset float32) rl.Rectangle {
 }
 
 // brushPreviewColor returns a tint for the active brush so the rect-drag preview
-// hints at what's painted. Panics on a missing layer case (a silent fallback
-// would mismatch the palette swatch).
+// hints at what's painted (per layer via layerDefs in layerdef.go).
 func brushPreviewColor(s *State) rl.Color {
-	b := s.activeBrush()
-	switch s.layer {
-	case LayerWalls:
-		if b.Char == core.TileRock {
-			return wallColor()
-		}
-		return floorColor(core.FloorAuto)
-	case LayerFloor:
-		return floorColor(b.Char)
-	case LayerDecor:
-		if b.Char == core.DecorAuto {
-			// Auto has no single render color; mirror its palette swatch tint.
-			return b.Color
-		}
-		return decorColor(b.Char)
-	case LayerProps:
-		if core.IsPropChar(b.Char) {
-			return propColor(b.Char)
-		}
-		return floorColor(core.FloorAuto)
-	case LayerCeiling:
-		return ceilingColor()
-	case LayerElevation:
-		// Tint by the selected level so a region paint reads as "this height."
-		return elevationLevelColor(s.editLevel)
-	case LayerEntities:
-		// Entities paint markers, not tile chars — neutral fallback.
-		return editorFallbackColor
-	}
-	panic(fmt.Sprintf("editor: brushPreviewColor missing case for layer %d", int(s.layer)))
+	return layerDefs[s.layer].previewColor(s, s.activeBrush())
 }
 
 // tileColorByChar is the per-layer per-char swatch color, a [layerCount][256]
@@ -2776,39 +2726,7 @@ func drawCeilingHash(r rl.Rectangle, cell float32, col color.RGBA) {
 // currentLayerGlyph returns the char to overlay for the active layer's cell at
 // (x, z), ok==false when empty or the layer has no per-tile chars (Entities).
 func currentLayerGlyph(s *State, x, z, lvl int) (byte, bool) {
-	switch s.layer {
-	case LayerWalls:
-		if w, ok := cellAt(s.area.Walls, x, z); ok && core.IsFaceSkinChar(w) {
-			return w, true
-		}
-	case LayerFloor:
-		if f, ok := cellAt(s.area.Floor, x, z); ok && f != core.FloorAuto && f != 0 {
-			return f, true
-		}
-	case LayerDecor:
-		if d := s.area.DecorForDisplay(x, z, s.editLevel); d != core.DecorAuto && d != core.DecorEmpty {
-			return d, true
-		}
-	case LayerProps:
-		if p := s.area.PropForDisplay(x, z, s.editLevel); core.IsPropChar(p) {
-			return p, true
-		}
-	case LayerCeiling:
-		if c, ok := cellAt(s.area.Ceiling, x, z); ok && s.area.CeilingAt(x, z) {
-			return c, true
-		}
-	case LayerElevation:
-		// Show off-ground tiles' level char; ground baseline stays blank.
-		if lvl != core.ElevationBaseline {
-			return core.ElevationChar(lvl), true
-		}
-	case LayerEntities:
-		// Entities are drawn as markers — no glyph.
-	default:
-		// Fail closed so a new layer can't silently render no glyph.
-		panic("editor: currentLayerGlyph missing case for layer")
-	}
-	return 0, false
+	return layerDefs[s.layer].glyph(s, x, z, lvl)
 }
 
 // tileGlyphMeasure memoizes each tile glyph's measured size at the current cell
@@ -2976,7 +2894,7 @@ func openModalRowAt(s *State, p rl.Vector2) int {
 
 func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 	header := "OPEN MAP"
-	if s.modalRenaming != "" {
+	if s.modalRenamingActive {
 		header = "RENAME MAP"
 	} else if s.modalConfirmDelete {
 		header = "DELETE MAP"
@@ -3009,7 +2927,7 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 			editorFontHint, 1, theme.TextHint)
 	}
 
-	if s.modalRenaming != "" {
+	if s.modalRenamingActive {
 		fieldR := rl.NewRectangle(r.X+modalContentInset, r.Y+r.Height-86, r.Width-2*modalContentInset, textFieldH)
 		drawTextField(font, fieldR, s.modalRenaming, true)
 		labels := cmdLabels(openRenameCmds(s))

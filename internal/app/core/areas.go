@@ -77,18 +77,11 @@ func onStartErr(what string, x, z int) error {
 	return fmt.Errorf("%s at (%d,%d) sits on the player start", what, x, z)
 }
 
-// validateLayerDims checks a layer's row count and per-row width against w×h,
-// returning a descriptive error on the first mismatch.
+// validateLayerDims checks a layer's row count and per-row width against w×h.
+// Delegates to mapfile.ValidateGridDims so the editor path (which bypasses
+// mapfile.validate) shares that one dimension check rather than duplicating it.
 func validateLayerDims(name string, rows []string, w, h int) error {
-	if len(rows) != h {
-		return fmt.Errorf("%s layer has %d rows, declared height %d", name, len(rows), h)
-	}
-	for i, row := range rows {
-		if len(row) != w {
-			return fmt.Errorf("%s layer row %d has width %d, want %d", name, i, len(row), w)
-		}
-	}
-	return nil
+	return mapfile.ValidateGridDims(name, rows, w, h)
 }
 
 // AreaFromMapFile is the converter half of LoadArea, exposed so the editor

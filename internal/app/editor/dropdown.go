@@ -240,6 +240,21 @@ func enemyKindEntries(apply func(*State, core.EnemyKind)) []dropdownEntry {
 	return out
 }
 
+// itemKindEntries builds one row per registered item kind (label = item name),
+// each running apply(s, kind). Symmetric with enemyKindEntries.
+func itemKindEntries(apply func(*State, core.ItemKind)) []dropdownEntry {
+	defs := core.AllItems()
+	out := make([]dropdownEntry, 0, len(defs))
+	for _, def := range defs {
+		kind := def.Kind
+		out = append(out, dropdownEntry{
+			label: def.Name,
+			apply: func(s *State) { apply(s, kind) },
+		})
+	}
+	return out
+}
+
 // foeKindEntries lists every enemy kind for the Foe Visualizer's kind picker.
 // Choosing re-seeds the working visual from that kind.
 func foeKindEntries(s *State) []dropdownEntry {
@@ -271,6 +286,9 @@ func packAIEntries(s *State) []dropdownEntry {
 			apply: func(s *State) {
 				if s.modalPackIdx < 0 || s.modalPackIdx >= len(s.area.PackSpawns) {
 					return
+				}
+				if s.area.PackSpawns[s.modalPackIdx].AI == mode {
+					return // re-picking the current AI — no undo/dirty churn
 				}
 				pushUndo(s)
 				s.area.PackSpawns[s.modalPackIdx].AI = mode
@@ -331,25 +349,16 @@ func packAddMember(s *State, add func(*core.PackSpawn)) {
 // --- Chest-add entries: every registered item kind ---
 
 func chestAddEntries(s *State) []dropdownEntry {
-	defs := core.AllItems()
-	out := make([]dropdownEntry, 0, len(defs))
-	for _, def := range defs {
-		kind := def.Kind
-		out = append(out, dropdownEntry{
-			label: def.Name,
-			apply: func(s *State) {
-				if s.modalChestIdx < 0 || s.modalChestIdx >= len(s.area.ChestSpawns) {
-					return
-				}
-				pushUndo(s)
-				chest := &s.area.ChestSpawns[s.modalChestIdx]
-				chest.Items = append(chest.Items, kind)
-				s.modalCursor = len(chest.Items) - 1
-				s.dirty = true
-			},
-		})
-	}
-	return out
+	return itemKindEntries(func(s *State, kind core.ItemKind) {
+		if s.modalChestIdx < 0 || s.modalChestIdx >= len(s.area.ChestSpawns) {
+			return
+		}
+		pushUndo(s)
+		chest := &s.area.ChestSpawns[s.modalChestIdx]
+		chest.Items = append(chest.Items, kind)
+		s.modalCursor = len(chest.Items) - 1
+		s.dirty = true
+	})
 }
 
 // --- Geometry (single source shared by update hit-test + draw) ---

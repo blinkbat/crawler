@@ -213,6 +213,8 @@ func playThroughRing(wavBytes []byte) {
 		// Zero Sound (dead device or malformed bytes) — don't store or play.
 		return
 	}
+	// Honor the SFX slider + master mute; a fresh Sound defaults to full volume.
+	rl.SetSoundVolume(snd, sfx.effective())
 	// Reuse a finished slot: replaceSound frees the slot's buffer, and freeing
 	// one still streaming is a use-after-free. Scan from the cursor for the first
 	// free/empty slot; only when all are in flight fall back to the oldest.

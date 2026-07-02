@@ -94,8 +94,11 @@ func (s *State) ensureIsoRT(w, h int32) {
 	if s.isoRT.ID != 0 && s.isoRTW == w && s.isoRTH == h {
 		return // already the right size
 	}
-	if s.isoRT.ID != 0 && changing {
-		return // mid-resize: reuse the current RT this frame, realloc once it settles
+	if s.isoRT.ID != 0 && (changing || rl.IsMouseButtonDown(rl.MouseLeftButton)) {
+		// Mid-resize (size still changing) OR a drag paused mid-resize (mouse held, size
+		// momentarily stable): reuse the current RT this frame — reallocating the GPU FBO
+		// while the window is being dragged is what trips the DrawModelEx crash.
+		return
 	}
 	s.freeIsoRT()
 	s.isoRT = rl.LoadRenderTexture(w, h)

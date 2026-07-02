@@ -9,15 +9,11 @@ import (
 	"strconv"
 )
 
-// activeFootprint returns the active brush's multi-tile footprint (props →
-// core.PropFootprint, decor → core.DecorFootprint), or nil if single-tile.
+// activeFootprint returns the active brush's multi-tile footprint (props/decor carry
+// one; other layers are single-tile → nil). See layerDefs in layerdef.go.
 func activeFootprint(s *State) []core.MultiTileOffset {
-	b := s.activeBrush()
-	switch s.layer {
-	case LayerProps:
-		return core.PropFootprint(b.Char)
-	case LayerDecor:
-		return core.DecorFootprint(b.Char)
+	if fp := layerDefs[s.layer].footprint; fp != nil {
+		return fp(s.activeBrush().Char)
 	}
 	return nil
 }
@@ -68,45 +64,16 @@ func applyTool(s *State, x, z int) {
 		eraseAt(s, x, z)
 		return
 	}
-	switch s.layer {
-	case LayerWalls:
-		applyFaceBrush(s, x, z, brush.Char)
-	case LayerFloor:
-		setLayerCell(&s.area.Floor, x, z, brush.Char)
-	case LayerDecor:
-		applyDecorBrush(s, x, z, brush.Char)
-	case LayerProps:
-		applyPropBrush(s, x, z, brush.Char)
-	case LayerCeiling:
-		setLayerCell(&s.area.Ceiling, x, z, brush.Char)
-	case LayerElevation:
-		// Voxel grid: a paint places ONE tile at (x, editLevel, z); a gap between
-		// stacked tiles makes a land bridge. Erase removes the tile at the level.
-		s.area.SetCube(x, s.editLevel, z, s.area.FaceSkinAt(x, z))
-		s.dirty = true
-		return
-	case LayerEntities:
-		applyEntityBrush(s, x, z, brush.Entity)
-		return // entity branch sets dirty itself when it lands
-	default:
-		panic("editor: applyTool missing case for layer — add it here, in eraseAt, and in activeGrid")
-	}
-	// A content paint also lifts the tile to the active level (shared with
-	// flood-fill and fill-all via stampActiveLevel).
-	stampActiveLevel(s, x, z)
-	s.dirty = true
+	// Per-layer paint — the descriptor's apply owns the stamp-to-level + dirty tail
+	// (content layers via paintContentCell; entities set their own conditional dirty).
+	layerDefs[s.layer].apply(s, x, z, brush)
 }
 
 // layerStampsActiveLevel reports whether painting on layer lifts the tile to the
-// active level. Floor/decor/props/ceiling define a floor's level; WALLS do NOT
-// (re-stamping would move raised neighbours under a fat brush). Elevation sets
-// the level itself; Entities have none.
+// active level. Floor/decor/props/ceiling define a floor's level; walls/elevation/
+// entities do not (see the stampsLevel field of layerDefs in layerdef.go).
 func layerStampsActiveLevel(layer Layer) bool {
-	switch layer {
-	case LayerElevation, LayerEntities, LayerWalls:
-		return false
-	}
-	return true
+	return layerDefs[layer].stampsLevel
 }
 
 // stampActiveLevel lifts tile (x,z) to the active level — shared by applyTool,
@@ -673,23 +640,12 @@ func placeCrystalAt(s *State, x, z int) {
 // eraseSentinel is the "empty" char a layer resets to when erased (shared by
 // flood-erase and per-cell eraseAt). Elevation resets to the ground baseline.
 func eraseSentinel(layer Layer) byte {
-	switch layer {
-	case LayerWalls:
-		return core.TileOpen
-	case LayerFloor:
-		return core.FloorAuto
-	case LayerDecor:
-		// Erase suppresses scatter (DecorEmpty), NOT auto-scatter (DecorAuto).
-		return core.DecorEmpty
-	case LayerProps:
-		return core.TilePropEmpty
-	case LayerCeiling:
-		return core.TileCeilingOpen
-	case LayerElevation:
-		return core.ElevationChar(core.ElevationBaseline)
+	d := &layerDefs[layer]
+	if !d.hasSentinel {
+		// Fail closed like the sibling layer lookups (Entities has no per-tile char).
+		panic("editor: eraseSentinel called for a layer with no sentinel")
 	}
-	// Fail closed like the sibling layer switches.
-	panic("editor: eraseSentinel missing case for layer")
+	return d.sentinel
 }
 
 // eraseAt resets the active layer's cell at (x,z) to its eraseSentinel; Props,
@@ -699,27 +655,11 @@ func eraseAt(s *State, x, z int) {
 		return
 	}
 	s.layerHidden[s.layer] = false // reveal so an erase isn't invisible
-	switch s.layer {
-	case LayerProps:
-		clearPropCell(s, x, z)
-	case LayerDecor:
-		setDecorFloor(s, x, z, eraseSentinel(LayerDecor))
-	case LayerElevation:
-		// Remove the tile at (x, editLevel, z) — voxel inverse of a paint; the gap
-		// under a higher tile makes a walk-under bridge. Clear any ramp too.
-		s.area.ClearCube(x, s.editLevel, z)
-		if _, ok := s.area.RampAt(x, z); ok {
-			setLayerCell(&s.area.Floor, x, z, core.FloorAuto)
-		}
-	case LayerEntities:
-		if !clearEntitiesAt(s, x, z) {
-			return
-		}
-	default:
-		// Plain grid layers: reset to sentinel (eraseSentinel panics on unknown).
-		setLayerCell(activeGrid(s), x, z, eraseSentinel(s.layer))
+	// Per-layer clear; the returned bool drives dirty so an entity clear that removed
+	// nothing leaves the map clean. See layerDefs in layerdef.go.
+	if layerDefs[s.layer].erase(s, x, z) {
+		s.dirty = true
 	}
-	s.dirty = true
 }
 
 // placeRamp is the smart ramp tool (toolbar Ramp mode): finds the single axis
@@ -1250,6 +1190,13 @@ func floodFill(s *State, x, z int, b byte, erase bool) {
 	if !s.area.InBounds(x, z) {
 		return
 	}
+	// Voxel elevation: the Elevation grid is dead once Solids is explicit, so a BFS
+	// over it (and its rewrite) would be a silent no-op that still banks undo/dirty.
+	// Flood the ElevationLevelAt-connected region on live column data instead.
+	if s.layer == LayerElevation && len(s.area.Solids) > 0 {
+		floodFillVoxelElevation(s, x, z, b, erase)
+		return
+	}
 	// InBounds checks declared dims, which can exceed actual slice lengths for a
 	// ragged area — guard this raw seed read against the real extents.
 	if z >= len(*layer) || x >= len((*layer)[z]) {
@@ -1280,19 +1227,52 @@ func floodFill(s *State, x, z int, b byte, erase bool) {
 		}
 	})
 	switch {
-	case erase && s.layer == LayerElevation && len(s.area.Solids) > 0:
-		// Voxel elevation flood-erase: the Elevation string is dead, so clear each
-		// flooded cube at the edit level (mirror of eraseAt → ClearCube).
-		for _, c := range filled {
-			s.area.ClearCube(c[0], s.editLevel, c[1])
-		}
 	case erase:
-		// Other flood-erase: the flooded sentinel IS the cleared state. Do NOT
-		// fall through to the active-level lift — erasing must not raise the ground.
+		// Flood-erase: the flooded sentinel IS the cleared state. Do NOT fall through
+		// to the active-level lift — erasing must not raise the ground.
 	case layerStampsActiveLevel(s.layer):
 		// PAINT: the flooded region joins the active floor (mirror of applyTool's
 		// per-cell stamp). Walls exempt.
 		liftCellsToActiveLevel(s, filled)
+	}
+	s.dirty = true
+}
+
+// floodFillVoxelElevation flood-fills the 4-connected region of columns sharing the
+// seed's top-solid level (ElevationLevelAt — the live data; the Elevation string is
+// dead when Solids is explicit). Paint raises each column to the brush's level via
+// SetColumnTop; erase clears the cube at editLevel (mirror of eraseAt → ClearCube).
+func floodFillVoxelElevation(s *State, x, z int, b byte, erase bool) {
+	target := s.area.ElevationLevelAt(x, z)
+	newLevel := core.ElevationLevelFromChar(b)
+	if !erase && newLevel == target {
+		return // painting a column to its own level changes nothing — bank no undo
+	}
+	// Collect the connected same-level region first, then apply (SetColumnTop only
+	// touches its own column, so applying can't disturb an unvisited neighbor's level).
+	var region [][2]int
+	visited := make(map[[2]int]bool)
+	stack := [][2]int{{x, z}}
+	for len(stack) > 0 {
+		p := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if !s.area.InBounds(p[0], p[1]) || visited[p] {
+			continue
+		}
+		if s.area.ElevationLevelAt(p[0], p[1]) != target {
+			continue
+		}
+		visited[p] = true
+		region = append(region, p)
+		stack = append(stack, [2]int{p[0] + 1, p[1]}, [2]int{p[0] - 1, p[1]}, [2]int{p[0], p[1] + 1}, [2]int{p[0], p[1] - 1})
+	}
+	pushUndo(s)
+	for _, c := range region {
+		if erase {
+			s.area.ClearCube(c[0], s.editLevel, c[1])
+		} else {
+			s.area.SetColumnTop(c[0], c[1], newLevel)
+		}
 	}
 	s.dirty = true
 }
@@ -1529,27 +1509,13 @@ func paintLine(s *State, x0, z0, x1, z1 int) {
 	})
 }
 
-// activeGrid returns a pointer to the layer slice being edited, or nil for
-// gridless layers (entities). Must stay in sync with applyTool / eraseAt.
+// activeGrid returns a pointer to the layer slice being edited, or nil for gridless
+// layers (entities — the legitimate answer flood-fill checks for). See layerDefs.
 func activeGrid(s *State) *[]string {
-	switch s.layer {
-	case LayerWalls:
-		return &s.area.Walls
-	case LayerFloor:
-		return &s.area.Floor
-	case LayerDecor:
-		return &s.area.Decor
-	case LayerProps:
-		return &s.area.Props
-	case LayerCeiling:
-		return &s.area.Ceiling
-	case LayerElevation:
-		return &s.area.Elevation
-	case LayerEntities:
-		return nil // gridless — the legitimate answer flood-fill checks for
-	default:
-		panic("editor: activeGrid missing case for layer — add it here, in applyTool, and in eraseAt")
+	if g := layerDefs[s.layer].grid; g != nil {
+		return g(s)
 	}
+	return nil
 }
 
 // startTileBlocker returns the first "player can't spawn" warning, or "". Single

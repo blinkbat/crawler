@@ -397,12 +397,12 @@ func nextLivingSwapTarget(g *core.GameState, from, dir int) (int, bool) {
 func defaultSwapPartner(g *core.GameState) int {
 	actor := g.Battle.CurrentParty
 	if !core.PartyIndexInRange(g.Party, actor) {
-		return -1
+		return core.NoIndex
 	}
 	if idx, ok := nextLivingSwapTarget(g, actor, +1); ok {
 		return idx
 	}
-	return -1
+	return core.NoIndex
 }
 
 // enterSwapTargeting opens the Swap picker on the first living partner; the actor

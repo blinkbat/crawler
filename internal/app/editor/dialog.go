@@ -159,6 +159,9 @@ func setDialogStartNode(s *State, idx int) {
 	if d == nil || idx < 0 || idx >= len(d.Nodes) {
 		return
 	}
+	if d.StartNodeID == d.Nodes[idx].ID {
+		return // already the start node — no undo/dirty/flash churn
+	}
 	pushUndo(s)
 	d.StartNodeID = d.Nodes[idx].ID
 	s.dirty = true
@@ -270,7 +273,7 @@ func openDialogChoiceEditModal(s *State, choiceIdx int) {
 
 func dialogSpeakerEntries(s *State) []dropdownEntry {
 	return fieldEntries(core.DialogSpeakerIDs(), core.DialogSpeakerName, func(s *State, id core.DialogSpeakerID) {
-		if n := currentDialogNode(s); n != nil {
+		if n := currentDialogNode(s); n != nil && n.SpeakerID != id {
 			pushUndo(s)
 			n.SpeakerID = id
 			s.dirty = true
@@ -424,7 +427,7 @@ func dialogCondKindEntries(s *State) []dropdownEntry {
 
 func dialogQuestStatusEntries(s *State) []dropdownEntry {
 	return fieldEntries([]core.QuestStatus{core.QuestActive, core.QuestComplete}, questStatusLabel, func(s *State, qs core.QuestStatus) {
-		if c := currentDialogCond(s); c != nil {
+		if c := currentDialogCond(s); c != nil && c.QuestStatus != qs {
 			pushUndo(s)
 			c.QuestStatus = qs
 			s.dirty = true
@@ -434,7 +437,7 @@ func dialogQuestStatusEntries(s *State) []dropdownEntry {
 
 func dialogCondFoeEntries(s *State) []dropdownEntry {
 	return enemyKindEntries(func(s *State, kind core.EnemyKind) {
-		if c := currentDialogCond(s); c != nil {
+		if c := currentDialogCond(s); c != nil && c.FoeKind != kind {
 			pushUndo(s)
 			c.FoeKind = kind
 			s.dirty = true
@@ -456,7 +459,7 @@ func dialogTriggerKindEntries(s *State) []dropdownEntry {
 
 func dialogTriggerDialogEntries(s *State) []dropdownEntry {
 	return fieldEntries(s.area.Dialogs, func(d core.DialogDefinition) string { return d.ID }, func(s *State, d core.DialogDefinition) {
-		if t := currentDialogTrigger(s); t != nil {
+		if t := currentDialogTrigger(s); t != nil && t.DialogID != d.ID {
 			pushUndo(s)
 			t.DialogID = d.ID
 			s.dirty = true
@@ -466,7 +469,7 @@ func dialogTriggerDialogEntries(s *State) []dropdownEntry {
 
 func dialogTriggerFoeEntries(s *State) []dropdownEntry {
 	return enemyKindEntries(func(s *State, kind core.EnemyKind) {
-		if t := currentDialogTrigger(s); t != nil {
+		if t := currentDialogTrigger(s); t != nil && t.FoeKind != kind {
 			pushUndo(s)
 			t.FoeKind = kind
 			s.dirty = true
@@ -477,7 +480,7 @@ func dialogTriggerFoeEntries(s *State) []dropdownEntry {
 // dialogTriggerLocationEntries lists the area's regions for an enterLocation trigger.
 func dialogTriggerLocationEntries(s *State) []dropdownEntry {
 	return fieldEntries(s.area.Locations, locationLabel, func(s *State, loc core.Location) {
-		if t := currentDialogTrigger(s); t != nil {
+		if t := currentDialogTrigger(s); t != nil && t.LocationID != loc.ID {
 			pushUndo(s)
 			t.LocationID = loc.ID
 			s.dirty = true
@@ -1344,6 +1347,19 @@ func dialogActionKindEntries(s *State) []dropdownEntry {
 			holder := currentDialogActionHolder(s)
 			if holder == nil {
 				return
+			}
+			// No-change guard: re-picking the action the holder already has shouldn't
+			// bank a no-op undo or dirty the map (mirrors the sibling field pickers).
+			if set == nil {
+				if *holder == nil {
+					return
+				}
+			} else {
+				var probe core.DialogAction
+				set(&probe)
+				if *holder != nil && **holder == probe {
+					return
+				}
 			}
 			pushUndo(s)
 			if set == nil {

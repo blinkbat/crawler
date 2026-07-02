@@ -458,7 +458,7 @@ func TurnLeftHeld() bool {
 }
 
 func TurnRightHeld() bool {
-	return rl.IsKeyDown(rl.KeyRight) || rl.IsKeyDown(rl.KeyE) ||
+	return rl.IsKeyDown(rl.KeyRight) ||
 		padDown(rl.GamepadButtonRightTrigger1)
 }
 

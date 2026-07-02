@@ -967,12 +967,19 @@ func (mf *MapFile) validateOptionalGrid(name string, rows []string) error {
 // errors with name ("floor layer", "ceiling layer", "solids plane 2", "prop_levels"
 // …). The single dimension check shared by every required + optional grid below.
 func (mf *MapFile) validateGridDims(name string, rows []string) error {
-	if len(rows) != mf.Height {
-		return fmt.Errorf("%s has %d rows, size declares %d", name, len(rows), mf.Height)
+	return ValidateGridDims(name, rows, mf.Width, mf.Height)
+}
+
+// ValidateGridDims checks that rows is exactly h rows of w cols, tagging errors with
+// name. Exported free-function form so core's editor-path dimension check (which
+// bypasses MapFile.validate) shares this one implementation instead of copying it.
+func ValidateGridDims(name string, rows []string, w, h int) error {
+	if len(rows) != h {
+		return fmt.Errorf("%s has %d rows, size declares %d", name, len(rows), h)
 	}
 	for i, row := range rows {
-		if len(row) != mf.Width {
-			return fmt.Errorf("%s row %d has %d cols, size declares %d", name, i, len(row), mf.Width)
+		if len(row) != w {
+			return fmt.Errorf("%s row %d has %d cols, size declares %d", name, i, len(row), w)
 		}
 	}
 	return nil

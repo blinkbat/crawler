@@ -81,7 +81,7 @@ func Run() {
 	state := appState{scene: sceneTitle, title: title.New()}
 
 	for !rl.WindowShouldClose() && !state.quit {
-		dt := rl.GetFrameTime()
+		dt := input.FrameTime() // single frame-time seam (input pkg), shared with explore.Update
 		// Sample the stick once per frame so directional edge predicates are
 		// idempotent within the frame — see input.NewFrame.
 		input.NewFrame()

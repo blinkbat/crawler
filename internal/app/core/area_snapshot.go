@@ -1,6 +1,10 @@
 package core
 
-import "slices"
+import (
+	"slices"
+
+	"crawler/internal/app/core/mapfile"
+)
 
 // gridLayers returns pointers to the authored grid-layer slices in canonical
 // order (walls, floor, decor, props, ceiling, elevation) — single enumeration
@@ -138,20 +142,8 @@ func optionalLayerEqual(a, b []string, width, height int, blank byte) bool {
 // normalizeOptionalLayer returns a height×width layer, every row padded/truncated
 // to width. An absent layer becomes a full blank layer; a ragged one is normalized.
 func normalizeOptionalLayer(layer []string, width, height int, blank byte) []string {
-	blankRow := func() string {
-		buf := make([]byte, width)
-		for i := range buf {
-			buf[i] = blank
-		}
-		return string(buf)
-	}
 	if len(layer) != height {
-		row := blankRow()
-		out := make([]string, height)
-		for i := range out {
-			out[i] = row
-		}
-		return out
+		return mapfile.BlankLayer(width, height, blank)
 	}
 	// Right row count: normalize each row's width vs the loader's full-width form.
 	ragged := false

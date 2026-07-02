@@ -756,7 +756,12 @@ func strokePaint(s *State, x, z int) {
 	wasHidden := s.layerHidden[s.layer]
 	applyToolBrushed(s, x, z)
 	if s.dragSnapshotDone {
-		return // already banked this stroke's snapshot
+		// Snapshot already banked, but later cells in the drag still mutate content —
+		// invalidate the reachability + per-epoch draw caches (3D preview, fade, tooltip,
+		// reach badge) that commitUndoSnapshot would otherwise refresh on the first cell only.
+		s.reachValid = false
+		s.contentEpoch++
+		return
 	}
 	if core.AreaContentEqual(s.area, s.dragUndoBefore) {
 		// Refused / no-op cell: undo applyTool's optimistic dirty AND layer-reveal
@@ -1015,29 +1020,10 @@ func cellAt(layer []string, x, z int) (byte, bool) {
 }
 
 // activeLayerCharAt returns the raw char at (x,z) on the active grid layer
-// (including sentinels). ok is false for Entities, which has no per-tile char.
+// (including sentinels). ok is false for Entities (no per-tile char). Per layer via
+// layerDefs in layerdef.go.
 func activeLayerCharAt(s *State, x, z int) (byte, bool) {
-	switch s.layer {
-	case LayerWalls:
-		return cellAt(s.area.Walls, x, z)
-	case LayerFloor:
-		return cellAt(s.area.Floor, x, z)
-	case LayerDecor:
-		// Per-floor: sample the active floor's decor (legacy single char on nil-stack).
-		return s.area.DecorForDisplay(x, z, s.editLevel), true
-	case LayerProps:
-		return s.area.PropForDisplay(x, z, s.editLevel), true
-	case LayerCeiling:
-		return cellAt(s.area.Ceiling, x, z)
-	case LayerElevation:
-		return cellAt(s.area.Elevation, x, z)
-	case LayerEntities:
-		return 0, false // gridless — no per-tile char
-	default:
-		// A new grid layer must be handled above; panic loudly like activeGrid/
-		// applyTool/eraseAt rather than silently reading as empty here.
-		panic("editor: activeLayerCharAt missing case for layer — add it here and in activeGrid/applyTool/eraseAt")
-	}
+	return layerDefs[s.layer].charAt(s, x, z)
 }
 
 // minZoom / maxZoom bound the editor canvas zoom.
@@ -1346,6 +1332,10 @@ func (s *State) markDirty() {
 		return
 	}
 	s.dirty = true
+	// A focused-field edit (door targets especially) can change reachability and the
+	// hover tooltip's content; invalidate the lazy caches so neither shows stale data.
+	s.reachValid = false
+	s.contentEpoch++
 }
 
 func activeTextTarget(s *State) *string {
@@ -1427,6 +1417,10 @@ func validateModalState(s *State) {
 		if s.modalLocationIdx < 0 || s.modalLocationIdx >= len(s.area.Locations) {
 			closeModal(s)
 		}
+	default:
+		// Intentionally no arm: the remaining modals (foe/party/object views, new-map,
+		// save, confirm-dirty) reference no spawn index, so there's nothing to invalidate.
+		// A new INDEX-backed modal MUST add its own stale-index guard above.
 	}
 }
 
@@ -1475,6 +1469,7 @@ func closeModal(s *State) {
 	s.modalValidateRows = nil
 	s.modalConfirmDelete = false
 	s.modalRenaming = ""
+	s.modalRenamingActive = false
 	s.deleteArmed = ""
 	soundDrag = noSliderDrag
 	// Drop modal-scoped focus (door fields, new-map numeric) so it can't carry over.
@@ -1540,15 +1535,19 @@ func updateDoorEditModal(s *State) Action {
 			s.focus = focusDoorTargetDoor
 			return ActionNone
 		case doorHitFacing:
-			pushUndo(s)
-			door.Facing = hit.facing
-			s.dirty = true
+			if door.Facing != hit.facing { // re-picking the current facing shouldn't bank undo/dirty
+				pushUndo(s)
+				door.Facing = hit.facing
+				s.dirty = true
+			}
 			s.focus = focusNone
 			return ActionNone
 		case doorHitStyle:
-			pushUndo(s)
-			door.Style = hit.style
-			s.dirty = true
+			if door.Style != hit.style {
+				pushUndo(s)
+				door.Style = hit.style
+				s.dirty = true
+			}
 			s.focus = focusNone
 			return ActionNone
 		case doorHitDelete:
@@ -1588,18 +1587,22 @@ func updateDoorEditModal(s *State) Action {
 	// N/E/S/W set facing ('S' is free here — Ctrl+S Save doesn't fire in modals).
 	for _, fk := range doorFacingKeys {
 		if rl.IsKeyPressed(fk.key) {
-			pushUndo(s)
-			door.Facing = fk.facing
-			s.dirty = true
+			if door.Facing != fk.facing { // no undo/dirty churn when re-setting the current facing
+				pushUndo(s)
+				door.Facing = fk.facing
+				s.dirty = true
+			}
 			return ActionNone
 		}
 	}
 	// 1/2/3 set the door style (building / cave / field).
 	for _, sk := range doorStyleKeys {
 		if rl.IsKeyPressed(sk.key) {
-			pushUndo(s)
-			door.Style = sk.style
-			s.dirty = true
+			if door.Style != sk.style {
+				pushUndo(s)
+				door.Style = sk.style
+				s.dirty = true
+			}
 			return ActionNone
 		}
 	}
@@ -2052,7 +2055,7 @@ func chestRemoveSelected(s *State, chest *core.ChestSpawn) {
 }
 
 func updateOpenModal(s *State) Action {
-	if s.modalRenaming != "" {
+	if s.modalRenamingActive {
 		return updateOpenRename(s)
 	}
 	if s.modalConfirmDelete {
@@ -2090,6 +2093,7 @@ func openModalActionCmds(s *State) []modalCmd {
 		{label: "Open", hot: editorCommitPressed, run: func() Action { return openSelectedMap(s) }},
 		{label: "Rename", hot: keyHot(rl.KeyR), run: func() Action {
 			s.modalRenaming = core.MapIDFromPath(s.modalPaths[s.modalCursor])
+			s.modalRenamingActive = true
 			return ActionNone
 		}},
 		{label: "Delete", hot: keyHot(rl.KeyD), run: func() Action { s.modalConfirmDelete = true; return ActionNone }},
@@ -2167,7 +2171,7 @@ func updateOpenRename(s *State) Action {
 func openRenameCmds(s *State) []modalCmd {
 	return []modalCmd{
 		{label: "Rename", hot: editorCommitPressed, run: func() Action { openRenameCommit(s); return ActionNone }},
-		{label: "Cancel", hot: editorCancelPressed, run: func() Action { s.modalRenaming = ""; return ActionNone }},
+		{label: "Cancel", hot: editorCancelPressed, run: func() Action { s.modalRenaming = ""; s.modalRenamingActive = false; return ActionNone }},
 	}
 }
 
@@ -2175,6 +2179,7 @@ func openRenameCommit(s *State) {
 	oldPath := s.modalPaths[s.modalCursor]
 	newPath, err := renameMapFile(oldPath, s.modalRenaming)
 	s.modalRenaming = ""
+	s.modalRenamingActive = false
 	if err != nil {
 		s.flash("Rename failed: " + err.Error())
 		return

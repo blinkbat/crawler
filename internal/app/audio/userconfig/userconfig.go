@@ -8,6 +8,7 @@ import (
 	"crawler/internal/app/core"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -68,7 +69,9 @@ func LoadVolumes() (music, sfx float32, muted bool) {
 			return
 		}
 		f, err := strconv.ParseFloat(val, 32)
-		if err != nil {
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+			// Reject non-finite: ParseFloat accepts "nan"/"inf", and Clamp passes NaN
+			// through unchanged, so the corruption would round-trip via SaveVolumes.
 			return
 		}
 		v := core.Clamp(float32(f), 0, 1)

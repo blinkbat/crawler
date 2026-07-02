@@ -283,6 +283,7 @@ func updateContextMenu(s *State) bool {
 	}
 	if editorCancelPressed() {
 		closeContextMenu(s)
+		s.cancelHandled = true // else this same Esc also opens the pause menu this frame
 		return true
 	}
 	mp := rl.GetMousePosition()

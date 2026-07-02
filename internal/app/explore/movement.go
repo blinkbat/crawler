@@ -402,6 +402,9 @@ func updateRetroMenu(g *core.GameState) {
 				g.RetroFilters = [core.RetroFilterCount]float64{}
 			case item == core.RetroMenuClose:
 				g.RetroMenuOpen = false
+			default:
+				// Hand-maintained enum; a missing arm would silently confirm nothing.
+				panic(fmt.Sprintf("explore: updateRetroMenu missing case for item %d", item))
 			}
 		},
 		func(row, delta int) { core.AdjustRetroFilter(&g.RetroFilters[row], delta) })
@@ -452,6 +455,9 @@ func updateCombatTuneMenu(g *core.GameState) {
 				}
 			case item == core.BattleTuneCloseRow():
 				g.CombatTuneOpen = false
+			default:
+				// Hand-maintained enum; a missing arm would silently confirm nothing.
+				panic(fmt.Sprintf("explore: updateCombatTuneMenu missing case for item %d", item))
 			}
 		},
 		func(row, delta int) { core.AdjustBattleTuneSlider(&g.BattleTuning, row, delta) })

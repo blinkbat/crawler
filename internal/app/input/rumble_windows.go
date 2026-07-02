@@ -4,8 +4,9 @@ package input
 
 import (
 	"sync"
-	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 
 	"crawler/internal/app/core"
 )
@@ -19,7 +20,7 @@ const xinputPrimaryUser = uint32(gamepadID)
 
 var (
 	xinputOnce     sync.Once
-	xinputSetState *syscall.LazyProc
+	xinputSetState *windows.LazyProc
 	xinputReady    bool
 )
 
@@ -27,7 +28,10 @@ var (
 // 1_3 = legacy DX redist, 9_1_0 = Vista/7). None present leaves rumble a no-op.
 func loadXInput() {
 	for _, name := range []string{"xinput1_4.dll", "xinput1_3.dll", "xinput9_1_0.dll"} {
-		dll := syscall.NewLazyDLL(name)
+		// NewLazySystemDLL restricts the search to System32 — NewLazyDLL's default
+		// order could load a planted xinput*.dll from the working directory. (Only
+		// golang.org/x/sys/windows exports it; the std syscall package does not.)
+		dll := windows.NewLazySystemDLL(name)
 		if dll.Load() != nil {
 			continue
 		}

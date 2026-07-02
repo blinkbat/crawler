@@ -101,7 +101,12 @@ var mainMenuRows = []mainMenuRowDef{
 	{
 		Label: func() string { return "Adventure" },
 		Action: func(s *State) Action {
-			paths, _ := mapfile.List(core.MapsDir())
+			paths, err := mapfile.List(core.MapsDir())
+			if err != nil {
+				// I/O failure reads as an empty picker otherwise; surface it instead.
+				s.loadError = "Couldn't read maps folder: " + err.Error()
+				return ActionNone
+			}
 			// Derive path + display name once (the list is fixed while the picker is open).
 			s.mapChoices = make([]mapChoice, len(paths))
 			for i, p := range paths {
@@ -197,7 +202,7 @@ func Draw(s State, assets render.Resources) {
 	titleSpacing := titleSplashSpacing
 	tm := rl.MeasureTextEx(font, title, titleSize, titleSpacing)
 	titleX := render.CenterXF(tm.X)
-	titleY := float32(screenH) * 0.18
+	titleY := float32(screenH) * titleSplashAnchorFrac
 	// Embossed gilt wordmark: cast shadow, gold body, cream speculum up-left.
 	rl.DrawTextEx(font, title, rl.NewVector2(titleX+3, titleY+4), titleSize, titleSpacing, rl.NewColor(0, 0, 0, 210))
 	rl.DrawTextEx(font, title, rl.NewVector2(titleX, titleY), titleSize, titleSpacing, theme.BorderActive)
@@ -213,8 +218,8 @@ func Draw(s State, assets render.Resources) {
 
 	// Gilt rule beneath the title, flanked by fleurons. Width = title + slack
 	// so the ornament frames the wordmark.
-	ruleY := titleY + tm.Y + 14
-	ruleW := tm.X + 48
+	ruleY := titleY + tm.Y + titleRuleGap
+	ruleW := tm.X + titleRuleSlack
 	ruleX := render.CenterXF(ruleW)
 	render.DrawTitleRule(ruleX, ruleY, ruleW)
 
@@ -266,6 +271,9 @@ const (
 	// Wordmark sizing — the documented exception to the five-size standard.
 	titleSplashSize        = float32(72)
 	titleSplashSpacing     = float32(4)
+	titleSplashAnchorFrac  = float32(0.18) // wordmark vertical anchor (frac of screenH)
+	titleRuleGap           = float32(14)   // wordmark baseline down to the gilt rule
+	titleRuleSlack         = float32(48)   // rule width beyond the wordmark (fleuron frame)
 	titleListAnchorFrac    = float32(0.42) // menu list vertical anchor (frac of screenH)
 	titleListRowStride     = float32(44)   // gap between rows
 	titleListHeaderOffset  = float32(52)   // list top up to the header

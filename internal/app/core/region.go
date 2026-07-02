@@ -1,5 +1,7 @@
 package core
 
+import "sort"
+
 // region.go: editor region copy/paste — a rectangle of the grid layers
 // snapshotted and stamped elsewhere. Grid layers only (gridLayers()); entities
 // (packs/chests/doors/crystals) live in spawn lists and are NOT copied.
@@ -13,6 +15,16 @@ type TileRegion struct {
 	W, H   int
 	Layers [][]string
 	Solids [][]string // per-level rectangle rows; nil for a heightfield source
+	// PropStack/DecorStack: per-floor scatter planes; nil for a single-grid source
+	// (the Props/Decor grid in Layers carries it). PropLevels/DecorLevels: the legacy
+	// per-tile level tags — NOT in gridLayers(), so captured here explicitly or a
+	// legacy source's props/decor paste at floor auto. Faces: cliff-face overrides in
+	// the rectangle, coords made region-local (remapped back on paste).
+	PropStack   [][]string
+	DecorStack  [][]string
+	PropLevels  []string
+	DecorLevels []string
+	Faces       []FaceOverride
 }
 
 // Empty reports whether the region has nothing to paste.
@@ -62,22 +74,76 @@ func CopyRegion(a *AreaDefinition, x0, z0, x1, z1 int) TileRegion {
 		}
 		out.Layers[li] = rows
 	}
-	// Voxel source: also snapshot the cube stack for the rectangle, one row per
-	// (level, z). Heightfield sources leave Solids nil (Elevation layer carries them).
-	if len(a.Solids) > 0 {
-		planes := make([][]string, len(a.Solids))
-		for L := range a.Solids {
-			rows := make([]string, h)
-			for i := 0; i < h; i++ {
-				z := z0 + i
-				if z >= len(a.Solids[L]) {
-					continue
-				}
-				rows[i] = clampSubstr(a.Solids[L][z], x0, x1+1)
+	// Voxel source: also snapshot the cube stack (the Elevation layer is dead there).
+	// The per-floor prop/decor stacks, legacy level tags, and face overrides all live
+	// outside gridLayers(), so capture them explicitly or paste silently drops them.
+	out.Solids = copyStackRect(a.Solids, x0, z0, x1, z1)
+	out.PropStack = copyStackRect(a.PropStack, x0, z0, x1, z1)
+	out.DecorStack = copyStackRect(a.DecorStack, x0, z0, x1, z1)
+	out.PropLevels = copyLevelRect(a.PropLevels, x0, z0, x1, z1)
+	out.DecorLevels = copyLevelRect(a.DecorLevels, x0, z0, x1, z1)
+	out.Faces = copyFaceRect(a.FaceOverrides, x0, z0, x1, z1)
+	return out
+}
+
+// copyStackRect snapshots a per-level scatter/solid stack's rectangle, one row per
+// (level, z), tolerating ragged planes. Returns nil for an absent stack (a
+// single-grid/heightfield source — the grid layer carries it).
+func copyStackRect(stack [][]string, x0, z0, x1, z1 int) [][]string {
+	if len(stack) == 0 {
+		return nil
+	}
+	h := z1 - z0 + 1
+	planes := make([][]string, len(stack))
+	for L := range stack {
+		rows := make([]string, h)
+		for i := 0; i < h; i++ {
+			z := z0 + i
+			if z >= len(stack[L]) {
+				continue
 			}
-			planes[L] = rows
+			rows[i] = clampSubstr(stack[L][z], x0, x1+1)
 		}
-		out.Solids = planes
+		planes[L] = rows
+	}
+	return planes
+}
+
+// copyLevelRect snapshots a level-tag grid's rectangle as full-width rows (auto
+// where the source is absent/ragged), so a paste overwrites the destination's tags
+// exactly — including clearing stale non-auto tags a legacy source left at auto.
+func copyLevelRect(grid []string, x0, z0, x1, z1 int) []string {
+	w, h := x1-x0+1, z1-z0+1
+	rows := make([]string, h)
+	for i := 0; i < h; i++ {
+		buf := make([]byte, w)
+		var srcRow string
+		if z := z0 + i; z < len(grid) {
+			srcRow = grid[z]
+		}
+		for j := 0; j < w; j++ {
+			if x := x0 + j; x < len(srcRow) {
+				buf[j] = srcRow[x]
+			} else {
+				buf[j] = PropLevelAuto
+			}
+		}
+		rows[i] = string(buf)
+	}
+	return rows
+}
+
+// copyFaceRect collects the face overrides inside the rectangle, coords made
+// region-local (remapped back on paste). nil when none fall in the rectangle.
+func copyFaceRect(faces []FaceOverride, x0, z0, x1, z1 int) []FaceOverride {
+	var out []FaceOverride
+	for _, o := range faces {
+		if o.X < x0 || o.X > x1 || o.Z < z0 || o.Z > z1 {
+			continue
+		}
+		lo := o
+		lo.X, lo.Z = o.X-x0, o.Z-z0
+		out = append(out, lo)
 	}
 	return out
 }
@@ -115,6 +181,8 @@ func (a *AreaDefinition) PasteRegion(r TileRegion, atX, atZ int) {
 		}
 	}
 	a.pasteRegionSolids(r, atX, atZ)
+	a.pasteRegionScatter(r, atX, atZ)
+	a.pasteRegionFaces(r, atX, atZ)
 }
 
 // pasteRegionSolids stamps a voxel region's cube stack at (atX,atZ). Materializes
@@ -124,30 +192,114 @@ func (a *AreaDefinition) pasteRegionSolids(r TileRegion, atX, atZ int) {
 	if len(r.Solids) == 0 {
 		return
 	}
+	// Same full-column stamp as the prop/decor stacks (cells above the copied planes
+	// clear to air); setSolidCell grows the stack as needed, then trim trailing air.
 	EnsureSolids(a)
-	a.growSolidsTo(len(r.Solids))
-	for L := 0; L < len(a.Solids); L++ {
-		for i := 0; i < r.H; i++ {
+	a.pasteScatterStack(r.Solids, len(a.Solids), SolidAir, r.W, r.H, atX, atZ, a.setSolidCell)
+	a.trimTopAir()
+}
+
+// pasteRegionScatter stamps a region's per-floor prop/decor stacks and legacy level
+// tags at (atX,atZ). Stacks overwrite the full column in the rectangle (dest cubes
+// above the copied planes clear to blank), mirroring pasteRegionSolids; the level
+// grids are stamped as an overlay so a legacy source's props land on the right floor.
+func (a *AreaDefinition) pasteRegionScatter(r TileRegion, atX, atZ int) {
+	if len(r.PropStack) > 0 {
+		a.EnsurePropStack()
+		a.pasteScatterStack(r.PropStack, len(a.PropStack), TilePropEmpty, r.W, r.H, atX, atZ, a.SetProp)
+	}
+	if len(r.DecorStack) > 0 {
+		a.EnsureDecorStack()
+		a.pasteScatterStack(r.DecorStack, len(a.DecorStack), DecorEmpty, r.W, r.H, atX, atZ, a.SetDecor)
+	}
+	a.pasteLevelGrid(&a.PropLevels, r.PropLevels, atX, atZ)
+	a.pasteLevelGrid(&a.DecorLevels, r.DecorLevels, atX, atZ)
+}
+
+// pasteScatterStack writes a scatter region across levels 0..max(dest,region)-1 so
+// dest content above the pasted stack clears (blank cells), while `set` (SetProp/
+// SetDecor) materializes + trims. Off-map cells no-op via set's own guard.
+func (a *AreaDefinition) pasteScatterStack(planes [][]string, destLevels int, blank byte, w, h, atX, atZ int, set func(x, level, z int, c byte)) {
+	levels := destLevels
+	if len(planes) > levels {
+		levels = len(planes)
+	}
+	for L := 0; L < levels; L++ {
+		for i := 0; i < h; i++ {
 			z := atZ + i
-			if z < 0 || z >= a.Height {
-				continue
-			}
 			var row string
-			if L < len(r.Solids) && i < len(r.Solids[L]) {
-				row = r.Solids[L][i]
+			if L < len(planes) && i < len(planes[L]) {
+				row = planes[L][i]
 			}
-			for j := 0; j < r.W; j++ {
-				x := atX + j
-				if x < 0 || x >= a.Width {
-					continue
-				}
-				c := byte(SolidAir)
+			for j := 0; j < w; j++ {
+				c := blank
 				if j < len(row) {
 					c = row[j]
 				}
-				a.setSolidCell(x, L, z, c)
+				set(atX+j, L, z, c)
 			}
 		}
 	}
-	a.trimTopAir()
+}
+
+// pasteLevelGrid stamps a captured level-tag rectangle into dest at (atX,atZ). Skips
+// entirely when both source and dest are trivial (all-auto/absent), preserving the
+// nil round-trip; otherwise materializes dest so the overwrite (auto included) lands.
+func (a *AreaDefinition) pasteLevelGrid(dest *[]string, src []string, atX, atZ int) {
+	if len(src) == 0 {
+		return
+	}
+	if len(*dest) == 0 && planeAllChar(src, PropLevelAuto) {
+		return
+	}
+	*dest = normalizeOptionalLayer(*dest, a.Width, a.Height, PropLevelAuto)
+	for i, row := range src {
+		z := atZ + i
+		if z < 0 || z >= len(*dest) {
+			continue
+		}
+		buf := []byte((*dest)[z])
+		for j := 0; j < len(row); j++ {
+			x := atX + j
+			if x < 0 || x >= len(buf) {
+				continue
+			}
+			buf[x] = row[j]
+		}
+		(*dest)[z] = string(buf)
+	}
+}
+
+// pasteRegionFaces stamps the region's face overrides at (atX,atZ) with overwrite
+// semantics: any dest override inside the paste rectangle is dropped first (a source
+// tile with no override means base skin), then the source's are remapped in-bounds.
+func (a *AreaDefinition) pasteRegionFaces(r TileRegion, atX, atZ int) {
+	if len(r.Faces) == 0 && len(a.FaceOverrides) == 0 {
+		return
+	}
+	x1, z1 := atX+r.W-1, atZ+r.H-1
+	kept := make([]FaceOverride, 0, len(a.FaceOverrides)+len(r.Faces))
+	for _, o := range a.FaceOverrides {
+		if o.X >= atX && o.X <= x1 && o.Z >= atZ && o.Z <= z1 {
+			continue // inside the paste rectangle — replaced below
+		}
+		kept = append(kept, o)
+	}
+	for _, o := range r.Faces {
+		dx, dz := o.X+atX, o.Z+atZ
+		if !a.InBounds(dx, dz) {
+			continue
+		}
+		o.X, o.Z = dx, dz
+		kept = append(kept, o)
+	}
+	// Keep the (Z,X) ordering FaceOverrides relies on for deterministic encoding.
+	sort.Slice(kept, func(i, j int) bool {
+		if kept[i].Z != kept[j].Z {
+			return kept[i].Z < kept[j].Z
+		}
+		return kept[i].X < kept[j].X
+	})
+	a.FaceOverrides = kept
+	a.faceOverrideIdx = nil // invalidate the lazy (x,z)->index lookup
 }

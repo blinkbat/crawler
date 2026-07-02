@@ -349,44 +349,22 @@ func entityHotkeyAt(i int) int32 {
 	return 0
 }
 
-// layerDisplayNames is the Layer→label table powering layerName.
-var layerDisplayNames = [layerCount]string{
-	LayerWalls:     "Faces",
-	LayerFloor:     "Floor",
-	LayerElevation: "Elevation",
-	LayerDecor:     "Decor",
-	LayerProps:     "Props",
-	LayerCeiling:   "Ceiling",
-	LayerEntities:  "Entities",
-}
-
+// layerName / layerAccent read the display label + color-code from layerDefs
+// (layerdef.go) — the accents echo each layer's palette family (floor=grass,
+// decor=teal, props=wood, ceiling=sky, elevation=stone-tan, entities=amber).
 func layerName(l Layer) string {
-	if int(l) < 0 || int(l) >= len(layerDisplayNames) {
-		panic("editor: layerName called with unhandled Layer — add it to layerDisplayNames")
+	if int(l) < 0 || int(l) >= layerCount {
+		panic("editor: layerName called with unhandled Layer")
 	}
-	return layerDisplayNames[l]
-}
-
-// layerAccentColors color-codes each layer (chip + border on the Layer selector
-// and one swatch per dropdown row) so the active layer reads at a glance. Hues
-// echo each layer's palette family: floor=grass, decor=teal, props=wood,
-// ceiling=sky, elevation=stone-tan, entities=amber.
-var layerAccentColors = [layerCount]rl.Color{
-	LayerWalls:     rl.NewColor(150, 148, 142, 255),
-	LayerFloor:     rl.NewColor(120, 184, 110, 255),
-	LayerDecor:     rl.NewColor(110, 186, 170, 255),
-	LayerProps:     rl.NewColor(200, 140, 82, 255),
-	LayerCeiling:   rl.NewColor(96, 150, 208, 255),
-	LayerElevation: rl.NewColor(198, 168, 120, 255),
-	LayerEntities:  rl.NewColor(214, 176, 96, 255),
+	return layerDefs[l].name
 }
 
 // layerAccent returns layer l's color-code (falls back to the active-border tint).
 func layerAccent(l Layer) rl.Color {
-	if int(l) < 0 || int(l) >= len(layerAccentColors) {
+	if int(l) < 0 || int(l) >= layerCount {
 		return editorBorderActive
 	}
-	return layerAccentColors[l]
+	return layerDefs[l].accent
 }
 
 // selectableLayers are the layers the author can make active (Tab-cycle, Alt+N,
@@ -639,7 +617,11 @@ type State struct {
 	modalCursor        int
 	modalFilename      string
 	modalRenaming      string
-	modalConfirmDelete bool
+	// modalRenamingActive is the Open-modal rename sub-mode flag. Separate from the
+	// modalRenaming text so backspacing the field to empty doesn't silently exit rename
+	// (the text can't double as the mode sentinel).
+	modalRenamingActive bool
+	modalConfirmDelete  bool
 	// modalPackIdx / modalChestIdx / modalDoorIdx index the spawn being edited in
 	// the corresponding modal; -1 outside the flow.
 	modalPackIdx  int
