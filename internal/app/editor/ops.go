@@ -559,16 +559,6 @@ func doorFacingForCell(a *core.AreaDefinition, x, z int) int {
 	return a.StartFacing
 }
 
-// firstUnusedName returns the first `format`-with-N (N from 1) not in `taken`.
-func firstUnusedName(taken map[string]bool, format string) string {
-	for i := 1; ; i++ {
-		name := fmt.Sprintf(format, i)
-		if !taken[name] {
-			return name
-		}
-	}
-}
-
 // nextDoorName picks an unused "door_N" placeholder. Names must be unique within
 // the map so runtime name resolution is unambiguous.
 func nextDoorName(spawns []core.DoorSpawn) string {
@@ -576,7 +566,7 @@ func nextDoorName(spawns []core.DoorSpawn) string {
 	for _, sp := range spawns {
 		taken[sp.Name] = true
 	}
-	return firstUnusedName(taken, "door_%d")
+	return uniqueID("door_", func(id string) bool { return taken[id] })
 }
 
 // removeSpawnsAt drops every spawn on (x, z), generic over spawn types via
@@ -1839,8 +1829,7 @@ func performNewMap(s *State, w, h int, floor byte) {
 	clearSelection(s) // new map — old selection coords no longer apply
 	// Reset Levels-panel / active-floor state (as openSelectedMap does) so a stale
 	// editLevel can't lift the first paint onto a nonexistent floor.
-	s.topLevel = maxAreaLevel(s.area)
-	s.bottomLevel = minAreaLevel(s.area)
+	s.topLevel, s.bottomLevel = surfaceLevelSpan(&s.area)
 	s.editLevel = clampLevel(s.area.ElevationLevelAt(s.area.StartTileX, s.area.StartTileZ))
 	s.levelHidden = [maxEditLevel + 1]bool{}
 	s.zoom = 1

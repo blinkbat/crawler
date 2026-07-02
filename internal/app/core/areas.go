@@ -150,6 +150,11 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	if !mapfile.InBoundsWH(mf.StartX, mf.StartZ, mf.Width, mf.Height) {
 		return AreaDefinition{}, oobErr("start position", mf.StartX, mf.StartZ, mf.Width, mf.Height)
 	}
+	// Entity bounds: shared with mapfile.validate() so the editor's direct-build
+	// path (which skips validate) rejects an off-map pack/chest/crystal/door too.
+	if err := mf.ValidateEntityBounds(); err != nil {
+		return AreaDefinition{}, err
+	}
 	customs := make([]CustomEnemyDef, 0, len(mf.CustomEnemies))
 	for _, ce := range mf.CustomEnemies {
 		def, err := CustomEnemyDefFromMap(ce)
@@ -160,9 +165,6 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	}
 	spawns := make([]PackSpawn, 0, len(mf.Packs))
 	for _, p := range mf.Packs {
-		if !mapfile.InBoundsWH(p.X, p.Z, mf.Width, mf.Height) {
-			return AreaDefinition{}, oobErr("pack", p.X, p.Z, mf.Width, mf.Height)
-		}
 		if len(p.Members) == 0 {
 			return AreaDefinition{}, fmt.Errorf("pack at (%d,%d) has no members", p.X, p.Z)
 		}
@@ -186,9 +188,6 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	}
 	chests := make([]ChestSpawn, 0, len(mf.Chests))
 	for _, c := range mf.Chests {
-		if !mapfile.InBoundsWH(c.X, c.Z, mf.Width, mf.Height) {
-			return AreaDefinition{}, oobErr("chest", c.X, c.Z, mf.Width, mf.Height)
-		}
 		// A chest on the player start would soft-lock the spawn (blocks the tile).
 		// Reject loudly here; placeChests silently drops it at runtime.
 		if c.X == mf.StartX && c.Z == mf.StartZ {
@@ -209,9 +208,6 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	// now-wrong cross-map target. Display sites resolve "self" to the area name.
 	doors := make([]DoorSpawn, 0, len(mf.Doors))
 	for _, d := range mf.Doors {
-		if !mapfile.InBoundsWH(d.X, d.Z, mf.Width, mf.Height) {
-			return AreaDefinition{}, oobErr(fmt.Sprintf("door %q", d.Name), d.X, d.Z, mf.Width, mf.Height)
-		}
 		facing, ok := facingFromName(d.Facing)
 		if !ok {
 			return AreaDefinition{}, fmt.Errorf("door %q has bad facing %q", d.Name, d.Facing)
@@ -515,13 +511,22 @@ func mapFacesFromArea(a AreaDefinition) []mapfile.MapFace {
 		}
 		out = append(out, mapfile.MapFace{X: o.X, Z: o.Z, Skins: sk})
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Z != out[j].Z {
-			return out[i].Z < out[j].Z
-		}
-		return out[i].X < out[j].X
-	})
+	sortByZX(out, func(f mapfile.MapFace) (int, int) { return f.X, f.Z })
 	return out
+}
+
+// sortByZX sorts entries by (Z, then X) ascending — the deterministic-encode order
+// FaceOverrides relies on. Single home for that comparator (shared by the
+// area→mapfile face export and region paste).
+func sortByZX[T any](s []T, xz func(T) (x, z int)) {
+	sort.Slice(s, func(i, j int) bool {
+		xi, zi := xz(s[i])
+		xj, zj := xz(s[j])
+		if zi != zj {
+			return zi < zj
+		}
+		return xi < xj
+	})
 }
 
 // --- Table-driven name <-> enum lookups ---
@@ -717,15 +722,13 @@ func FacingAwayFromAdjacentWall(m *AreaDefinition, x, z int) (facing int, found 
 	wall := func(nx, nz int) bool {
 		return m.WallAt(nx, nz) || m.ElevationLevelAt(nx, nz) > here
 	}
-	switch {
-	case wall(x, z-1):
-		return South, true // wall north → face south
-	case wall(x+1, z):
-		return West, true
-	case wall(x, z+1):
-		return North, true
-	case wall(x-1, z):
-		return East, true
+	// Walk cardinals in the canonical N→E→S→W order (same idiom as TileExposesFace)
+	// and face away from the first wall found — no hand-listed per-arm mapping.
+	for _, d := range CardinalDirs {
+		dx, dz := FacingVector(d)
+		if wall(x+dx, z+dz) {
+			return OppositeFacing(d), true
+		}
 	}
 	return 0, false
 }

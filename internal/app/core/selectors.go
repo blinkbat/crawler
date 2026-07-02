@@ -546,6 +546,27 @@ func AoEReachesEnemy(members []Enemy, skill SkillID, slot int) bool {
 	return true
 }
 
+// PreviewAoEHitsEnemy reports whether an all-enemy AoE skill highlighted in the Skill
+// submenu would land on the enemy at slot (the cue to chevron that foe). Gated on
+// Phase==BattlePlayer + ActionSkillMenu, reading the live SkillMenuList so the preview
+// tracks the same skill the cursor walks. Lives here (not render) so the menu-mode
+// gating shares core with the commit path — the renderer just consumes the bool.
+func PreviewAoEHitsEnemy(g *GameState, slot int) bool {
+	if g.Battle.Phase != BattlePlayer || g.Battle.ActionMode != ActionSkillMenu {
+		return false
+	}
+	if g.Battle.CurrentParty < 0 || g.Battle.CurrentParty >= len(g.Party) {
+		return false
+	}
+	skills := g.Battle.SkillMenuList
+	idx := g.Battle.SkillMenuIndex
+	if idx < 0 || idx >= len(skills) {
+		return false
+	}
+	skill := skills[idx]
+	return SkillTargetsAllEnemies(skill) && AoEReachesEnemy(BattleMembers(g), skill, slot)
+}
+
 // BattlePendingAttackIsMelee reports whether the targeted action is MELEE (basic
 // attack off the equipped weapon, skill off its reach class). Shared body for the
 // renderer (which can't import battle) and battle.battlePendingAttackMelee, which

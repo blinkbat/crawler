@@ -13,6 +13,15 @@ func selectedGlassTint(base rl.Color, t float64) rl.Color {
 	return core.MixColor(base, glassWarm, t)
 }
 
+// selectedGlassTint blend factors — "how warm is this selected surface." Named
+// alongside their siblings activeCardGlassTint (party.go) and levelUpRowGlassAlpha
+// (levelup.go) so the warmth of each highlighted glass surface lives in one place.
+const (
+	panelTabSelGlassTint  = 0.65 // active Tome panel tab
+	memberCardHiGlassTint = 0.9  // highlighted party-member card shell
+	skillNodeSelGlassTint = 0.5  // selected skill-tree node
+)
+
 // panelStatMeasureCache memoizes Stats-tab right-aligned value measures (change only on level-up/HP-spend/status).
 var panelStatMeasureCache measureCache
 
@@ -134,7 +143,7 @@ func drawPanelsBody(g *core.GameState, assets Resources) {
 		bg := glassMid
 		txt := textMuted
 		if active {
-			bg = selectedGlassTint(glassMid, 0.65)
+			bg = selectedGlassTint(glassMid, panelTabSelGlassTint)
 			txt = textPrimary
 		}
 		drawGlassPane(tx, tabRowY, tabW, tabH, bg)
@@ -383,7 +392,7 @@ var formationCardMetrics = cardIdentityMetrics{
 func drawMemberCardShell(rect rl.Rectangle, classCol rl.Color, highlight bool) {
 	cardBG := glassMid
 	if highlight {
-		cardBG = selectedGlassTint(glassMid, 0.9)
+		cardBG = selectedGlassTint(glassMid, memberCardHiGlassTint)
 	}
 	drawGlassPaneRect(rect, cardBG)
 	// Class accent rail flush to the left edge.

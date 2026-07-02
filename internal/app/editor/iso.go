@@ -107,13 +107,14 @@ func (s *State) ensureIsoRT(w, h int32) {
 	s.isoRTW, s.isoRTH = w, h
 }
 
-// isoLevelSpan returns the lowest+highest elevation level (columns draw relative
-// to the lowest).
-func isoLevelSpan(s *State) (minL, maxL int) {
+// areaLevelSpan returns the lowest+highest elevation level across every tile in ONE
+// pass; found=false for an empty area (no tiles). The single home for the level-extent
+// scan — callers apply their own default/clamp policy (isoLevelSpan, surfaceLevelSpan).
+func areaLevelSpan(a *core.AreaDefinition) (minL, maxL int, found bool) {
 	minL, maxL = 1<<30, -(1 << 30)
-	for z := 0; z < s.area.Height; z++ {
-		for x := 0; x < s.area.Width; x++ {
-			l := s.area.ElevationLevelAt(x, z)
+	for z := 0; z < a.Height; z++ {
+		for x := 0; x < a.Width; x++ {
+			l := a.ElevationLevelAt(x, z)
 			if l < minL {
 				minL = l
 			}
@@ -122,9 +123,16 @@ func isoLevelSpan(s *State) (minL, maxL int) {
 			}
 		}
 	}
-	if minL > maxL { // empty map
-		minL, maxL = 0, 0
+	if minL > maxL {
+		return 0, 0, false
 	}
+	return minL, maxL, true
+}
+
+// isoLevelSpan returns the lowest+highest elevation level (columns draw relative
+// to the lowest); an empty map collapses to (0,0).
+func isoLevelSpan(s *State) (minL, maxL int) {
+	minL, maxL, _ = areaLevelSpan(&s.area)
 	return minL, maxL
 }
 

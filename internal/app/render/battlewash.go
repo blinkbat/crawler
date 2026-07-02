@@ -23,6 +23,7 @@ const (
 	wipeZoomFovFloor   = float32(12)   // WipeZoom: FOV floor
 	wipeWobbleFreq     = float32(38)   // WipeWobble: oscillation frequency
 	wipeWobbleRoll     = float32(0.16) // WipeWobble: roll amplitude (radians)
+	wipeSpinRoll       = float32(0.6)  // WipeSpin: roll amplitude at entry (radians)
 	wipeTintMaxAlpha   = float32(0.6)  // WipeTint: peak overlay opacity at entry
 	wipeVignetteAlpha  = float32(0.92) // WipeVignette: dark-iris ring opacity
 	wipeWobbleFovDip   = float32(6)    // WipeWobble: FOV breathing coupled to the roll oscillation
@@ -66,7 +67,7 @@ func battleWipeCamera(g *core.GameState, dir rl.Vector3, fov float32) (rl.Vector
 			fov = wipeZoomFovFloor
 		}
 	case core.WipeSpin:
-		up = wipeRollUp(dir, r*0.6)
+		up = wipeRollUp(dir, r*wipeSpinRoll)
 	case core.WipeWobble:
 		osc := float32(math.Sin(float64(t*wipeWobbleFreq))) * r
 		up = wipeRollUp(dir, osc*wipeWobbleRoll)

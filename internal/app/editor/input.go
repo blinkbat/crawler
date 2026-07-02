@@ -275,38 +275,28 @@ func stepEditLevel(s *State, dir int) {
 	s.flash("Active level " + signedLevelLabel(s.editLevel))
 }
 
-// maxAreaLevel / minAreaLevel return the highest / lowest elevation level any
-// tile uses, clamped to range; both default to the ground baseline for a flat map.
-func maxAreaLevel(a core.AreaDefinition) int {
-	hi := core.ElevationBaseline
-	for z := 0; z < a.Height; z++ {
-		for x := 0; x < a.Width; x++ {
-			if l := a.ElevationLevelAt(x, z); l > hi {
-				hi = l
-			}
-		}
+// surfaceLevelSpan returns the clamped highest/lowest levels for the Levels-panel
+// range: the ground baseline is always included (a flat/empty map collapses both to
+// it), so the panel never opens below/above the terrain. One scan via areaLevelSpan.
+func surfaceLevelSpan(a *core.AreaDefinition) (top, bottom int) {
+	lo, hi, found := areaLevelSpan(a)
+	if !found {
+		return clampLevel(core.ElevationBaseline), clampLevel(core.ElevationBaseline)
 	}
-	return clampLevel(hi)
-}
-
-func minAreaLevel(a core.AreaDefinition) int {
-	lo := core.ElevationBaseline
-	for z := 0; z < a.Height; z++ {
-		for x := 0; x < a.Width; x++ {
-			if l := a.ElevationLevelAt(x, z); l < lo {
-				lo = l
-			}
-		}
+	if hi < core.ElevationBaseline {
+		hi = core.ElevationBaseline
 	}
-	return clampLevel(lo)
+	if lo > core.ElevationBaseline {
+		lo = core.ElevationBaseline
+	}
+	return clampLevel(hi), clampLevel(lo)
 }
 
 // surfaceAreaLevels sets the Levels-panel range to span every level the area
 // uses and puts the active floor on the start tile (not level 0, a pit below the
 // baseline), revealing all levels. Shared by Open and the default-map load.
 func surfaceAreaLevels(s *State) {
-	s.topLevel = maxAreaLevel(s.area)
-	s.bottomLevel = minAreaLevel(s.area)
+	s.topLevel, s.bottomLevel = surfaceLevelSpan(&s.area)
 	s.editLevel = clampLevel(s.area.ElevationLevelAt(s.area.StartTileX, s.area.StartTileZ))
 	s.levelHidden = [maxEditLevel + 1]bool{}
 }
@@ -1539,19 +1529,11 @@ func updateDoorEditModal(s *State) Action {
 			s.focus = focusDoorTargetDoor
 			return ActionNone
 		case doorHitFacing:
-			if door.Facing != hit.facing { // re-picking the current facing shouldn't bank undo/dirty
-				pushUndo(s)
-				door.Facing = hit.facing
-				s.dirty = true
-			}
+			setIfChanged(s, &door.Facing, hit.facing) // re-picking the current facing shouldn't bank undo/dirty
 			s.focus = focusNone
 			return ActionNone
 		case doorHitStyle:
-			if door.Style != hit.style {
-				pushUndo(s)
-				door.Style = hit.style
-				s.dirty = true
-			}
+			setIfChanged(s, &door.Style, hit.style)
 			s.focus = focusNone
 			return ActionNone
 		case doorHitDelete:
@@ -1591,22 +1573,14 @@ func updateDoorEditModal(s *State) Action {
 	// N/E/S/W set facing ('S' is free here — Ctrl+S Save doesn't fire in modals).
 	for _, fk := range doorFacingKeys {
 		if rl.IsKeyPressed(fk.key) {
-			if door.Facing != fk.facing { // no undo/dirty churn when re-setting the current facing
-				pushUndo(s)
-				door.Facing = fk.facing
-				s.dirty = true
-			}
+			setIfChanged(s, &door.Facing, fk.facing) // no undo/dirty churn when re-setting the current facing
 			return ActionNone
 		}
 	}
 	// 1/2/3 set the door style (building / cave / field).
 	for _, sk := range doorStyleKeys {
 		if rl.IsKeyPressed(sk.key) {
-			if door.Style != sk.style {
-				pushUndo(s)
-				door.Style = sk.style
-				s.dirty = true
-			}
+			setIfChanged(s, &door.Style, sk.style)
 			return ActionNone
 		}
 	}

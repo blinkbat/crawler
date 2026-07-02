@@ -329,10 +329,5 @@ func deleteSpawnAt(s *State, x, z int, noun string, remove func() (changed bool)
 
 // setStartFacing writes StartFacing. No-op on no change (no undo/dirty churn).
 func setStartFacing(s *State, dir int) {
-	if s.area.StartFacing == dir {
-		return
-	}
-	pushUndo(s)
-	s.area.StartFacing = dir
-	s.dirty = true
+	setIfChanged(s, &s.area.StartFacing, dir)
 }

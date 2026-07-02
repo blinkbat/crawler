@@ -197,15 +197,24 @@ func (t treeModel) draw(center rl.Vector3, scale, yaw float32) {
 		offset := rotateOffsetY(part.offset, scale, yaw)
 		position := rl.NewVector3(center.X+offset.X, center.Y+offset.Y, center.Z+offset.Z)
 		drawScale := rl.NewVector3(part.scale.X*scale, part.scale.Y*scale, part.scale.Z*scale)
-		axis := partRotationAxis(part)
-		rotation := part.rotation
-		if isVerticalAxis(part.rotationAxis) {
-			rotation += yaw
-		} else {
-			axis = yawedTiltAxis(axis, yaw)
-		}
-		rl.DrawModelEx(t.models[part.modelIdx], position, axis, rotation, drawScale, part.tint)
+		drawYawedPart(t.models[part.modelIdx], position, drawScale, part, yaw, part.tint)
 	}
+}
+
+// drawYawedPart draws one part at position, composing yaw into either the part's
+// rotation (vertical axis) or its tilt axis (yawedTiltAxis). Single home for the
+// yaw-compose + DrawModelEx tail shared by the tree and prop draw loops.
+func drawYawedPart(model rl.Model, position, drawScale rl.Vector3, part treePart, yaw float32, tint color.RGBA) {
+	axis := partRotationAxis(part)
+	rotation := part.rotation
+	if isVerticalAxis(part.rotationAxis) {
+		rotation += yaw
+	} else {
+		// Tilted parts must yaw their tilt AXIS too, else the mesh keeps a
+		// world-fixed orientation while its position swings.
+		axis = yawedTiltAxis(axis, yaw)
+	}
+	rl.DrawModelEx(model, position, axis, rotation, drawScale, tint)
 }
 
 // yawedTiltAxis rotates a part's tilt axis around world-up by yaw degrees.
@@ -369,16 +378,7 @@ func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32
 		offset := rotateOffsetY(rl.NewVector3(offX, offsetY, offZ), overall, yaw)
 		position := rl.NewVector3(center.X+offset.X, center.Y+offset.Y, center.Z+offset.Z)
 		drawScale := rl.NewVector3(part.scale.X*pv.sx*overall, part.scale.Y*pv.sy*trunkYScale*overall, part.scale.Z*pv.sz*overall)
-		axis := partRotationAxis(part)
-		rotation := part.rotation
-		if isVerticalAxis(part.rotationAxis) {
-			rotation += yaw
-		} else {
-			// Tilted parts compose yaw via the rotated tilt axis (yawedTiltAxis)
-			// so they swing with the tree and tip tufts stay glued to their boughs.
-			axis = yawedTiltAxis(axis, yaw)
-		}
-		rl.DrawModelEx(t.models[part.modelIdx], position, axis, rotation, drawScale, pv.tint)
+		drawYawedPart(t.models[part.modelIdx], position, drawScale, part, yaw, pv.tint)
 	}
 }
 
@@ -482,16 +482,7 @@ func (p propModel) draw(center rl.Vector3, scale, yaw float32) {
 			position.Z += swayZ * lean
 		}
 		drawScale := rl.NewVector3(part.scale.X*scale, part.scale.Y*scale, part.scale.Z*scale)
-		axis := partRotationAxis(part)
-		rotation := part.rotation
-		if isVerticalAxis(part.rotationAxis) {
-			rotation += yaw
-		} else {
-			// Tilted parts must yaw their tilt AXIS too, else the mesh keeps a
-			// world-fixed orientation while its position swings. Mirrors treeModel.
-			axis = yawedTiltAxis(axis, yaw)
-		}
-		rl.DrawModelEx(p.models[part.modelIdx], position, axis, rotation, drawScale, part.tint)
+		drawYawedPart(p.models[part.modelIdx], position, drawScale, part, yaw, part.tint)
 	}
 }
 

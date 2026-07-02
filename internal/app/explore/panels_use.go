@@ -9,10 +9,6 @@ import (
 // heals). When a recipient is needed both route through one shared ally-target
 // sub-modal of the living members; party-wide heals skip it and apply to everyone.
 
-// noCaster is the "no pending caster" sentinel for g.UsePendingCaster (an item is
-// pending). A real caster is a valid party seat (>= 0).
-const noCaster = -1
-
 // validMember resolves idx to a live *g.Party pointer (ok=false when out of range).
 func validMember(g *core.GameState, idx int) (*core.PartyMember, bool) {
 	if !core.PartyIndexInRange(g.Party, idx) {
@@ -149,9 +145,9 @@ func anyMemberBelowFull(g *core.GameState) bool {
 // close / tab switch.
 func closeHealPick(g *core.GameState) {
 	g.HealPickOpen = false
-	// noCaster, not 0: readers treat caster < 0 as "no caster" and bail; 0 is a
+	// core.NoIndex, not 0: readers treat caster < 0 as "no caster" and bail; 0 is a
 	// valid party index that would linger in a closed picker.
-	g.HealPickCaster = noCaster
+	g.HealPickCaster = core.NoIndex
 	g.HealPickCursor = 0
 }
 
@@ -252,7 +248,7 @@ func setUseTarget(g *core.GameState, open bool, cursor int, item core.ItemKind, 
 
 // openUseTargetForItem opens the ally-target picker carrying a pending item.
 func openUseTargetForItem(g *core.GameState, kind core.ItemKind) {
-	setUseTarget(g, true, 0, kind, core.SkillNone, noCaster)
+	setUseTarget(g, true, 0, kind, core.SkillNone, core.NoIndex)
 }
 
 // openUseTargetForSkill opens the picker carrying a pending single-target heal
@@ -264,5 +260,5 @@ func openUseTargetForSkill(g *core.GameState, caster int, skill core.SkillID) {
 // closeUseTarget dismisses the ally-target picker and clears its pending state.
 // Called on apply, Back, and overlay close / tab switch.
 func closeUseTarget(g *core.GameState) {
-	setUseTarget(g, false, 0, core.ItemNone, core.SkillNone, noCaster)
+	setUseTarget(g, false, 0, core.ItemNone, core.SkillNone, core.NoIndex)
 }

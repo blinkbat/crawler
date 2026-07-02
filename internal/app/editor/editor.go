@@ -1,5 +1,6 @@
-// Package editor is the in-game map authoring tool: six paintable grid layers
-// (walls / floor / decor / props / ceiling / elevation) plus entities.
+// Package editor is the in-game map authoring tool: five paintable grid layers
+// (floor / decor / props / ceiling / elevation) plus per-tile faces (set from the
+// right-click context menu, not a paint layer) and entities.
 package editor
 
 import (
@@ -268,6 +269,15 @@ var entityBrushColors = map[core.EnemyKind]rl.Color{
 	core.EnemySkeleton:     rl.NewColor(230, 226, 198, 255),
 }
 
+// entityBrushColor returns kind's swatch tint, or the grey fallback for an unmapped
+// kind. Single home for the lookup+fallback (the palette build and the pack marker).
+func entityBrushColor(kind core.EnemyKind) rl.Color {
+	if col, ok := entityBrushColors[kind]; ok {
+		return col
+	}
+	return entityFallbackColor
+}
+
 // init asserts entityBrushColors covers every enemy kind, and that the Prop/Decor
 // palettes carry a brush for every core prop/decor char — add a prop/decor in core
 // and forget the palette here and it silently never appears in the editor.
@@ -305,16 +315,12 @@ func buildEntityBrushes() []Brush {
 	// slot runs across entityBrushHotkeys: enemies first, then each trailing brush.
 	slot := 0
 	for _, def := range defs {
-		col, ok := entityBrushColors[def.Kind]
-		if !ok {
-			col = entityFallbackColor
-		}
 		brushes = append(brushes, Brush{
 			Name:      "Add " + def.SingularName,
 			Entity:    entityAddEnemy,
 			EnemyKind: def.Kind,
 			Hotkey:    entityHotkeyAt(slot),
-			Color:     col,
+			Color:     entityBrushColor(def.Kind),
 		})
 		slot++
 	}
@@ -373,18 +379,21 @@ func layerAccent(l Layer) rl.Color {
 var selectableLayers = []Layer{LayerFloor, LayerDecor, LayerProps, LayerCeiling, LayerElevation, LayerEntities}
 
 // cycleSelectableLayer returns the next (+1) / previous (-1) selectable layer,
-// wrapping. Skips the unselectable LayerWalls.
+// wrapping. Skips the unselectable LayerWalls (absent from selectableLayers).
 func cycleSelectableLayer(cur Layer, dir int) Layer {
-	n := len(selectableLayers)
-	idx := 0
-	for i, l := range selectableLayers {
-		if l == cur {
-			idx = i
-			break
-		}
+	return cycleByIndex(selectableLayers, cur, dir)
+}
+
+// setIfChanged writes v to *dst only when it differs, banking one undo snapshot and
+// marking the map dirty — the single home for the "re-picking the current value must
+// not churn undo/dirty" field-setter idiom. Callers guard nil containers first.
+func setIfChanged[T comparable](s *State, dst *T, v T) {
+	if *dst == v {
+		return
 	}
-	idx = ((idx+dir)%n + n) % n
-	return selectableLayers[idx]
+	pushUndo(s)
+	*dst = v
+	s.dirty = true
 }
 
 type focusField int

@@ -1,9 +1,11 @@
 package core
 
 import (
+	"crawler/internal/app/core/mapfile"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -150,20 +152,14 @@ func SaveGame(g *GameState) error {
 	return atomicWriteFile(SavePath(), blob)
 }
 
-// atomicWriteFile stages blob in a sibling ".tmp" then renames it over path.
-// os.Rename is atomic on a single volume, so a crash mid-write leaves the PRIOR
-// file intact instead of a truncated, undecodable blob. Best-effort temp cleanup
-// on rename failure. The parent dir must already exist.
+// atomicWriteFile stages blob in a sibling ".tmp" then renames it over path — the
+// blob-shaped adapter over mapfile.AtomicWrite (the single home for the temp-then-
+// rename pattern). The parent dir must already exist.
 func atomicWriteFile(path string, blob []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, blob, AssetFileMode); err != nil {
+	return mapfile.AtomicWrite(path, func(w io.Writer) error {
+		_, err := w.Write(blob)
 		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
+	})
 }
 
 // SaveExists reports whether a readable save file is present — gates the

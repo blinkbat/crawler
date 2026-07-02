@@ -4,7 +4,6 @@ import (
 	"crawler/internal/app/core"
 	"fmt"
 	"image/color"
-	"math"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -984,7 +983,7 @@ func drawBattleSplash(g *core.GameState, assets Resources) {
 	if g.Battle.Splash < splashExitDur {
 		exitT = g.Battle.Splash / splashExitDur
 	}
-	intro := easeOutBack(enterT)
+	intro := core.EaseOutBack(enterT)
 	overall := exitT
 
 	text := core.BattleEncounterTitle(g)
@@ -1025,15 +1024,3 @@ func drawBattleSplash(g *core.GameState, assets Resources) {
 // splashTitleMeasureCache memoizes the splash title measure across the splash window.
 var splashTitleMeasureCache measureCache
 
-func easeOutBack(t float32) float32 {
-	if t <= 0 {
-		return 0
-	}
-	if t >= 1 {
-		return 1
-	}
-	const c1 = 1.70158
-	const c3 = c1 + 1
-	x := float64(t) - 1
-	return float32(1 + c3*math.Pow(x, 3) + c1*math.Pow(x, 2))
-}

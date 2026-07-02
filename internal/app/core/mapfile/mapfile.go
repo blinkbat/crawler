@@ -991,6 +991,40 @@ func (mf *MapFile) oobErr(what string, x, z int) error {
 	return fmt.Errorf("%s at (%d,%d) outside map %dx%d", what, x, z, mf.Width, mf.Height)
 }
 
+// ValidateEntityBounds checks every placed entity (pack/chest/crystal/door) sits
+// in-bounds. The single home for that check: validate() calls it on the load path,
+// and core.AreaFromMapFile — the editor's direct build path, which skips validate() —
+// calls it too, so neither path re-codes the bounds test (mirrors ValidateGridDims).
+func (mf *MapFile) ValidateEntityBounds() error {
+	inb := func(what string, x, z int) error {
+		if !InBoundsWH(x, z, mf.Width, mf.Height) {
+			return mf.oobErr(what, x, z)
+		}
+		return nil
+	}
+	for _, p := range mf.Packs {
+		if err := inb("pack", p.X, p.Z); err != nil {
+			return err
+		}
+	}
+	for _, c := range mf.Chests {
+		if err := inb("chest", c.X, c.Z); err != nil {
+			return err
+		}
+	}
+	for _, c := range mf.Crystals {
+		if err := inb("crystal", c.X, c.Z); err != nil {
+			return err
+		}
+	}
+	for _, d := range mf.Doors {
+		if err := inb(fmt.Sprintf("door %q", d.Name), d.X, d.Z); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // MaxFloorLevel is the highest floor an entity's @N section may name — the level
 // MaxLevelChar ('K') encodes (0..20), the same alphabet as elevation/prop levels.
 const MaxFloorLevel = 20
@@ -1090,12 +1124,13 @@ func (mf *MapFile) validate() error {
 	if !IsFacingName(mf.StartFace) {
 		return fmt.Errorf("start facing %q invalid", mf.StartFace)
 	}
-	// Pack/chest bounds checked here (not in the parser) so a typo surfaces at
-	// load rather than as a silently-skipped entry at runtime.
+	// Entity bounds checked here (not in the parser) so a typo surfaces at load
+	// rather than as a silently-skipped entry at runtime. Shared with the editor's
+	// direct-AreaFromMapFile path via ValidateEntityBounds.
+	if err := mf.ValidateEntityBounds(); err != nil {
+		return err
+	}
 	for _, p := range mf.Packs {
-		if !InBoundsWH(p.X, p.Z, mf.Width, mf.Height) {
-			return mf.oobErr("pack", p.X, p.Z)
-		}
 		if err := mf.validateFloor("pack", p.Level, p.X, p.Z); err != nil {
 			return err
 		}
@@ -1111,9 +1146,6 @@ func (mf *MapFile) validate() error {
 		}
 	}
 	for _, c := range mf.Chests {
-		if !InBoundsWH(c.X, c.Z, mf.Width, mf.Height) {
-			return mf.oobErr("chest", c.X, c.Z)
-		}
 		if err := mf.validateFloor("chest", c.Level, c.X, c.Z); err != nil {
 			return err
 		}
@@ -1126,11 +1158,7 @@ func (mf *MapFile) validate() error {
 			}
 		}
 	}
-	// Crystals: same bounds guard as packs/chests.
 	for _, c := range mf.Crystals {
-		if !InBoundsWH(c.X, c.Z, mf.Width, mf.Height) {
-			return mf.oobErr("crystal", c.X, c.Z)
-		}
 		if err := mf.validateFloor("crystal", c.Level, c.X, c.Z); err != nil {
 			return err
 		}
@@ -1139,9 +1167,6 @@ func (mf *MapFile) validate() error {
 	// by name, so duplicates would be ambiguous).
 	seenNames := make(map[string]struct{}, len(mf.Doors))
 	for _, d := range mf.Doors {
-		if !InBoundsWH(d.X, d.Z, mf.Width, mf.Height) {
-			return mf.oobErr(fmt.Sprintf("door %q", d.Name), d.X, d.Z)
-		}
 		if err := mf.validateFloor(fmt.Sprintf("door %q", d.Name), d.Level, d.X, d.Z); err != nil {
 			return err
 		}
@@ -1546,6 +1571,25 @@ func writeVerbatimSection(bw *bufio.Writer, name string, rows []string) {
 	}
 }
 
+// writeLeveledSection emits items grouped into per-floor "section@N" blocks
+// (ascending; base level-0 block forced when forceBase). Single home for the
+// pack/chest/door/crystal emit scaffold — emit writes one row and may error
+// (the door target guard is the only caller that does).
+func writeLeveledSection[T any](bw *bufio.Writer, section string, items []T, levelOf func(T) int, forceBase bool, emit func(*bufio.Writer, T) error) error {
+	for _, lvl := range entityLevels(len(items), func(i int) int { return levelOf(items[i]) }, forceBase) {
+		fmt.Fprintln(bw, leveledSectionName(section, lvl)+":")
+		for _, e := range items {
+			if levelOf(e) != lvl {
+				continue
+			}
+			if err := emit(bw, e); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // Encode writes mf in the canonical .map format; fixed layer order so maps diff cleanly.
 func (mf MapFile) Encode(w io.Writer) error {
 	bw := bufio.NewWriter(w)
@@ -1587,12 +1631,8 @@ func (mf MapFile) Encode(w io.Writer) error {
 	// enemies/chests: base section ALWAYS emitted (level 0, possibly empty); each
 	// higher floor with packs/chests appends an "@N" section. Single-floor maps
 	// have only level-0 entities, so output is byte-identical to the legacy form.
-	for _, lvl := range entityLevels(len(mf.Packs), func(i int) int { return mf.Packs[i].Level }, true) {
-		fmt.Fprintln(bw, leveledSectionName(SectionEnemies, lvl)+":")
-		for _, p := range mf.Packs {
-			if p.Level != lvl {
-				continue
-			}
+	if err := writeLeveledSection(bw, SectionEnemies, mf.Packs, func(p MapPack) int { return p.Level }, true,
+		func(bw *bufio.Writer, p MapPack) error {
 			// Single-member packs encode as the legacy "kind X Z" line; the AI column
 			// is appended only when non-default, so stationary packs stay 3 fields.
 			members := encodePackMembers(p.Members, p.BackCount)
@@ -1602,29 +1642,25 @@ func (mf MapFile) Encode(w io.Writer) error {
 			} else {
 				fmt.Fprintf(bw, packEncodeFormat, members, p.X, p.Z, ai)
 			}
-		}
+			return nil
+		}); err != nil {
+		return err
 	}
-	for _, lvl := range entityLevels(len(mf.Chests), func(i int) int { return mf.Chests[i].Level }, true) {
-		fmt.Fprintln(bw, leveledSectionName(SectionChests, lvl)+":")
-		for _, c := range mf.Chests {
-			if c.Level != lvl {
-				continue
-			}
+	if err := writeLeveledSection(bw, SectionChests, mf.Chests, func(c MapChest) int { return c.Level }, true,
+		func(bw *bufio.Writer, c MapChest) error {
 			token := EmptyChestToken
 			if len(c.Items) > 0 {
 				token = strings.Join(c.Items, ",")
 			}
 			fmt.Fprintf(bw, chestEncodeFormat, token, c.X, c.Z)
-		}
+			return nil
+		}); err != nil {
+		return err
 	}
 	// doors: appended only for floors that have a door (missing ⇒ zero-doors,
 	// byte-identical). Level 0 is NOT forced — a door-free map writes nothing.
-	for _, lvl := range entityLevels(len(mf.Doors), func(i int) int { return mf.Doors[i].Level }, false) {
-		fmt.Fprintln(bw, leveledSectionName(SectionDoors, lvl)+":")
-		for _, d := range mf.Doors {
-			if d.Level != lvl {
-				continue
-			}
+	if err := writeLeveledSection(bw, SectionDoors, mf.Doors, func(d MapDoor) int { return d.Level }, false,
+		func(bw *bufio.Writer, d MapDoor) error {
 			// Refuse a door without a complete destination — it would emit a row the
 			// parser collapses to too few fields and rejects on reload. validate()
 			// already enforces HasTarget(); mirror it here so a direct Encode (which
@@ -1637,19 +1673,19 @@ func (mf MapFile) Encode(w io.Writer) error {
 				style = DoorStyleBuildingName
 			}
 			fmt.Fprintf(bw, doorEncodeFormat, d.Name, d.TargetMap, d.TargetDoor, d.X, d.Z, d.Facing, style)
-		}
+			return nil
+		}); err != nil {
+		return err
 	}
 	// crystals: base section emits when defined at all (CrystalsDefined OR a row),
 	// so a legacy map stays byte-identical; higher floors append "@N". Rows are
 	// position-only; charge state lives in SaveData.
-	for _, lvl := range entityLevels(len(mf.Crystals), func(i int) int { return mf.Crystals[i].Level }, mf.CrystalsDefined) {
-		fmt.Fprintln(bw, leveledSectionName(SectionCrystals, lvl)+":")
-		for _, c := range mf.Crystals {
-			if c.Level != lvl {
-				continue
-			}
+	if err := writeLeveledSection(bw, SectionCrystals, mf.Crystals, func(c MapCrystal) int { return c.Level }, mf.CrystalsDefined,
+		func(bw *bufio.Writer, c MapCrystal) error {
 			fmt.Fprintf(bw, crystalEncodeFormat, c.X, c.Z)
-		}
+			return nil
+		}); err != nil {
+		return err
 	}
 	// custom_enemies: emits only when present (byte-identical otherwise). Order on
 	// MapCustomEnemy, matching parseCustomEnemyLine.
@@ -1676,24 +1712,19 @@ func Load(path string) (MapFile, error) {
 	return Parse(f)
 }
 
-func Save(path string, mf MapFile) error {
-	// Validate BEFORE touching disk — same check Parse runs, so a saved map reloads.
-	if err := mf.validate(); err != nil {
-		return fmt.Errorf("refusing to save invalid map %q: %w", path, err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), AssetDirMode); err != nil {
-		return err
-	}
-	// Write to a sibling temp file and rename over the target: an I/O failure
-	// mid-encode (disk full, network drive) must not destroy the prior good map.
+// AtomicWrite stages the bytes produced by write into a sibling ".tmp" then renames
+// it over path. os.Rename is atomic on a single volume, so a crash mid-write leaves
+// the PRIOR file intact instead of a truncated one. The close/flush error is captured
+// (a deferred Close would swallow it), preferring write's error if both fire; the temp
+// is cleaned up best-effort on failure. The parent dir must already exist. Single home
+// for the temp-then-rename pattern — the map encoder and core's save-blob writer share it.
+func AtomicWrite(path string, write func(io.Writer) error) error {
 	tmp := path + ".tmp"
 	f, err := os.Create(tmp)
 	if err != nil {
 		return err
 	}
-	// Capture the close error too — a deferred Close would swallow flush failures
-	// (network drive, quota). Prefer the encode error if both fire.
-	err = mf.Encode(f)
+	err = write(f)
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -1702,6 +1733,18 @@ func Save(path string, mf MapFile) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+func Save(path string, mf MapFile) error {
+	// Validate BEFORE touching disk — same check Parse runs, so a saved map reloads.
+	if err := mf.validate(); err != nil {
+		return fmt.Errorf("refusing to save invalid map %q: %w", path, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), AssetDirMode); err != nil {
+		return err
+	}
+	// I/O failure mid-encode (disk full, network drive) must not destroy the prior good map.
+	return AtomicWrite(path, mf.Encode)
 }
 
 // mapDirEntries returns dir's non-dir .map entries (case-insensitive) — the shared

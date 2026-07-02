@@ -824,6 +824,7 @@ const (
 	// (like the ArcBolt row above) so the tier table reads as data, not bare floats.
 	// Magnitudes differ by skill, so these are per-skill rather than one shared bump.
 	SmiteTierStunChance        = 0.25 // Smite T3 stun roll
+	CrushingBlowTierStunBump   = 0.15 // Crushing Blow T2 stun bump
 	FrostLanceTierStunChance   = 0.15 // Frost Lance T2 stun roll
 	StealTierChanceBump        = 0.15 // Steal T1/T2 / Mug T2 success bump
 	VenomStrikeTierPoisonBump  = 0.15 // Venom Strike T1 poison bump

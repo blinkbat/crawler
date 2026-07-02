@@ -273,10 +273,8 @@ func openDialogChoiceEditModal(s *State, choiceIdx int) {
 
 func dialogSpeakerEntries(s *State) []dropdownEntry {
 	return fieldEntries(core.DialogSpeakerIDs(), core.DialogSpeakerName, func(s *State, id core.DialogSpeakerID) {
-		if n := currentDialogNode(s); n != nil && n.SpeakerID != id {
-			pushUndo(s)
-			n.SpeakerID = id
-			s.dirty = true
+		if n := currentDialogNode(s); n != nil {
+			setIfChanged(s, &n.SpeakerID, id)
 		}
 	})
 }
@@ -427,20 +425,16 @@ func dialogCondKindEntries(s *State) []dropdownEntry {
 
 func dialogQuestStatusEntries(s *State) []dropdownEntry {
 	return fieldEntries([]core.QuestStatus{core.QuestActive, core.QuestComplete}, questStatusLabel, func(s *State, qs core.QuestStatus) {
-		if c := currentDialogCond(s); c != nil && c.QuestStatus != qs {
-			pushUndo(s)
-			c.QuestStatus = qs
-			s.dirty = true
+		if c := currentDialogCond(s); c != nil {
+			setIfChanged(s, &c.QuestStatus, qs)
 		}
 	})
 }
 
 func dialogCondFoeEntries(s *State) []dropdownEntry {
 	return enemyKindEntries(func(s *State, kind core.EnemyKind) {
-		if c := currentDialogCond(s); c != nil && c.FoeKind != kind {
-			pushUndo(s)
-			c.FoeKind = kind
-			s.dirty = true
+		if c := currentDialogCond(s); c != nil {
+			setIfChanged(s, &c.FoeKind, kind)
 		}
 	})
 }
@@ -469,10 +463,8 @@ func dialogTriggerDialogEntries(s *State) []dropdownEntry {
 
 func dialogTriggerFoeEntries(s *State) []dropdownEntry {
 	return enemyKindEntries(func(s *State, kind core.EnemyKind) {
-		if t := currentDialogTrigger(s); t != nil && t.FoeKind != kind {
-			pushUndo(s)
-			t.FoeKind = kind
-			s.dirty = true
+		if t := currentDialogTrigger(s); t != nil {
+			setIfChanged(s, &t.FoeKind, kind)
 		}
 	})
 }
@@ -1510,6 +1502,109 @@ func returnToDialogChoiceEdit(s *State) {
 	clearDialogFocus(s)
 }
 
+// dialogEditRowKind selects how one variable row of the cond/trigger edit modal
+// renders and responds to a click.
+type dialogEditRowKind int
+
+const (
+	rowNumeric  dialogEditRowKind = iota // numeric text field (shared s.dialogNumBuf)
+	rowText                              // plain text field
+	rowDropdown                          // button that opens a field dropdown
+)
+
+// dialogEditRow describes one variable row of the cond/trigger edit modal — enough
+// for BOTH the draw pass and the click hit-test, so the per-kind field layout lives
+// in one builder (dialogCondRows/dialogTrigRows) instead of a switch duplicated
+// across draw+update. Add a cond/trigger kind ⇒ edit ONE builder, not four switches.
+type dialogEditRow struct {
+	kind  dialogEditRowKind
+	label string
+	focus focusField    // rowNumeric/rowText: the focus this row takes
+	value int           // rowNumeric: current value (numFieldText + focusDialogNumeric)
+	text  string        // rowText: field text · rowDropdown: button label
+	dd    dropdownOwner // rowDropdown: which field dropdown opens
+}
+
+// dialogCondRows returns the variable rows for the current condition kind (draw+click).
+func dialogCondRows(c *core.DialogChoiceCondition) []dialogEditRow {
+	switch c.Kind {
+	case core.DialogCondGold:
+		return []dialogEditRow{{kind: rowNumeric, label: "Minimum gold the party must hold", focus: focusDialogCondGold, value: c.Gold}}
+	case core.DialogCondQuest:
+		return []dialogEditRow{
+			{kind: rowText, label: "Quest id", focus: focusDialogCondQuestID, text: c.QuestID},
+			{kind: rowDropdown, label: "Required status (click to choose)", text: questStatusLabel(c.QuestStatus), dd: ddDialogQuestStatus},
+		}
+	case core.DialogCondFoeKilled:
+		return []dialogEditRow{
+			{kind: rowDropdown, label: "Foe (click to choose)", text: core.FoeKindName(c.FoeKind), dd: ddDialogCondFoe},
+			{kind: rowNumeric, label: "Kills required (0 = at least one)", focus: focusDialogCondFoeKills, value: c.FoeKills},
+		}
+	case core.DialogCondTileVisited:
+		return []dialogEditRow{
+			{kind: rowNumeric, label: "Tile X", focus: focusDialogCondTileX, value: c.TileX},
+			{kind: rowNumeric, label: "Tile Z", focus: focusDialogCondTileZ, value: c.TileZ},
+		}
+	}
+	panic("editor: dialogCondRows has no case for dialog condition kind " + string(c.Kind))
+}
+
+// dialogTrigRows returns the variable rows for the current trigger kind (draw+click).
+func dialogTrigRows(s *State, t *core.DialogTrigger) []dialogEditRow {
+	switch t.Kind {
+	case core.DialogTriggerEnterTile:
+		return []dialogEditRow{
+			{kind: rowNumeric, label: "Tile X", focus: focusDialogTrigTileX, value: t.TileX},
+			{kind: rowNumeric, label: "Tile Z", focus: focusDialogTrigTileZ, value: t.TileZ},
+		}
+	case core.DialogTriggerEnterLocation:
+		return []dialogEditRow{{kind: rowDropdown, label: "Location (click to choose)", text: triggerLocationButtonLabel(s, t.LocationID), dd: ddDialogTriggerLocation}}
+	case core.DialogTriggerFoeKilled:
+		return []dialogEditRow{
+			{kind: rowDropdown, label: "Foe (click to choose)", text: core.FoeKindName(t.FoeKind), dd: ddDialogTriggerFoe},
+			{kind: rowNumeric, label: "Kills required (0 = at least one)", focus: focusDialogTrigFoeKills, value: t.FoeKills},
+		}
+	}
+	panic("editor: dialogTrigRows has no case for dialog trigger kind " + string(t.Kind))
+}
+
+// drawDialogEditRows paints rows[i] into rects[i] (label above + the kind's widget).
+func drawDialogEditRows(s *State, font rl.Font, rows []dialogEditRow, rects []rl.Rectangle) {
+	for i, r := range rows {
+		rect := rects[i]
+		drawLabel(font, r.label, labelAbove(rect))
+		switch r.kind {
+		case rowNumeric:
+			drawTextField(font, rect, numFieldText(s.focus == r.focus, r.value, s.dialogNumBuf), s.focus == r.focus)
+		case rowText:
+			drawTextField(font, rect, r.text, s.focus == r.focus)
+		case rowDropdown:
+			drawButton(font, rect, r.text+dropdownArrowSuffix, false)
+		}
+	}
+}
+
+// clickDialogEditRows dispatches a click at mp against rows[i]/rects[i], returning
+// true (and acting) on the first hit. Mirror of drawDialogEditRows for the hit-test.
+func clickDialogEditRows(s *State, mp rl.Vector2, rows []dialogEditRow, rects []rl.Rectangle) bool {
+	for i, r := range rows {
+		rect := rects[i]
+		if !pointIn(mp, rect) {
+			continue
+		}
+		switch r.kind {
+		case rowNumeric:
+			focusDialogNumeric(s, r.focus, r.value)
+		case rowText:
+			s.focus = r.focus
+		case rowDropdown:
+			openFieldDropdown(s, r.dd, rect)
+		}
+		return true
+	}
+	return false
+}
+
 func drawDialogCondEditModal(s *State, font rl.Font, theme render.Theme) {
 	c := currentDialogCond(s)
 	if c == nil {
@@ -1521,28 +1616,7 @@ func drawDialogCondEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawLabel(font, "Kind (click to choose)", labelAbove(l.kindBtn))
 	drawButton(font, l.kindBtn, condKindLabel(c.Kind)+dropdownArrowSuffix, false)
 
-	switch c.Kind {
-	case core.DialogCondGold:
-		drawLabel(font, "Minimum gold the party must hold", labelAbove(l.row1))
-		drawTextField(font, l.row1, numFieldText(s.focus == focusDialogCondGold, c.Gold, s.dialogNumBuf), s.focus == focusDialogCondGold)
-	case core.DialogCondQuest:
-		drawLabel(font, "Quest id", labelAbove(l.row1))
-		drawTextField(font, l.row1, c.QuestID, s.focus == focusDialogCondQuestID)
-		drawLabel(font, "Required status (click to choose)", labelAbove(l.row2))
-		drawButton(font, l.row2, questStatusLabel(c.QuestStatus)+dropdownArrowSuffix, false)
-	case core.DialogCondFoeKilled:
-		drawLabel(font, "Foe (click to choose)", labelAbove(l.row1))
-		drawButton(font, l.row1, core.FoeKindName(c.FoeKind)+dropdownArrowSuffix, false)
-		drawLabel(font, "Kills required (0 = at least one)", labelAbove(l.row2))
-		drawTextField(font, l.row2, numFieldText(s.focus == focusDialogCondFoeKills, c.FoeKills, s.dialogNumBuf), s.focus == focusDialogCondFoeKills)
-	case core.DialogCondTileVisited:
-		drawLabel(font, "Tile X", labelAbove(l.row1))
-		drawTextField(font, l.row1, numFieldText(s.focus == focusDialogCondTileX, c.TileX, s.dialogNumBuf), s.focus == focusDialogCondTileX)
-		drawLabel(font, "Tile Z", labelAbove(l.row2))
-		drawTextField(font, l.row2, numFieldText(s.focus == focusDialogCondTileZ, c.TileZ, s.dialogNumBuf), s.focus == focusDialogCondTileZ)
-	default:
-		panic("editor: drawDialogCondEditModal has no case for dialog condition kind " + string(c.Kind))
-	}
+	drawDialogEditRows(s, font, dialogCondRows(c), []rl.Rectangle{l.row1, l.row2})
 
 	drawLabel(font, "Disabled message (blank = auto reason)", labelAbove(l.msgField))
 	drawTextField(font, l.msgField, c.DisabledMessage, s.focus == focusDialogCondMessage)
@@ -1570,41 +1644,8 @@ func updateDialogCondEditModal(s *State) Action {
 			returnToDialogChoiceEdit(s)
 			return ActionNone
 		}
-		switch c.Kind {
-		case core.DialogCondGold:
-			if pointIn(mp, l.row1) {
-				focusDialogNumeric(s, focusDialogCondGold, c.Gold)
-				return ActionNone
-			}
-		case core.DialogCondQuest:
-			if pointIn(mp, l.row1) {
-				s.focus = focusDialogCondQuestID
-				return ActionNone
-			}
-			if pointIn(mp, l.row2) {
-				openFieldDropdown(s, ddDialogQuestStatus, l.row2)
-				return ActionNone
-			}
-		case core.DialogCondFoeKilled:
-			if pointIn(mp, l.row1) {
-				openFieldDropdown(s, ddDialogCondFoe, l.row1)
-				return ActionNone
-			}
-			if pointIn(mp, l.row2) {
-				focusDialogNumeric(s, focusDialogCondFoeKills, c.FoeKills)
-				return ActionNone
-			}
-		case core.DialogCondTileVisited:
-			if pointIn(mp, l.row1) {
-				focusDialogNumeric(s, focusDialogCondTileX, c.TileX)
-				return ActionNone
-			}
-			if pointIn(mp, l.row2) {
-				focusDialogNumeric(s, focusDialogCondTileZ, c.TileZ)
-				return ActionNone
-			}
-		default:
-			panic("editor: updateDialogCondEditModal has no case for dialog condition kind " + string(c.Kind))
+		if clickDialogEditRows(s, mp, dialogCondRows(c), []rl.Rectangle{l.row1, l.row2}) {
+			return ActionNone
 		}
 		s.focus = focusNone
 	}
@@ -1758,23 +1799,7 @@ func drawDialogTriggerEditModal(s *State, font rl.Font, theme render.Theme) {
 
 	drawButton(font, l.onceToggle, "Fire once (M): "+render.OnOffLabel(t.Once), t.Once)
 
-	switch t.Kind {
-	case core.DialogTriggerEnterTile:
-		drawLabel(font, "Tile X", labelAbove(l.row1))
-		drawTextField(font, l.row1, numFieldText(s.focus == focusDialogTrigTileX, t.TileX, s.dialogNumBuf), s.focus == focusDialogTrigTileX)
-		drawLabel(font, "Tile Z", labelAbove(l.row2))
-		drawTextField(font, l.row2, numFieldText(s.focus == focusDialogTrigTileZ, t.TileZ, s.dialogNumBuf), s.focus == focusDialogTrigTileZ)
-	case core.DialogTriggerEnterLocation:
-		drawLabel(font, "Location (click to choose)", labelAbove(l.row1))
-		drawButton(font, l.row1, triggerLocationButtonLabel(s, t.LocationID)+dropdownArrowSuffix, false)
-	case core.DialogTriggerFoeKilled:
-		drawLabel(font, "Foe (click to choose)", labelAbove(l.row1))
-		drawButton(font, l.row1, core.FoeKindName(t.FoeKind)+dropdownArrowSuffix, false)
-		drawLabel(font, "Kills required (0 = at least one)", labelAbove(l.row2))
-		drawTextField(font, l.row2, numFieldText(s.focus == focusDialogTrigFoeKills, t.FoeKills, s.dialogNumBuf), s.focus == focusDialogTrigFoeKills)
-	default:
-		panic("editor: drawDialogTriggerEditModal has no case for dialog trigger kind " + string(t.Kind))
-	}
+	drawDialogEditRows(s, font, dialogTrigRows(s, t), []rl.Rectangle{l.row1, l.row2})
 	drawButton(font, l.backBtn, "Back (Esc)", false)
 }
 
@@ -1802,32 +1827,8 @@ func updateDialogTriggerEditModal(s *State) Action {
 			returnToDialogTriggerList(s)
 			return ActionNone
 		}
-		switch t.Kind {
-		case core.DialogTriggerEnterTile:
-			if pointIn(mp, l.row1) {
-				focusDialogNumeric(s, focusDialogTrigTileX, t.TileX)
-				return ActionNone
-			}
-			if pointIn(mp, l.row2) {
-				focusDialogNumeric(s, focusDialogTrigTileZ, t.TileZ)
-				return ActionNone
-			}
-		case core.DialogTriggerEnterLocation:
-			if pointIn(mp, l.row1) {
-				openFieldDropdown(s, ddDialogTriggerLocation, l.row1)
-				return ActionNone
-			}
-		case core.DialogTriggerFoeKilled:
-			if pointIn(mp, l.row1) {
-				openFieldDropdown(s, ddDialogTriggerFoe, l.row1)
-				return ActionNone
-			}
-			if pointIn(mp, l.row2) {
-				focusDialogNumeric(s, focusDialogTrigFoeKills, t.FoeKills)
-				return ActionNone
-			}
-		default:
-			panic("editor: updateDialogTriggerEditModal has no case for dialog trigger kind " + string(t.Kind))
+		if clickDialogEditRows(s, mp, dialogTrigRows(s, t), []rl.Rectangle{l.row1, l.row2}) {
+			return ActionNone
 		}
 		s.focus = focusNone
 	}

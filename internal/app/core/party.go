@@ -1144,12 +1144,16 @@ const (
 	StatCount
 )
 
-// statSpec is one statTable row: label, read accessor, and in-place increment.
-// Keyed by slice index (Stat's iota); init() length-asserts the 1:1 invariant.
+// statSpec is one statTable row: label, read accessor, in-place increment, and
+// absolute write. Keyed by slice index (Stat's iota); init() length-asserts the
+// 1:1 invariant.
 type statSpec struct {
 	Label string
 	Get   func(Stats) int
 	Add   func(*Stats)
+	// Set writes the stat absolutely (used by the fold self-test and SpendStatPoint's
+	// clamp-and-store); the counterpart to Get/Add.
+	Set func(*Stats, int)
 	// Derive runs the level-up side effect on the WHOLE member (VIT→MaxHP,
 	// INT→MP pool), called by SpendStatPoint AFTER Add. nil = no pool effect.
 	Derive func(*PartyMember)
@@ -1160,18 +1164,18 @@ type statSpec struct {
 }
 
 var statTable = []statSpec{
-	StatSTR: {Label: "STR", Get: func(s Stats) int { return s.STR }, Add: func(s *Stats) { s.STR++ }, Preview: previewSTR},
-	StatDEX: {Label: "DEX", Get: func(s Stats) int { return s.DEX }, Add: func(s *Stats) { s.DEX++ }, Preview: previewDEX},
-	StatINT: {Label: "INT", Get: func(s Stats) int { return s.INT }, Add: func(s *Stats) { s.INT++ },
+	StatSTR: {Label: "STR", Get: func(s Stats) int { return s.STR }, Add: func(s *Stats) { s.STR++ }, Set: func(s *Stats, v int) { s.STR = v }, Preview: previewSTR},
+	StatDEX: {Label: "DEX", Get: func(s Stats) int { return s.DEX }, Add: func(s *Stats) { s.DEX++ }, Set: func(s *Stats, v int) { s.DEX = v }, Preview: previewDEX},
+	StatINT: {Label: "INT", Get: func(s Stats) int { return s.INT }, Add: func(s *Stats) { s.INT++ }, Set: func(s *Stats, v int) { s.INT = v },
 		// INT grows MaxMP and tops off MP by the same delta.
 		Derive:  func(m *PartyMember) { m.MaxMP += MPPerINT; GainUpTo(&m.MP, m.MaxMP, MPPerINT) },
 		Preview: previewINT},
-	StatWIS: {Label: "WIS", Get: func(s Stats) int { return s.WIS }, Add: func(s *Stats) { s.WIS++ }, Preview: previewWIS},
-	StatVIT: {Label: "VIT", Get: func(s Stats) int { return s.VIT }, Add: func(s *Stats) { s.VIT++ },
+	StatWIS: {Label: "WIS", Get: func(s Stats) int { return s.WIS }, Add: func(s *Stats) { s.WIS++ }, Set: func(s *Stats, v int) { s.WIS = v }, Preview: previewWIS},
+	StatVIT: {Label: "VIT", Get: func(s Stats) int { return s.VIT }, Add: func(s *Stats) { s.VIT++ }, Set: func(s *Stats, v int) { s.VIT = v },
 		// VIT recomputes MaxHP authoritatively and heals by the per-point delta.
 		Derive:  func(m *PartyMember) { m.MaxHP = MaxHPFor(m.Stats); GainUpTo(&m.HP, m.MaxHP, HPPerVIT) },
 		Preview: previewVIT},
-	StatSPD: {Label: "SPD", Get: func(s Stats) int { return s.SPD }, Add: func(s *Stats) { s.SPD++ }, Preview: previewSPD},
+	StatSPD: {Label: "SPD", Get: func(s Stats) int { return s.SPD }, Add: func(s *Stats) { s.SPD++ }, Set: func(s *Stats, v int) { s.SPD = v }, Preview: previewSPD},
 }
 
 // previewXXX build the level-up "what this spend buys" lines (statSpec.Preview).
@@ -1214,17 +1218,6 @@ func previewSPD(current, after Stats, _ Stat) string {
 	return fmt.Sprintf("SPD %d → %d (more turns)", current.SPD, after.SPD)
 }
 
-// statSetters is the absolute-write half of statTable (kept separate so readers
-// using only Get/Add aren't touched).
-var statSetters = []func(*Stats, int){
-	StatSTR: func(s *Stats, v int) { s.STR = v },
-	StatDEX: func(s *Stats, v int) { s.DEX = v },
-	StatINT: func(s *Stats, v int) { s.INT = v },
-	StatWIS: func(s *Stats, v int) { s.WIS = v },
-	StatVIT: func(s *Stats, v int) { s.VIT = v },
-	StatSPD: func(s *Stats, v int) { s.SPD = v },
-}
-
 // init self-tests the hand-unrolled stat folds (SumStats / addStatsFloored /
 // Total). They're unrolled for hot-path inlining, so a newly-added Stat field can
 // silently slip past one. Probe every stat index via statTable/statSetters and
@@ -1235,8 +1228,8 @@ func init() {
 	var arr [StatCount]int
 	expectTotal := 0
 	for i := 0; i < int(StatCount); i++ {
-		statSetters[i](&a, i+1)
-		statSetters[i](&b, (i+1)*10)
+		statTable[i].Set(&a, i+1)
+		statTable[i].Set(&b, (i+1)*10)
 		arr[i] = (i + 1) * 100
 		expectTotal += i + 1
 	}
@@ -1390,7 +1383,7 @@ func AdjustStat(s *Stats, st Stat, delta int) {
 		return
 	}
 	v := MaxZero(statTable[st].Get(*s) + delta)
-	statSetters[st](s, v)
+	statTable[st].Set(s, v)
 }
 
 // DebugBoostParty adds `amount` to every base stat of every member, refreshes
@@ -1480,8 +1473,12 @@ func init() {
 	if len(statDescriptions) != int(StatCount) {
 		panic("core: statDescriptions length must match StatCount — add a row when adding a Stat enum value")
 	}
-	if len(statSetters) != int(StatCount) {
-		panic("core: statSetters length must match StatCount — add a row when adding a Stat enum value")
+	// Every row must supply Set/Get/Add (SpendStatPoint + the fold self-test call them);
+	// a nil would nil-panic only on the affected stat, so fail loud at startup instead.
+	for i := Stat(0); i < StatCount; i++ {
+		if statTable[i].Set == nil || statTable[i].Get == nil || statTable[i].Add == nil {
+			panic(fmt.Sprintf("core: statTable[%d] (%s) missing Get/Add/Set accessor", int(i), statTable[i].Label))
+		}
 	}
 	// StatPreviewLine's per-stat switch is the one parallel table the asserts
 	// above can't cover — force coverage so a missing case panics at STARTUP.

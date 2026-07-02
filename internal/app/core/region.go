@@ -1,7 +1,5 @@
 package core
 
-import "sort"
-
 // region.go: editor region copy/paste — a rectangle of the grid layers
 // snapshotted and stamped elsewhere. Grid layers only (gridLayers()); entities
 // (packs/chests/doors/crystals) live in spawn lists and are NOT copied.
@@ -294,12 +292,7 @@ func (a *AreaDefinition) pasteRegionFaces(r TileRegion, atX, atZ int) {
 		kept = append(kept, o)
 	}
 	// Keep the (Z,X) ordering FaceOverrides relies on for deterministic encoding.
-	sort.Slice(kept, func(i, j int) bool {
-		if kept[i].Z != kept[j].Z {
-			return kept[i].Z < kept[j].Z
-		}
-		return kept[i].X < kept[j].X
-	})
+	sortByZX(kept, func(o FaceOverride) (int, int) { return o.X, o.Z })
 	a.FaceOverrides = kept
 	a.faceOverrideIdx = nil // invalidate the lazy (x,z)->index lookup
 }

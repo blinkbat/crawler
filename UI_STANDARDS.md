@@ -96,7 +96,17 @@ All semi-glow:
 - **`statusSleep`** — `rgb(132, 196, 232)`
 - **`statusPoison`** — `rgb(148, 200, 96)`
 - **`statusDefending`** — `rgb(132, 196, 255)`
+- **`statusStarving`** — `rgb(198, 130, 84)` — famine brown; the food system's only
+  mechanical status, and the one that *flickers* (browner than `statusBurn`).
 - **`statusBurn`** — `rgb(240, 144, 72)` — *enemy-side only (not a `PartyStatusKind`)*
+- **`statusBleed`** — `rgb(200, 56, 56)` — bleed DoT accent (enemy-pill fill/outline)
+
+**Positive-buff accents** (never flicker — a buff isn't a threat):
+- **`statusBlessed`** — `rgb(244, 212, 128)` — warm holy gilt (Bless), off `statusStun`'s flatter yellow
+- **`statusRegen`** — `rgb(120, 224, 150)` — mint heal-over-time (Renewal), cleaner than `statusPoison`'s olive
+- **`statusShielded`** — `rgb(96, 222, 214)` — teal Aegis ward, off the light-blues
+- **`statusIceArmor`** — `rgb(186, 226, 248)` — pale icy frost ward, cooler than `statusSleep`
+- **`statusGuarding`** — `rgb(150, 172, 214)` — steely azure cover (Warrior's Guard), deeper than `statusDefending`
 
 ## Type
 
@@ -269,8 +279,8 @@ A small `FontHeading` title, all-caps, followed by a 28-px-wide
 the tick mark.
 
 ### Row (list entry)
-- **Resting row**: 36 px tall, glassMid inset (4 px from panel edge),
-  no border.
+- **Resting row**: one `uiRowH` (32 px) tall, glassMid inset (4 px from panel edge),
+  no border. (Modal cursor lists use `modalListRowH` = 34; see the Spacing tokens.)
 - **Hovered / cursor row**: same panel, but with a `giltDim` left
   spine (3 px × row height) and the row label promoted to
   `inkPrimary` from `inkMuted`.

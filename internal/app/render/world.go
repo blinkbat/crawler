@@ -1826,25 +1826,10 @@ func drawBattleFoe(camera rl.Camera3D, g *core.GameState, assets Resources, enem
 
 // aoeEnemyTargetPreview reports whether an all-enemy AoE skill highlighted in the
 // Skill submenu would land on the enemy at `slot` (the cue to chevron that foe).
-// Gated on Phase==BattlePlayer + ActionSkillMenu, reading the live SkillMenuList;
-// the per-slot reach check keeps a melee AoE (Swipe) off back-row/Flying foes.
+// Delegates to core.PreviewAoEHitsEnemy so the menu-mode gating lives with the
+// commit path (cf. enemyAttackTarget → core.PeekEnemyAttackerTarget).
 func aoeEnemyTargetPreview(g *core.GameState, slot int) bool {
-	if g.Battle.Phase != core.BattlePlayer || g.Battle.ActionMode != core.ActionSkillMenu {
-		return false
-	}
-	if g.Battle.CurrentParty < 0 || g.Battle.CurrentParty >= len(g.Party) {
-		return false
-	}
-	// Index the SAME list the cursor walks (SkillMenuList) — re-deriving the
-	// learned set here would index a different list (DebugAllSkills) and preview
-	// the wrong skill.
-	skills := g.Battle.SkillMenuList
-	idx := g.Battle.SkillMenuIndex
-	if idx < 0 || idx >= len(skills) {
-		return false
-	}
-	skill := skills[idx]
-	return core.SkillTargetsAllEnemies(skill) && core.AoEReachesEnemy(core.BattleMembers(g), skill, slot)
+	return core.PreviewAoEHitsEnemy(g, slot)
 }
 
 // isEnemyAttackerSlot reports whether `slot` is the one lunging at the party

@@ -169,7 +169,7 @@ func drawSkillTreeNode(font rl.Font, m *core.PartyMember, node core.SkillTreeNod
 	case !unlocked:
 		bg = fadeColor(glassDeep, 0.6)
 	case rank > 0:
-		bg = selectedGlassTint(glassMid, 0.5)
+		bg = selectedGlassTint(glassMid, skillNodeSelGlassTint)
 	}
 	drawSkillNodePlate(rect, bg, rank, unlocked, focused)
 	if focused {

@@ -1482,23 +1482,31 @@ func paletteContentHeight(s *State) float32 {
 	return headerReserve + float32(len(palette))*paletteRowStride + paletteHintGap + float32(len(paletteHints))*paletteHintStride + paletteHintStride
 }
 
-// ScrollPalette adjusts the active layer's palette scroll by dy px (positive =
-// down), clamped to [0, max].
-func ScrollPalette(s *State, dy float32) {
-	if s.rect.palette.Height <= 0 {
+// clampScroll advances *off by dy (positive = down), clamping to [0, content-panelH]
+// (0 when the content fits). No-op for a zero-height panel — content is only measured
+// then. Single home for the palette/metadata scroll-clamp body.
+func clampScroll(off *float32, dy, panelH float32, content func() float32) {
+	if panelH <= 0 {
 		return
 	}
-	max := paletteContentHeight(s) - s.rect.palette.Height
+	max := content() - panelH
 	if max < 0 {
 		max = 0
 	}
-	s.paletteScroll[s.layer] += dy
-	if s.paletteScroll[s.layer] < 0 {
-		s.paletteScroll[s.layer] = 0
+	v := *off + dy
+	if v < 0 {
+		v = 0
 	}
-	if s.paletteScroll[s.layer] > max {
-		s.paletteScroll[s.layer] = max
+	if v > max {
+		v = max
 	}
+	*off = v
+}
+
+// ScrollPalette adjusts the active layer's palette scroll by dy px (positive =
+// down), clamped to [0, max].
+func ScrollPalette(s *State, dy float32) {
+	clampScroll(&s.paletteScroll[s.layer], dy, s.rect.palette.Height, func() float32 { return paletteContentHeight(s) })
 }
 
 func drawPalette(s *State, font rl.Font, theme render.Theme) {
@@ -1730,20 +1738,7 @@ const metadataRowStride = float32(42)
 // ScrollMetadata adjusts the metadata panel's scroll by dy px (positive = down),
 // clamped to [0, max].
 func ScrollMetadata(s *State, dy float32) {
-	if s.rect.metadata.Height <= 0 {
-		return
-	}
-	max := metadataContentHeight(s) - s.rect.metadata.Height
-	if max < 0 {
-		max = 0
-	}
-	s.metadataScroll += dy
-	if s.metadataScroll < 0 {
-		s.metadataScroll = 0
-	}
-	if s.metadataScroll > max {
-		s.metadataScroll = max
-	}
+	clampScroll(&s.metadataScroll, dy, s.rect.metadata.Height, func() float32 { return metadataContentHeight(s) })
 }
 
 func handleMetadataClick(s *State, p rl.Vector2) bool {
@@ -1771,11 +1766,7 @@ func handleMetadataClick(s *State, p rl.Vector2) bool {
 	}
 	for i, br := range mr.matButtons {
 		if pointIn(p, br) {
-			if s.area.Materials != core.MaterialOptions[i] {
-				pushUndo(s)
-				s.area.Materials = core.MaterialOptions[i]
-				s.dirty = true
-			}
+			setIfChanged(s, &s.area.Materials, core.MaterialOptions[i])
 			return true
 		}
 	}
@@ -2505,13 +2496,10 @@ func tooltipLinesFor(s *State, x, z int) []string {
 	return out
 }
 
-// packMarkerColor returns a pack marker's canvas color: the leader's
-// entityBrushColors entry, else the grey fallback.
+// packMarkerColor returns a pack marker's canvas color: the leader's swatch, else
+// the grey fallback (via entityBrushColor).
 func packMarkerColor(kind core.EnemyKind) rl.Color {
-	if col, ok := entityBrushColors[kind]; ok {
-		return col
-	}
-	return entityFallbackColor
+	return entityBrushColor(kind)
 }
 
 // packMarkerInitial returns the uppercase letter for a pack's marker center.

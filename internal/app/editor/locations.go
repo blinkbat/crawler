@@ -23,12 +23,10 @@ var (
 
 // newLocationID returns the first free "location_N" id (bg2-style auto-increment).
 func newLocationID(locs []core.Location) string {
-	for n := 1; ; n++ {
-		id := "location_" + strconv.Itoa(n)
-		if _, taken := core.LocationByID(locs, id); !taken {
-			return id
-		}
-	}
+	return uniqueID("location_", func(id string) bool {
+		_, taken := core.LocationByID(locs, id)
+		return taken
+	})
 }
 
 // createLocationAt appends a default region anchored at (x,z) on the active level,

@@ -330,6 +330,22 @@ func EaseOutCubic(t float32) float32 {
 	return 1 - inv*inv*inv
 }
 
+// EaseOutBack overshoots past 1 near the end then settles back — a springy "pop"
+// (battle splash intro). Endpoints pin to exactly 0/1; the mid-range overshoot is
+// deliberate, so the OUTPUT is intentionally NOT clamped (unlike the -Quad/-Cubic).
+func EaseOutBack(t float32) float32 {
+	if t <= 0 {
+		return 0
+	}
+	if t >= 1 {
+		return 1
+	}
+	const c1 = 1.70158
+	const c3 = c1 + 1
+	x := float64(t) - 1
+	return float32(1 + c3*math.Pow(x, 3) + c1*math.Pow(x, 2))
+}
+
 // DistanceFade indexes a precomputed fade table by |d| (level/depth distance from
 // the observer), returning min once past the table's end. Single source for the
 // minimap depth fade and the editor level-distance fade.

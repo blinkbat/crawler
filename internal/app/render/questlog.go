@@ -14,10 +14,12 @@ func drawPanelsQuests(g *core.GameState, assets Resources, body rl.Rectangle) {
 	headerH := drawJournalSubtabHeader(font, g.JournalTab, body)
 	inner := rl.NewRectangle(body.X, body.Y+headerH, body.Width, body.Height-headerH)
 	switch g.JournalTab {
+	case core.JournalQuests:
+		drawJournalQuests(g, font, inner)
 	case core.JournalBestiary:
 		drawJournalBestiary(g, font, inner)
 	default:
-		drawJournalQuests(g, font, inner)
+		panic(fmt.Sprintf("render: drawPanelsQuests has no body for JournalSubtab %d — add a case", int(g.JournalTab)))
 	}
 }
 

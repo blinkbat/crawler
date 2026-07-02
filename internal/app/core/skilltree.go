@@ -81,7 +81,7 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 	},
 	SkillCrushingBlow: {
 		tier(1, "+3 damage", "+3 base damage on the heavy hit.", SkillEffectDelta{Damage: 3}),
-		tier(2, "+15% stun", "Stun roll gets +15% chance on a landed Great/Excellent.", SkillEffectDelta{StunChance: 0.15}),
+		tier(2, "+15% stun", "Stun roll gets +15% chance on a landed Great/Excellent.", SkillEffectDelta{StunChance: CrushingBlowTierStunBump}),
 		tier(3, "Excellent crits", "An Excellent timing hit deals double damage.", SkillEffectDelta{CritDoubleOnExcellent: true}),
 	},
 	SkillWhirlwind: {
