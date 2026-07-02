@@ -553,6 +553,12 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 	ruleY := y + actionMenuRuleY
 	drawPipCappedRule(x+actionMenuRuleInsetX, ruleY, w-2*actionMenuRuleInsetX, fadeColor(giltBright, 0.5), 2.4, fadeColor(giltDim, 0.85))
 	contentY := y + actionMenuContentGap
+	// listMaxY: bottom bound for submenu rows — above the hint footer's rule when
+	// present, else just inside the panel. Long skill/item lists window to it.
+	listMaxY := y + h - uiFooterMargin
+	if h >= actionMenuHintMinH {
+		listMaxY = footerBaselineY(y+h, FontSmall) - 16
+	}
 	// subY: sub-prompt/list start, via bodyBelowHeading for a consistent heading→body gap.
 	subY := bodyBelowHeading(contentY, FontHeading)
 
@@ -568,10 +574,10 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 		drawAllyTargetPrompt(g, assets, core.SkillName(g.Battle.PendingSkill), contentX, contentY, subY)
 	case core.ActionItemMenu:
 		drawEngravedText(assets.hudFont, "Items", float32(contentX), float32(contentY), FontHeading, textPrimary)
-		drawItemMenuList(g, assets, contentX, subY, rightX)
+		drawItemMenuList(g, assets, contentX, subY, rightX, listMaxY)
 	case core.ActionSkillMenu:
 		drawEngravedText(assets.hudFont, "Skills", float32(contentX), float32(contentY), FontHeading, textPrimary)
-		drawSkillMenuList(g, assets, contentX, subY, rightX)
+		drawSkillMenuList(g, assets, contentX, subY, rightX, listMaxY)
 	case core.ActionItemTarget:
 		drawAllyTargetPrompt(g, assets, core.ItemInfo(g.Battle.PendingItem).Name, contentX, contentY, subY)
 	case core.ActionFleeConfirm:
@@ -798,24 +804,32 @@ func drawEmptyMenuRow(font rl.Font, x, y int32, label string) {
 	drawTextWithShadow(font, label, float32(x), float32(y), FontSmall, textDim)
 }
 
-// drawMenuList lays out n action rows from y down at uiRowPitch with selIdx
+// drawMenuList lays out action rows from y down at uiRowPitch with selIdx
 // highlighted; row(i) yields the label, right-aligned suffix, and disabled flag.
-func drawMenuList(font rl.Font, x, y, rightX int32, n, selIdx int, row func(i int) (label, suffix string, disabled bool)) {
-	for i := 0; i < n; i++ {
+// Rows are windowed to fit above maxY (scrolled around the cursor via
+// journalScrollFirst) — a long skill/item list must not paint past the panel
+// bottom or leave the cursored row off-panel.
+func drawMenuList(font rl.Font, x, y, rightX, maxY int32, n, selIdx int, row func(i int) (label, suffix string, disabled bool)) {
+	visible := int((maxY - y) / uiRowPitch)
+	if visible < 1 {
+		visible = 1
+	}
+	first := journalScrollFirst(selIdx, n, visible)
+	for i := first; i < n && i < first+visible; i++ {
 		label, suffix, disabled := row(i)
-		drawActionRow(font, x, y+int32(i)*uiRowPitch, rightX, label, suffix, selIdx == i, disabled)
+		drawActionRow(font, x, y+int32(i-first)*uiRowPitch, rightX, label, suffix, selIdx == i, disabled)
 	}
 }
 
 // drawSkillMenuList renders the skill submenu (one row per learned skill, MP cost right).
 // Reads the prebuilt g.Battle.SkillMenuList.
-func drawSkillMenuList(g *core.GameState, assets Resources, x, y, rightX int32) {
+func drawSkillMenuList(g *core.GameState, assets Resources, x, y, rightX, maxY int32) {
 	skills := g.Battle.SkillMenuList
 	if len(skills) == 0 {
 		drawEmptyMenuRow(assets.hudFont, x, y, "(no skills)")
 		return
 	}
-	drawMenuList(assets.hudFont, x, y, rightX, len(skills), g.Battle.SkillMenuIndex, func(i int) (string, string, bool) {
+	drawMenuList(assets.hudFont, x, y, rightX, maxY, len(skills), g.Battle.SkillMenuIndex, func(i int) (string, string, bool) {
 		s := skills[i]
 		suffix := ""
 		if cost := core.SkillCost(s); cost > 0 {
@@ -839,13 +853,13 @@ func skillUnusable(g *core.GameState, idx int, skill core.SkillID) bool {
 
 // drawItemMenuList renders the inventory picker ("Name xCount" rows). Reads the prebuilt
 // g.Battle.ItemMenuList (consumables only, matching updateItemMenu).
-func drawItemMenuList(g *core.GameState, assets Resources, x, y, rightX int32) {
+func drawItemMenuList(g *core.GameState, assets Resources, x, y, rightX, maxY int32) {
 	living := g.Battle.ItemMenuList
 	if len(living) == 0 {
 		drawEmptyMenuRow(assets.hudFont, x, y, "(no items)")
 		return
 	}
-	drawMenuList(assets.hudFont, x, y, rightX, len(living), g.Battle.ItemMenuIndex, func(i int) (string, string, bool) {
+	drawMenuList(assets.hudFont, x, y, rightX, maxY, len(living), g.Battle.ItemMenuIndex, func(i int) (string, string, bool) {
 		def := core.ItemInfo(living[i].Kind)
 		return def.Name, panelsItemCountLabel(living[i].Count), false
 	})
@@ -944,6 +958,10 @@ const (
 	splashPadY       = float32(22)
 	splashScaleBase  = float32(0.86)
 	splashScaleRange = float32(0.14)
+	// splashBgPeakAlpha is the banner backdrop's opacity at full fade-in (kept
+	// below splashBgColor's own 255 so the scene reads faintly through it); the
+	// fade envelope scales it down. Title/shadow ride full 255 via the envelope.
+	splashBgPeakAlpha = float32(220)
 )
 
 // drawBattleSplash slams the encounter-title banner in at the top on battle start.
@@ -989,7 +1007,7 @@ func drawBattleSplash(g *core.GameState, assets Resources) {
 	bgX := cx - bgW/2
 	bgY := cy - bgH/2
 
-	bgAlpha := uint8(220 * overall)
+	bgAlpha := uint8(splashBgPeakAlpha * overall)
 	titleAlpha := uint8(255 * overall)
 
 	drawPanel(int32(bgX), int32(bgY), int32(bgW), int32(bgH), colorWithAlpha(splashBgColor, bgAlpha))

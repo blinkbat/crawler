@@ -27,8 +27,9 @@ type PartyClassDefinition struct {
 
 // PartyMemberCount is the fixed party size = number of class definitions. The
 // slice order is the seating / tie-break contract; render formation + save
-// format index by class slot. init() asserts len(partyClassDefinitions) matches.
-const PartyMemberCount = 4
+// format index by class slot. Derived from PartyClassCount (one member per
+// class); init() asserts len(partyClassDefinitions) matches.
+const PartyMemberCount = PartyClassCount
 
 // SkillKind tags how a skill scales off the actor's stats.
 //
@@ -1471,10 +1472,7 @@ func CommitLevelUp(m *PartyMember, pendingStats [StatCount]int) bool {
 
 func init() {
 	if len(partyClassDefinitions) != PartyMemberCount {
-		panic("core: partyClassDefinitions length must match PartyMemberCount — append a class and bump PartyMemberCount together")
-	}
-	if PartyClassCount != PartyMemberCount {
-		panic("core: PartyClassCount must match PartyMemberCount — one party member per class; bump both together")
+		panic("core: partyClassDefinitions length must match PartyMemberCount — append a class and bump PartyClassCount together")
 	}
 	if len(statTable) != int(StatCount) {
 		panic("core: statTable length must match StatCount — add a row when adding a Stat enum value")

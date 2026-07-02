@@ -745,6 +745,9 @@ type State struct {
 	// Ctrl+C snapshot. Tiles only — entities aren't copied.
 	selActive                  bool
 	selX0, selZ0, selX1, selZ1 int
+	// cancelHandled: set within updateHotkeys when Esc was consumed this frame
+	// (e.g. clearing a selection) so the same-frame pause-menu open is suppressed.
+	cancelHandled bool
 	clipboard                  core.TileRegion
 	// dragSnapshotDone reports whether the stroke banked its undo snapshot.
 	// dragUndoBefore is the pre-stroke area, committed LAZILY by strokePaint only
@@ -762,10 +765,8 @@ type State struct {
 	dragChestIdx int
 	dragDoorIdx  int
 
-	gridCursorX int
-	gridCursorZ int
-	hoverX      int
-	hoverZ      int
+	hoverX int
+	hoverZ int
 
 	zoom    float32
 	panX    float32
@@ -959,8 +960,6 @@ func freshState(a core.AreaDefinition) State {
 		bottomLevel:           core.ElevationBaseline,
 		brushSize:             1,
 		zoom:                  1,
-		gridCursorX:           -1,
-		gridCursorZ:           -1,
 		hoverX:                -1,
 		hoverZ:                -1,
 		isoView:               true, // 3D is the default authoring view
@@ -1099,6 +1098,7 @@ func Update(s *State, dt float32) Action {
 
 	// An open context menu owns all input. updateContextMenu (in updateMouse)
 	// absorbs the mouse, but hotkeys run BEFORE updateMouse so gate them here too.
+	s.cancelHandled = false
 	if !s.contextMenu.open {
 		updateHotkeys(s)
 	}
@@ -1129,7 +1129,7 @@ func Update(s *State, dt float32) Action {
 
 	// Esc opens the pause menu (modalEscMenu), not a direct exit. The
 	// exitRequested path still runs the dirty-bounce-then-exit flow.
-	if editorCancelPressed() {
+	if editorCancelPressed() && !s.cancelHandled {
 		openModal(s, modalEscMenu)
 		return ActionNone
 	}

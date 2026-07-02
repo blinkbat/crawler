@@ -99,7 +99,9 @@ func DrawObjectPreview(rect rl.Rectangle, assets Resources, item ObjectPreviewIt
 		// No lighting shader (zero-value Resources): bail rather than BeginShaderMode(0).
 		return
 	}
-	if !objectPreviewRT.ensure(w, h) {
+	// ensureStable, not ensure: the rect tracks the window layout, so a resize
+	// drag would otherwise Unload+Load the RT every frame (the DrawModelEx crash).
+	if !objectPreviewRT.ensureStable(w, h) {
 		return
 	}
 	// Feed the shared sway/flicker clock; without this thumbnails' foliage sway and torch flame freeze.

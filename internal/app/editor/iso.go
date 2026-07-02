@@ -23,7 +23,7 @@ import (
 const (
 	isoFovy     = float32(46)
 	isoPitchDeg = 38.0           // default camera tilt above the horizon
-	isoPanSpeed = float32(0.05)  // shift+middle-drag pan: screen px → world units (real scale)
+	isoPanSpeed = float32(0.05)  // shift+right-drag pan: screen px → world units (real scale)
 	isoOrbitRate = float32(0.004) // right-drag tumble: radians per screen px (kept gentle — full-speed felt twitchy)
 	isoMinPitch = float32(0.12)  // tumble pitch clamp (near-horizon)
 	isoMaxPitch = float32(1.50)  // tumble pitch clamp (near top-down)
@@ -34,13 +34,6 @@ const (
 	// the two can't drift.
 	isoDefaultYaw   = float32(math.Pi / 4)              // 45° default orbit
 	isoDefaultPitch = float32(isoPitchDeg * math.Pi / 180) // tilt above horizon
-)
-
-var (
-	isoHoverWire   = editorGold                     // hovered-cell / placeable preview
-	isoBlockedWire = rl.NewColor(255, 96, 96, 255)  // footprint-won't-fit preview
-	isoBG          = rl.NewColor(26, 28, 34, 255)   // off-screen clear
-	isoActiveFloor = withAlpha(editorCyan, 55)      // faint slab marking the active editLevel
 )
 
 // setIsoView switches to (on=true) or away from the 3D view, a no-op if already
@@ -238,7 +231,7 @@ func (s *State) isoWrongLevel(x, z int) bool {
 func drawIsoBrushPreview(s *State) {
 	hx, hz := s.isoHoverX, s.isoHoverZ
 	wrong := s.isoWrongLevel(hx, hz)
-	if fp := activeBrushFootprint(s); fp != nil {
+	if fp := activeFootprint(s); fp != nil {
 		col := isoHoverWire
 		if wrong || !footprintPlaceable(s, hx, hz, fp) {
 			col = isoBlockedWire
@@ -262,19 +255,6 @@ func drawIsoBrushPreview(s *State) {
 			s.drawIsoCellBox(hx+dx, hz+dz, col)
 		}
 	}
-}
-
-// activeBrushFootprint returns the active Props/Decor brush's multi-tile footprint,
-// or nil (single-tile brush / non-scatter layer).
-func activeBrushFootprint(s *State) []core.MultiTileOffset {
-	c := s.activeBrush().Char
-	switch s.layer {
-	case LayerProps:
-		return core.PropFootprint(c)
-	case LayerDecor:
-		return core.DecorFootprint(c)
-	}
-	return nil
 }
 
 // drawIsoCellBox outlines cell (x,z) at the active floor's height (where a paint
@@ -454,7 +434,7 @@ func drawEditorCompass(s *State, font rl.Font) {
 	cy := grid.Y + boxHalf + 6
 
 	// Dark circular overlay container so the compass is legible over any terrain/lighting.
-	rl.DrawCircle(int32(cx), int32(cy), boxHalf, rl.NewColor(14, 16, 22, 225))
+	rl.DrawCircle(int32(cx), int32(cy), boxHalf, withAlpha(bgFieldInset, 225))
 	rl.DrawCircleLines(int32(cx), int32(cy), boxHalf, withAlpha(editorGold, 90))
 
 	// project maps a world horizontal dir (wx,wz) to a screen offset (x right, y down).
@@ -521,7 +501,11 @@ func (s *State) isoPanTarget(dx, dy float32) {
 	yaw := float64(s.isoYaw)
 	rx, rz := float32(math.Cos(yaw+math.Pi/2)), float32(math.Sin(yaw+math.Pi/2))
 	fx, fz := float32(math.Cos(yaw)), float32(math.Sin(yaw))
-	k := isoPanSpeed / s.isoZoom
+	z := s.isoZoom
+	if z <= 0 { // mirror the zoom-wheel / isoCamera guard: never divide by a zero zoom
+		z = 1
+	}
+	k := isoPanSpeed / z
 	s.isoTargetX -= (rx*dx + fx*dy) * k
 	s.isoTargetZ -= (rz*dx + fz*dy) * k
 }

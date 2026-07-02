@@ -98,33 +98,33 @@ func AreaIsOutdoor(m *AreaDefinition) bool {
 var outdoorVerdictCache struct {
 	name          string
 	width, height int
-	rows          int
-	top, bot      string
+	hash          uint64
 	primed        bool
 	outdoor       bool
 }
 
-// CeilingFingerprint cheaply discriminates an area's ceiling layer (row count +
-// first/last row) so two same-named, same-sized areas with different roofs
-// don't share a stale verdict. Shared by outdoorVerdictCache + render's caches.
-func CeilingFingerprint(m *AreaDefinition) (rows int, top, bot string) {
-	rows = len(m.Ceiling)
-	if rows > 0 {
-		top, bot = m.Ceiling[0], m.Ceiling[rows-1]
+// CeilingFingerprint hashes the FULL ceiling layer (FNV-1a over every row) so
+// two same-named, same-sized areas with different roofs — including a middle-row
+// edit in the editor — can't share a stale verdict. Shared by
+// outdoorVerdictCache + render's caches.
+func CeilingFingerprint(m *AreaDefinition) uint64 {
+	h := FNVOffset64
+	for _, row := range m.Ceiling {
+		h = FoldLayerRow(h, row)
 	}
-	return rows, top, bot
+	return h
 }
 
 func areaIsOutdoorCached(m *AreaDefinition) bool {
 	c := &outdoorVerdictCache
-	rows, top, bot := CeilingFingerprint(m)
+	hash := CeilingFingerprint(m)
 	if c.primed && c.name == m.Name && c.width == m.Width && c.height == m.Height &&
-		c.rows == rows && c.top == top && c.bot == bot {
+		c.hash == hash {
 		return c.outdoor
 	}
 	c.outdoor = AreaIsOutdoor(m)
 	c.name, c.width, c.height = m.Name, m.Width, m.Height
-	c.rows, c.top, c.bot, c.primed = rows, top, bot, true
+	c.hash, c.primed = hash, true
 	return c.outdoor
 }
 

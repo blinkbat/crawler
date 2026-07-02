@@ -1169,6 +1169,24 @@ func (mf *MapFile) validate() error {
 		}
 		seenNames[d.Name] = struct{}{}
 	}
+	// Custom enemies: rows encode space-delimited (strings.Fields re-parse) with
+	// comma-joined skills, so whitespace in name/base-kind/skill — or a comma in a
+	// skill token — shifts every later column on reload. Reject at the data-model
+	// boundary (mirrors the pack-member and door-name guards) so a direct
+	// mapfile.Save caller fails loudly instead of writing an unloadable map.
+	for _, ce := range mf.CustomEnemies {
+		if ce.Name == "" || strings.ContainsAny(ce.Name, " \t") {
+			return fmt.Errorf("custom enemy name %q must be non-empty with no whitespace", ce.Name)
+		}
+		if ce.BaseKind == "" || strings.ContainsAny(ce.BaseKind, " \t") {
+			return fmt.Errorf("custom enemy %q base kind %q must be non-empty with no whitespace", ce.Name, ce.BaseKind)
+		}
+		for _, s := range ce.Skills {
+			if s == "" || strings.ContainsAny(s, ", \t") {
+				return fmt.Errorf("custom enemy %q skill %q must be non-empty with no comma or whitespace", ce.Name, s)
+			}
+		}
+	}
 	return nil
 }
 
@@ -1652,16 +1670,17 @@ func Load(path string) (MapFile, error) {
 }
 
 func Save(path string, mf MapFile) error {
-	// Validate BEFORE touching disk: os.Create truncates, so an invalid map must
-	// be rejected here or we'd truncate the prior good file on the way to a write
-	// the parser later refuses. Same check Parse runs, so a saved map reloads.
+	// Validate BEFORE touching disk — same check Parse runs, so a saved map reloads.
 	if err := mf.validate(); err != nil {
 		return fmt.Errorf("refusing to save invalid map %q: %w", path, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), AssetDirMode); err != nil {
 		return err
 	}
-	f, err := os.Create(path)
+	// Write to a sibling temp file and rename over the target: an I/O failure
+	// mid-encode (disk full, network drive) must not destroy the prior good map.
+	tmp := path + ".tmp"
+	f, err := os.Create(tmp)
 	if err != nil {
 		return err
 	}
@@ -1671,7 +1690,11 @@ func Save(path string, mf MapFile) error {
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
-	return err
+	if err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // mapDirEntries returns dir's non-dir .map entries (case-insensitive) — the shared

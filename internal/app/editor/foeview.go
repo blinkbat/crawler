@@ -330,11 +330,7 @@ func openFoeViewModal(s *State) {
 		seedFoeVisual(s)
 		s.foeInit = true
 	}
-	s.foeViewTab = foeTabLayout
-	s.foeViewZoom = 1
-	enterAssetEditing(s)
-	foeDrag.slider = noSliderDrag
-	foeDrag.asset = noSliderDrag
+	resetVisualizerView(s, &foeDrag)
 }
 
 // enterAssetEditing resets the Asset-tab cursor and flags the preview stale so
@@ -344,6 +340,26 @@ func openFoeViewModal(s *State) {
 func enterAssetEditing(s *State) {
 	s.assetCursor = 0
 	s.assetPreviewStale = true
+}
+
+// resetVisualizerView restores the shared view state (tab, zoom, asset cursor) and
+// clears the given modal's in-flight drag. Run on every Foe/Party visualizer open
+// so the two entry points can't drift.
+func resetVisualizerView(s *State, drag *visualizerDrag) {
+	s.foeViewTab = foeTabLayout
+	s.foeViewZoom = 1
+	enterAssetEditing(s)
+	drag.slider = noSliderDrag
+	drag.asset = noSliderDrag
+}
+
+// closeVisualizer tears down the live 3D + asset preview and closes the modal,
+// shared by the Esc and close-button paths (closeModal repeats the teardown
+// idempotently as a safety net).
+func closeVisualizer(s *State, cb visualizerCallbacks) {
+	cb.closePreview()
+	render.ClearAssetPreview()
+	closeModal(s)
 }
 
 // seedFoeVisual loads the current foe's live visual into the working copy and
@@ -558,9 +574,7 @@ type visualizerCallbacks struct {
 // Behavior-identical to the old per-modal updaters; only the cb fields differ.
 func updateVisualizerModal(s *State, cb visualizerCallbacks) Action {
 	if editorCancelPressed() {
-		cb.closePreview()
-		render.ClearAssetPreview()
-		closeModal(s)
+		closeVisualizer(s, cb)
 		return ActionNone
 	}
 
@@ -669,9 +683,7 @@ func handleVisualizerClick(s *State, l *foeViewLayout, mp rl.Vector2, cb visuali
 		return
 	}
 	if pointIn(mp, l.closeBtn) {
-		cb.closePreview()
-		render.ClearAssetPreview()
-		closeModal(s)
+		closeVisualizer(s, cb)
 		return
 	}
 }

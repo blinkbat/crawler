@@ -123,6 +123,12 @@ func Update(g *core.GameState, dt float32) {
 	// this can't re-enter. Gated on an active combat phase, and on a real pack —
 	// BattleMembers reads stale/-1 ActivePack as empty, which must NOT look like a wipe.
 	inCombatPhase := g.Battle.Phase.InCombat()
+	// Party wipe before enemy wipe (mirrors finishActorTurn): if both sides are
+	// down the battle is a loss, never a zero-survivor victory.
+	if g.Battle.Phase != core.BattleWon && g.Battle.Phase != core.BattleLost && core.ActivePartyCount(g.Party) == 0 {
+		loseBattle(g, "The party is driven back. Press to recover.")
+		return
+	}
 	if inCombatPhase && checkEnemyWipeoutFor(g, pack, members) {
 		return
 	}
@@ -133,10 +139,6 @@ func Update(g *core.GameState, dt float32) {
 	// the spoils screen + foe-killed triggers.
 	if inCombatPhase && (g.Battle.EnemyIndex < 0 || g.Battle.EnemyIndex >= len(members)) {
 		leaveBattle(g, "")
-		return
-	}
-	if g.Battle.Phase != core.BattleWon && g.Battle.Phase != core.BattleLost && core.ActivePartyCount(g.Party) == 0 {
-		loseBattle(g, "The party is driven back. Press to recover.")
 		return
 	}
 	if g.Battle.Splash > 0 {
@@ -403,9 +405,13 @@ func pushEnemyReadiness(g *core.GameState, slot, amount int) bool {
 		g.Battle.Readiness = map[core.ActorRef]int{}
 	}
 	cur := g.Battle.Readiness[ref]
+	before := cur
 	core.SubFloorZero(&cur, amount)
 	g.Battle.Readiness[ref] = cur
-	return true
+	// Honest move report: a target with no banked readiness (the common case
+	// right after it acts) is floored at 0 — the gauge didn't move, so the
+	// caller's "turn is shoved back" line must not fire.
+	return cur != before
 }
 
 // actorAppearsBefore reports whether `ref` occupies any queue slot strictly
@@ -678,10 +684,13 @@ func finishActorTurn(g *core.GameState) {
 	// leak into the next member's Bloodthirst / Killing Spree.
 	g.Battle.PhysDamageThisTurn = 0
 	g.Battle.EnemyKillsThisTurn = 0
-	if checkEnemyWipeout(g) {
+	// Party wipe FIRST: a killing blow whose own end-of-turn tick (poison,
+	// Overcharge recoil) also fells the last member must read as a loss — winning
+	// with zero living members would exit to explore in an unrecoverable state.
+	if checkPartyWipeout(g) {
 		return
 	}
-	if checkPartyWipeout(g) {
+	if checkEnemyWipeout(g) {
 		return
 	}
 	repointEnemyCursorIfDead(g)

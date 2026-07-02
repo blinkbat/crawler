@@ -924,14 +924,19 @@ func drawEntityListWindow(font rl.Font, theme render.Theme, lay entityModalLayou
 		lay.card.X+entityListTextInset, lay.listTop+float32(lay.end-lay.topRow)*lay.rowH, rowText)
 }
 
+// scrollArrowGlyph returns the up/down scroll caret; single-sourced so the two
+// scroll-hint helpers can't drift on the glyph.
+func scrollArrowGlyph(up bool) string {
+	if up {
+		return "▲"
+	}
+	return "▼"
+}
+
 // drawScrollArrow paints a bare ▲/▼ scroll affordance (no count) at pos; caller
 // owns the corner-offset math. For the "N more" counted form use drawScrollMoreHint.
 func drawScrollArrow(font rl.Font, up bool, pos rl.Vector2, fontSize float32, col rl.Color) {
-	arrow := "▼"
-	if up {
-		arrow = "▲"
-	}
-	render.DrawRichText(font, arrow, pos, fontSize, 1, col)
+	render.DrawRichText(font, scrollArrowGlyph(up), pos, fontSize, 1, col)
 }
 
 // drawCenteredRichLabel paints label centered on both axes within r at editorFontBody.
@@ -1006,17 +1011,6 @@ func stepperRow(x, y, valueW, gap float32) (value, minus, plus rl.Rectangle) {
 	minus, plus = stepperButtonPair(value.X+value.Width+gap, y, modalBtnH, modalBtnH, gap)
 	return value, minus, plus
 }
-
-// Door-link overlay colors.
-var (
-	doorLinkColor         = withAlpha(editorCyan, 220) // resolved same-map link
-	doorLinkWarnColor     = rl.NewColor(255, 90, 90, 235)   // dangling: target_door doesn't resolve
-	doorLinkExternalColor = rl.NewColor(186, 162, 255, 205) // cross-map link (target in another file)
-)
-
-// markerPackDot is the flat pack color for the Objects list + minimap dots
-// (distinct from the per-kind packMarkerColor on the canvas).
-var markerPackDot = rl.NewColor(222, 92, 80, 255)
 
 // doorSpawnByName finds the door spawn with the given name.
 func doorSpawnByName(spawns []core.DoorSpawn, name string) (core.DoorSpawn, bool) {
@@ -1617,7 +1611,7 @@ func isSentinelBrush(layer Layer, char byte) bool {
 // drawSentinelHatch overlays diagonal stripes onto a swatch so it reads as
 // "semantic" rather than a literal color.
 func drawSentinelHatch(r rl.Rectangle) {
-	stripe := rl.NewColor(0, 0, 0, 110)
+	stripe := sentinelHatchStripe
 	// Scissor to the swatch so the diagonal strokes can't bleed past its edges
 	// (DrawLineEx doesn't clip; the per-endpoint clamp left a ~1px corner overflow).
 	rl.BeginScissorMode(int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height))
@@ -1932,7 +1926,7 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 	drawLabel(font, "Reachability (click to validate)", mr.reachLabel)
 	if len(warnings) == 0 {
 		badgeValue := rl.NewRectangle(mr.reachArea.X, mr.reachArea.Y+reachBadgeTopGap, mr.reachArea.Width, reachBadgeOKRowH)
-		rl.DrawRectangleRec(badgeValue, rl.NewColor(14, 22, 18, 255))
+		rl.DrawRectangleRec(badgeValue, editorReachOKFill)
 		rl.DrawRectangleLinesEx(badgeValue, 1, editorReachOK)
 		render.DrawRichText(font, "OK", rl.NewVector2(badgeValue.X+8, badgeValue.Y+(badgeValue.Height-bodyLineH)/2), editorFontBody, 1, editorReachOKText)
 	} else {
@@ -1943,7 +1937,7 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 		}
 		h := 10 + reachBadgeRowH*float32(len(rows))
 		box := rl.NewRectangle(mr.reachArea.X, mr.reachArea.Y+reachBadgeTopGap, mr.reachArea.Width, h)
-		rl.DrawRectangleRec(box, rl.NewColor(38, 16, 18, 255))
+		rl.DrawRectangleRec(box, editorReachWarnFill)
 		rl.DrawRectangleLinesEx(box, 1, editorReachWarn)
 		for i, w := range rows {
 			render.DrawRichText(font, "! "+w,
@@ -2019,8 +2013,10 @@ func refreshElevGrid(s *State) {
 	for z := 0; z < h; z++ {
 		for x := 0; x < w; x++ {
 			elevGridCache[z*w+x] = s.area.ElevationLevelAt(x, z)
-			if !ramps && core.IsRampChar(s.area.Floor[z][x]) {
-				ramps = true
+			if !ramps {
+				if fc, ok := cellAt(s.area.Floor, x, z); ok && core.IsRampChar(fc) {
+					ramps = true
+				}
 			}
 		}
 	}
@@ -2078,6 +2074,11 @@ func drawGrid(s *State, font rl.Font) {
 	inCullWindow := func(tx, tz int) bool {
 		return tx >= xMin && tx < xMax && tz >= zMin && tz < zMax
 	}
+	// markerCulled: shared skip test for every spawn-marker loop (layer hidden or
+	// off-screen), so the guard can't drift between the pack/chest/door/crystal loops.
+	markerCulled := func(tx, tz int) bool {
+		return s.layerHidden[LayerEntities] || !inCullWindow(tx, tz)
+	}
 
 	// Active-layer char overlay: when a glyph fits, paint the active layer's
 	// tile-char per cell (only the active layer, to avoid noise). ALT-tap toggles
@@ -2085,7 +2086,7 @@ func drawGrid(s *State, font rl.Font) {
 	showCharOverlay := cell >= charOverlayMinCell && s.showTileGlyphs && !s.layerHidden[s.layer]
 	charFontSize := cell * 0.55
 	charShadow := glyphShadow
-	charFG := rl.NewColor(248, 250, 252, 235)
+	charFG := charGlyphFG
 
 	// Cache column-top levels (and the has-ramps flag) for this frame; the inner
 	// loop then indexes a slice instead of walking each voxel column.
@@ -2149,7 +2150,9 @@ func drawGrid(s *State, font rl.Font) {
 			// Ramp connector arrow on every ramp tile (the Levels panel carries the
 			// "which floor" read). Ramps touching the active level show even when hidden.
 			if elevGridRamps {
-				drawRampConnector(font, r, cell, s.area.Floor[z][x])
+				if fc, ok := cellAt(s.area.Floor, x, z); ok {
+					drawRampConnector(font, r, cell, fc)
+				}
 			}
 		}
 	}
@@ -2185,7 +2188,7 @@ func drawGrid(s *State, font rl.Font) {
 
 	// Axis tick labels every 5 cells, only when cells fit a digit.
 	if cell >= axisTickMinCell {
-		tickCol := rl.NewColor(220, 224, 232, 180)
+		tickCol := gridTickColor
 		// Top axis: column numbers.
 		for x := (xMin / 5) * 5; x < lineXMax; x += 5 {
 			label := tickLabel(x)
@@ -2217,7 +2220,7 @@ func drawGrid(s *State, font rl.Font) {
 			continue
 		}
 		// Cull spawns outside the visible window (skip off-screen leader-lookup + measure).
-		if s.layerHidden[LayerEntities] || !inCullWindow(sp.TileX, sp.TileZ) {
+		if markerCulled(sp.TileX, sp.TileZ) {
 			continue
 		}
 		cx, cy := s.rect.tileCenter(sp.TileX, sp.TileZ)
@@ -2249,7 +2252,7 @@ func drawGrid(s *State, font rl.Font) {
 
 	// Chest markers: a small filled square (distinct from pack circles).
 	for _, c := range s.area.ChestSpawns {
-		if s.layerHidden[LayerEntities] || !inCullWindow(c.TileX, c.TileZ) {
+		if markerCulled(c.TileX, c.TileZ) {
 			continue
 		}
 		gx, gy := s.rect.tileCorner(c.TileX, c.TileZ)
@@ -2264,7 +2267,7 @@ func drawGrid(s *State, font rl.Font) {
 
 	// Door markers: a tall rectangle + a facing arrowhead (distinct from chests).
 	for _, d := range s.area.DoorSpawns {
-		if s.layerHidden[LayerEntities] || !inCullWindow(d.TileX, d.TileZ) {
+		if markerCulled(d.TileX, d.TileZ) {
 			continue
 		}
 		gx, gy := s.rect.tileCorner(d.TileX, d.TileZ)
@@ -2287,7 +2290,7 @@ func drawGrid(s *State, font rl.Font) {
 
 	// Crystal markers: a small cyan diamond (distinct from the other markers).
 	for _, c := range s.area.CrystalSpawns {
-		if s.layerHidden[LayerEntities] || !inCullWindow(c.TileX, c.TileZ) {
+		if markerCulled(c.TileX, c.TileZ) {
 			continue
 		}
 		cx, cy := s.rect.tileCenter(c.TileX, c.TileZ)
@@ -2319,9 +2322,6 @@ func drawGrid(s *State, font rl.Font) {
 	// Brush ghost / hover highlight.
 	hoverPx := s.hoverX
 	hoverPz := s.hoverZ
-	if s.gridCursorX >= 0 {
-		hoverPx, hoverPz = s.gridCursorX, s.gridCursorZ
-	}
 	if hoverPx >= 0 {
 		// Multi-tile footprint preview: outline every cell tinted by placeability
 		// (green = clear, red = blocked) so the full shape shows before clicking.
@@ -2582,21 +2582,6 @@ func levelDistanceFade(s *State, lvl int) float32 {
 	return core.DistanceFade(lvl-s.editLevel, levelFadeTable[:], levelFadeMin)
 }
 
-// Editor accent bases — one RGB per accent so the alpha variants used across the
-// 2D canvas and 3D view can't drift when the accent is retuned. Build a variant
-// with withAlpha.
-var (
-	editorGold = rl.NewColor(255, 224, 130, 255) // active-level / hover / placeable preview
-	editorCyan = rl.NewColor(120, 200, 255, 255) // active-floor slab / resolved door link
-)
-
-// currentLevelOutlineColor is the gold stroke around active-level tile groups.
-var currentLevelOutlineColor = withAlpha(editorGold, 235)
-
-// currentLevelOutlineUnderlay is the dark halo under the gold core, for contrast
-// over pale active-level floors.
-var currentLevelOutlineUnderlay = rl.NewColor(20, 20, 26, 220)
-
 // drawCurrentLevelOutline strokes the perimeter of each active-level tile group:
 // for each active tile, the edges facing a different-level neighbour (or map
 // edge). Each boundary edge is drawn once (only the active side strokes it).
@@ -2758,7 +2743,7 @@ func drawRampConnector(font rl.Font, r rl.Rectangle, cell float32, floorChar byt
 	if !ok {
 		return
 	}
-	rl.DrawRectangleLinesEx(r, 2, rl.NewColor(120, 230, 140, 220))
+	rl.DrawRectangleLinesEx(r, 2, rampConnectorColor)
 	drawTileGlyph(font, r, cell, cell*0.62, core.RampCharForFacing(facing), rl.NewColor(150, 240, 165, 245), glyphShadow)
 }
 
@@ -2793,11 +2778,11 @@ func drawCeilingHash(r rl.Rectangle, cell float32, col color.RGBA) {
 func currentLayerGlyph(s *State, x, z, lvl int) (byte, bool) {
 	switch s.layer {
 	case LayerWalls:
-		if w := s.area.Walls[z][x]; core.IsFaceSkinChar(w) {
+		if w, ok := cellAt(s.area.Walls, x, z); ok && core.IsFaceSkinChar(w) {
 			return w, true
 		}
 	case LayerFloor:
-		if f := s.area.Floor[z][x]; f != core.FloorAuto && f != 0 {
+		if f, ok := cellAt(s.area.Floor, x, z); ok && f != core.FloorAuto && f != 0 {
 			return f, true
 		}
 	case LayerDecor:
@@ -2809,8 +2794,8 @@ func currentLayerGlyph(s *State, x, z, lvl int) (byte, bool) {
 			return p, true
 		}
 	case LayerCeiling:
-		if s.area.CeilingAt(x, z) {
-			return s.area.Ceiling[z][x], true
+		if c, ok := cellAt(s.area.Ceiling, x, z); ok && s.area.CeilingAt(x, z) {
+			return c, true
 		}
 	case LayerElevation:
 		// Show off-ground tiles' level char; ground baseline stays blank.
@@ -3215,7 +3200,7 @@ func drawDoorEditModal(s *State, font rl.Font, theme render.Theme) {
 func drawValidateModal(s *State, font rl.Font, theme render.Theme) {
 	rows := s.modalValidateRows
 	pw := validateModalW
-	ph := float32(56 + float32(len(rows))*22 + 56)
+	ph := 56 + float32(len(rows))*reachBadgeRowH + 56
 	if ph < 160 {
 		ph = 160
 	}
@@ -3232,7 +3217,7 @@ func drawValidateModal(s *State, font rl.Font, theme render.Theme) {
 		for _, line := range rows {
 			render.DrawRichText(font, "! "+line,
 				rl.NewVector2(r.X+modalContentInset, y), editorFontAccent, 1, theme.BorderDanger)
-			y += 22
+			y += reachBadgeRowH
 		}
 	}
 	drawModalFooterHint(font, r, "Esc / Enter / click   close", theme)

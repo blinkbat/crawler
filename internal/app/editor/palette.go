@@ -67,8 +67,14 @@ var (
 	swatchEdge    = rl.NewColor(0, 0, 0, 200)
 	gridLineCol   = rl.NewColor(0, 0, 0, 80)
 	gridLineMajor = rl.NewColor(0, 0, 0, 160)
-	// glyphShadow is the drop-shadow behind canvas tile-glyphs + elevation digits.
+	// gridTickColor tints the canvas axis tick labels.
+	gridTickColor = rl.NewColor(220, 224, 232, 180)
+	// glyphShadow is the drop-shadow behind canvas tile-glyphs + elevation digits;
+	// charGlyphFG is the glyph foreground it backs.
 	glyphShadow = withAlpha(outlineHard, 200)
+	charGlyphFG = rl.NewColor(248, 250, 252, 235)
+	// sentinelHatchStripe is the diagonal scrim marking a "semantic" (non-color) swatch.
+	sentinelHatchStripe = rl.NewColor(0, 0, 0, 110)
 	// selectionOutline is the white ring around brush-ghost / rect-drag / pack-drag previews.
 	selectionOutline = rl.NewColor(255, 255, 255, 220)
 	// marqueeOutline/Fill style the Select-tool copy/paste marquee. Amber to read
@@ -127,10 +133,46 @@ var (
 	editorPlaceOK   = rl.NewColor(120, 240, 140, 255)
 	editorPlaceWarn = rl.NewColor(240, 110, 110, 255)
 
+	// Dark green/red backings behind the reachability OK/warn badges (pair with the
+	// editorReach* outlines + editorReach*Text labels).
+	editorReachOKFill   = rl.NewColor(14, 22, 18, 255)
+	editorReachWarnFill = rl.NewColor(38, 16, 18, 255)
+
 	// Reachability badge FILL text (brighter green/red, legible inside the dark
 	// outlined badges). editorReachWarnText also paints "(+N more)" via withAlpha.
 	editorReachOKText   = rl.NewColor(150, 220, 180, 255)
 	editorReachWarnText = rl.NewColor(240, 180, 180, 255)
+
+	// Canvas/3D accent bases — one RGB per accent so the alpha variants used across
+	// the 2D canvas and 3D view can't drift when the accent is retuned. Build a
+	// variant with withAlpha.
+	editorGold = rl.NewColor(255, 224, 130, 255) // active-level / hover / placeable preview
+	editorCyan = rl.NewColor(120, 200, 255, 255) // active-floor slab / resolved door link
+
+	// currentLevelOutlineColor is the gold stroke around active-level tile groups;
+	// currentLevelOutlineUnderlay is the dark halo under it, for contrast over pale
+	// active-level floors.
+	currentLevelOutlineColor    = withAlpha(editorGold, 235)
+	currentLevelOutlineUnderlay = rl.NewColor(20, 20, 26, 220)
+
+	// Door-link overlay colors (draw.go drawDoorLinks).
+	doorLinkColor         = withAlpha(editorCyan, 220)      // resolved same-map link
+	doorLinkWarnColor     = rl.NewColor(255, 90, 90, 235)   // dangling: target_door doesn't resolve
+	doorLinkExternalColor = rl.NewColor(186, 162, 255, 205) // cross-map link (target in another file)
+
+	// markerPackDot is the flat pack color for the Objects list + minimap dots
+	// (distinct from the per-kind packMarkerColor on the canvas).
+	markerPackDot = rl.NewColor(222, 92, 80, 255)
+
+	// Iso (3D) view accents: hovered-cell wire, footprint-won't-fit wire, off-screen
+	// clear, and the faint slab marking the active editLevel.
+	isoHoverWire   = editorGold
+	isoBlockedWire = rl.NewColor(255, 96, 96, 255)
+	isoBG          = rl.NewColor(26, 28, 34, 255)
+	isoActiveFloor = withAlpha(editorCyan, 55)
+
+	// rampConnectorColor strokes the ramp low→high connector on the canvas.
+	rampConnectorColor = rl.NewColor(120, 230, 140, 220)
 )
 
 // tintSwatch nudges a base swatch by per-channel deltas (clamped [0,255]),

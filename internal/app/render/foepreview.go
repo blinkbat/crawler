@@ -196,7 +196,9 @@ func drawVisualizerPreview(rect rl.Rectangle, rt *previewRT, v enemyVisual, zoom
 	if w <= 0 || h <= 0 {
 		return
 	}
-	if !rt.ensure(w, h) {
+	// ensureStable, not ensure: the rect tracks the window layout, so a resize
+	// drag would otherwise Unload+Load the RT every frame (the DrawModelEx crash).
+	if !rt.ensureStable(w, h) {
 		return
 	}
 	cam := zoomedPreviewCamera(zoom)

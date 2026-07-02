@@ -421,6 +421,26 @@ func (a *AreaDefinition) SetFaceDir(x, z, dir int, skin byte) {
 	}
 }
 
+// PruneFaceOverridesOutside drops per-tile face skins whose tile fell past the
+// new (w,h) bounds after a shrink and returns how many were removed. Without it a
+// later re-grow re-exposes stale skins on the reclaimed tiles (mirrors the resize
+// spawn/location prune). Rebuilds the lazy index on next lookup.
+func (a *AreaDefinition) PruneFaceOverridesOutside(w, h int) int {
+	if len(a.FaceOverrides) == 0 {
+		return 0
+	}
+	kept := make([]FaceOverride, 0, len(a.FaceOverrides))
+	for _, o := range a.FaceOverrides {
+		if o.X >= 0 && o.X < w && o.Z >= 0 && o.Z < h {
+			kept = append(kept, o)
+		}
+	}
+	dropped := len(a.FaceOverrides) - len(kept)
+	a.FaceOverrides = kept
+	a.faceOverrideIdx = nil // bounds changed — rebuild lazily
+	return dropped
+}
+
 // CeilingAt reports whether the cell has a solid ceiling slab. OOB reads as
 // no-ceiling; maps without a ceiling: section get a blank layer (always false).
 func (a *AreaDefinition) CeilingAt(x, z int) bool {
@@ -749,7 +769,11 @@ func (a *AreaDefinition) PropBlocksStanding(x, level, z int) bool {
 		if c == TilePropEmpty || !IsPropChar(c) || PropIsNonBlocking(c) {
 			continue
 		}
-		if level < base+PropBlockHeight(c) {
+		// A blocking prop with no BlockHeight would otherwise block NOTHING here
+		// (level < base+0 is never true) — the voxel path never consults BlockedAt,
+		// so treat a height-less blocker as filling its column upward.
+		h := PropBlockHeight(c)
+		if h <= 0 || level < base+h {
 			return true
 		}
 	}
@@ -1104,8 +1128,10 @@ func DecorFootprintTail(anchor byte) byte {
 // propDefs is the SINGLE source for the prop char list, the props row of
 // tileLabelTable (populated in init), PropIsNonBlocking, and PropBlockHeight —
 // add a prop here and all of them derive automatically. BlockHeight is voxel
-// tallness for level-aware collision (0 = non-blocking OR a full-column blocker
-// handled by the 2D BlockedAt path; squat props 1; full trees/cairns 2).
+// tallness for level-aware collision: EVERY blocking prop needs one (squat props
+// 1; tall pieces / full trees 2) — the voxel step path never consults BlockedAt,
+// so a blocking prop left at 0 falls back to a full-column block in
+// PropBlocksStanding. Non-blocking props stay 0.
 type propDef struct {
 	Char        byte
 	Label       string
@@ -1121,28 +1147,28 @@ var propDefs = []propDef{
 	{TileTreeYoung, "Young Tree", false, 1},
 	{TileRockLarge, "Boulder", false, 1},
 	{TileBushLarge, "Large Bush", false, 1},
-	{TileCrate, "Crate", false, 0},
-	{TileBarrel, "Barrel", false, 0},
-	{TileUrn, "Urn", false, 0},
-	{TileStalagmite, "Stalagmite", false, 0},
-	{TilePillar, "Pillar", false, 0},
-	{TileBrokenPillar, "Broken Pillar", false, 0},
-	{TileStatue, "Statue", false, 0},
-	{TileObelisk, "Obelisk", false, 0},
-	{TileFountain, "Fountain", false, 0},
+	{TileCrate, "Crate", false, 1},
+	{TileBarrel, "Barrel", false, 1},
+	{TileUrn, "Urn", false, 1},
+	{TileStalagmite, "Stalagmite", false, 1},
+	{TilePillar, "Pillar", false, 2},
+	{TileBrokenPillar, "Broken Pillar", false, 1},
+	{TileStatue, "Statue", false, 2},
+	{TileObelisk, "Obelisk", false, 2},
+	{TileFountain, "Fountain", false, 1},
 	{TileRockCairn, "Rock Cairn", false, 2},
 	{TileRockFormation, "Rock Formation (anchor)", false, 2},
 	{TileRockFormationTail, "Rock Formation (tail)", false, 2},
-	{TileWell, "Well", false, 0},
-	{TileGravestone, "Gravestone", false, 0},
-	{TileSignPost, "Sign Post", false, 0},
-	{TileHayBale, "Hay Bale", false, 0},
-	{TileScarecrow, "Scarecrow", false, 0},
-	{TileBookshelf, "Bookshelf", false, 0},
-	{TileTable, "Table", false, 0},
-	{TileBed, "Bed", false, 0},
-	{TileBrazier, "Brazier", false, 0},
-	{TileSarcophagus, "Sarcophagus", false, 0},
+	{TileWell, "Well", false, 1},
+	{TileGravestone, "Gravestone", false, 1},
+	{TileSignPost, "Sign Post", false, 1},
+	{TileHayBale, "Hay Bale", false, 1},
+	{TileScarecrow, "Scarecrow", false, 2},
+	{TileBookshelf, "Bookshelf", false, 2},
+	{TileTable, "Table", false, 1},
+	{TileBed, "Bed", false, 1},
+	{TileBrazier, "Brazier", false, 1},
+	{TileSarcophagus, "Sarcophagus", false, 1},
 	{TileTorch, "Wall Torch", true, 0},               // mounts on wall, leaves floor clear
 	{TilePropExoticFlower, "Exotic Flower", true, 0}, // decorative plants — walkable
 	{TilePropTallFern, "Tall Fern", true, 0},
@@ -1426,6 +1452,14 @@ func init() {
 	// case the conversion is ever rewritten field-by-field.)
 	if a, b := len(FaceOverride{}.Skins), len(mapfile.MapFace{}.Skins); a != b {
 		panic(fmt.Sprintf("core: FaceOverride.Skins len=%d but mapfile.MapFace.Skins len=%d — keep them equal (= FacingCount)", a, b))
+	}
+	// RampAscentFacing and RampCharForFacing are inverse switches kept in lockstep
+	// by hand; round-trip every facing so adding a ramp direction to one and not
+	// the other trips here at startup instead of decoding silently wrong.
+	for facing := 0; facing < FacingCount; facing++ {
+		if got, ok := RampAscentFacing(RampCharForFacing(facing)); !ok || got != facing {
+			panic(fmt.Sprintf("core: ramp facing %d round-trips to (%d,%v) — RampCharForFacing and RampAscentFacing are out of lockstep", facing, got, ok))
+		}
 	}
 }
 

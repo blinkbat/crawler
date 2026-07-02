@@ -96,8 +96,9 @@ func EnemySlug(kind EnemyKind) string {
 
 // slugify lowercases s, collapses non-alphanumeric runs to one underscore, and
 // trims edge underscores. On-disk contract for the sprite-asset key (visuals.json
-// key + <slug>.png). Distinct from SanitizeFilename / SanitizeCustomEnemyName —
-// don't swap; each owns a different on-disk format.
+// key + <slug>.png). Distinct from SanitizeFilename / SanitizeCustomEnemyName /
+// SkillOnDiskName (which only lowercases + maps spaces→underscores, keeping other
+// punctuation) — don't swap; each owns a different on-disk format.
 func slugify(s string) string {
 	var b strings.Builder
 	prevUnderscore := false

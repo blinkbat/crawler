@@ -429,15 +429,7 @@ func isStartBlocked(a AreaDefinition) bool {
 	}
 	// Blocking props + a blocking floor (deep water) apply to both map types and are
 	// exactly what the runtime enforces, so defer to BlockedAt rather than re-listing
-	// prop chars.
-	if a.BlockedAt(a.StartTileX, a.StartTileZ) {
-		return true
-	}
-	// The legacy Walls rock layer only walls off HEIGHTFIELD maps. On a voxel map the
-	// solids stack is authoritative — a '#' in Walls can sit under a walkable deck —
-	// and the runtime never consults Walls there, so neither should this check.
-	if len(a.Solids) == 0 && a.Walls[a.StartTileZ][a.StartTileX] == TileRock {
-		return true
-	}
-	return false
+	// prop chars. The Walls layer is deliberately NOT consulted: it's face-skin only
+	// (BlockedAt never reads it), so a '#' there is a walkable tile with a rock skin.
+	return a.BlockedAt(a.StartTileX, a.StartTileZ)
 }

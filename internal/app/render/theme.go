@@ -422,6 +422,12 @@ var (
 	stonePaletteDark  = rl.NewColor(176, 172, 164, 255)
 	stonePaletteLight = rl.NewColor(232, 224, 210, 255)
 
+	// marblePaleBody / marblePaleCap are the pale dressed-stone tones shared by the
+	// archway, pillars, and well/statue (body/shaft vs cap/head highlight). Lighter
+	// than stonePalette* (faceted rock) — a distinct smooth-marble family.
+	marblePaleBody = rl.NewColor(220, 214, 198, 255)
+	marblePaleCap  = rl.NewColor(228, 222, 206, 255)
+
 	// Shared iron-fixture + flame palette for every torch/brazier (world.go). Iron is
 	// lit by the world shader; flame tints (hot core → mid → tip) are applied to unlit
 	// models so they glow. Shared by drawWallTorch + the brazier/candle props.

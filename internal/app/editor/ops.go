@@ -317,6 +317,53 @@ func decorUsesStack(s *State, x, z int) bool {
 	return lvl >= 0 && lvl != s.editLevel
 }
 
+// layerHasFloorTags reports whether a per-tile level grid carries any non-auto
+// tag — an item parked on a raised floor. Flood/fill-all write only the legacy
+// char grid (never the level tags), so they must refuse such a map even when no
+// stack has materialized yet, mirroring the brush path's propUsesStack routing.
+func layerHasFloorTags(grid []string) bool {
+	for _, row := range grid {
+		for i := 0; i < len(row); i++ {
+			if row[i] != core.PropLevelAuto {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// layerBlocksBulkFill reports whether flood/fill-all must refuse the active layer
+// because it uses per-floor prop/decor semantics (a materialized stack OR a
+// raised-floor level tag) that a legacy-grid write would make invisible or
+// clobber. The brush tools handle floors per-cell; bulk grid writes don't touch
+// the stack/level tags. Callers keep their own flash text.
+func layerBlocksBulkFill(s *State) bool {
+	return (s.layer == LayerProps && (len(s.area.PropStack) > 0 || layerHasFloorTags(s.area.PropLevels))) ||
+		(s.layer == LayerDecor && (len(s.area.DecorStack) > 0 || layerHasFloorTags(s.area.DecorLevels)))
+}
+
+// liftCellsToActiveLevel raises each listed cell's ground to the active edit level
+// after a PAINT flood/fill (mirror of applyTool's per-cell stamp; erase and Walls
+// never call this). Voxel maps lift via SetColumnTop; heightfields batch a single
+// Elevation row rewrite. Cells out of the backing rows (ragged map) are skipped.
+func liftCellsToActiveLevel(s *State, cells [][2]int) {
+	if len(s.area.Solids) > 0 {
+		for _, c := range cells {
+			setTileGroundLevel(s, c[0], c[1], s.editLevel)
+		}
+		return
+	}
+	ch := core.ElevationChar(s.editLevel)
+	rewriteLayerRows(&s.area.Elevation, func(rows [][]byte) {
+		for _, c := range cells {
+			x, z := c[0], c[1]
+			if z >= 0 && z < len(rows) && x >= 0 && x < len(rows[z]) {
+				rows[z][x] = ch
+			}
+		}
+	})
+}
+
 // setPropFloor places prop char c on the ACTIVE floor of column (x,z): through
 // the per-floor stack when the column is multi-floor, else the legacy single grid
 // + PropLevels tag. TilePropEmpty clears the active floor.
@@ -932,6 +979,9 @@ func resize(s *State, w, h int) {
 	if len(s.area.DecorLevels) > 0 {
 		s.area.DecorLevels = resizeLayer(s.area.DecorLevels, s.area.Width, s.area.Height, w, h, core.PropLevelAuto)
 	}
+	// Face skins are per-tile too: drop any now past the new bounds so a later
+	// re-grow can't re-expose stale cliff skins (spawns/locations are pruned below).
+	s.area.PruneFaceOverridesOutside(w, h)
 	s.area.Width = w
 	s.area.Height = h
 	clearSelection(s) // bounds changed — a stale marquee could outline off-grid
@@ -952,10 +1002,11 @@ func resize(s *State, w, h int) {
 		s.area.StartTileZ = 1
 	}
 	entitiesBefore := totalEntityCount(&s.area)
-	s.area.PackSpawns = removePackSpawnsOutside(s.area.PackSpawns, w, h)
-	s.area.ChestSpawns = removeChestSpawnsOutside(s.area.ChestSpawns, w, h)
-	s.area.DoorSpawns = removeDoorSpawnsOutside(s.area.DoorSpawns, w, h)
-	s.area.CrystalSpawns = removeCrystalSpawnsOutside(s.area.CrystalSpawns, w, h)
+	outside := outsideBounds(w, h)
+	s.area.PackSpawns = removeSpawnsWhere(s.area.PackSpawns, outside)
+	s.area.ChestSpawns = removeSpawnsWhere(s.area.ChestSpawns, outside)
+	s.area.DoorSpawns = removeSpawnsWhere(s.area.DoorSpawns, outside)
+	s.area.CrystalSpawns = removeSpawnsWhere(s.area.CrystalSpawns, outside)
 	// removeXOutside drops only spawns PAST the new bounds. A spawn on the tile
 	// that just became the sealed border is in-bounds but now walled — drop those
 	// too so a chest/door isn't buried unreachable.
@@ -994,30 +1045,10 @@ func pruneLocationsOutside(s *State, w, h int) []core.Location {
 }
 
 // outsideBounds is the shrink-prune predicate: a tile is outside the new (w,h)
-// bounds when its column or row falls past the edge. Shared by the four
-// removeXSpawnsOutside helpers.
+// bounds when its column or row falls past the edge. Fed to removeSpawnsWhere for
+// each spawn kind in resize.
 func outsideBounds(w, h int) func(x, z int) bool {
 	return func(x, z int) bool { return x >= w || z >= h }
-}
-
-// removeDoorSpawnsOutside drops door entries past the new bounds after a shrink.
-func removeDoorSpawnsOutside(spawns []core.DoorSpawn, w, h int) []core.DoorSpawn {
-	return removeSpawnsWhere(spawns, outsideBounds(w, h))
-}
-
-// removeCrystalSpawnsOutside drops crystal entries past the new bounds.
-func removeCrystalSpawnsOutside(spawns []core.CrystalSpawn, w, h int) []core.CrystalSpawn {
-	return removeSpawnsWhere(spawns, outsideBounds(w, h))
-}
-
-// removePackSpawnsOutside drops pack entries past the new bounds.
-func removePackSpawnsOutside(spawns []core.PackSpawn, w, h int) []core.PackSpawn {
-	return removeSpawnsWhere(spawns, outsideBounds(w, h))
-}
-
-// removeChestSpawnsOutside drops chest entries past the new bounds.
-func removeChestSpawnsOutside(spawns []core.ChestSpawn, w, h int) []core.ChestSpawn {
-	return removeSpawnsWhere(spawns, outsideBounds(w, h))
 }
 
 // sealWallBorder raises the outer ring one level (an enclosing wall) with an
@@ -1212,12 +1243,7 @@ func floodFill(s *State, x, z int, b byte, erase bool) {
 	if layer == nil {
 		return
 	}
-	// Per-floor scatter: once a column stacks prop/decor across floors, the single
-	// grid is frozen and readers use the stack — a grid flood would be invisible.
-	// Guard it (the brush/rect/line tools ARE per-floor). Single-floor maps (nil
-	// stack) never hit this, so flood on them is unchanged.
-	if (s.layer == LayerProps && len(s.area.PropStack) > 0) ||
-		(s.layer == LayerDecor && len(s.area.DecorStack) > 0) {
+	if layerBlocksBulkFill(s) {
 		s.flash("Flood fill isn't available for per-floor props/decor — use the brush")
 		return
 	}
@@ -1266,23 +1292,7 @@ func floodFill(s *State, x, z int, b byte, erase bool) {
 	case layerStampsActiveLevel(s.layer):
 		// PAINT: the flooded region joins the active floor (mirror of applyTool's
 		// per-cell stamp). Walls exempt.
-		if len(s.area.Solids) > 0 {
-			// Voxel map: lift each cell through SetColumnTop (see setTileGroundLevel).
-			for _, c := range filled {
-				setTileGroundLevel(s, c[0], c[1], s.editLevel)
-			}
-		} else {
-			// Heightfield: batch the lift into one row-set rewrite.
-			ch := core.ElevationChar(s.editLevel)
-			rewriteLayerRows(&s.area.Elevation, func(rows [][]byte) {
-				for _, c := range filled {
-					x, z := c[0], c[1]
-					if z >= 0 && z < len(rows) && x >= 0 && x < len(rows[z]) {
-						rows[z][x] = ch
-					}
-				}
-			})
-		}
+		liftCellsToActiveLevel(s, filled)
 	}
 	s.dirty = true
 }
@@ -1326,11 +1336,7 @@ func fillEntireLayer(s *State) {
 		s.flash("Pick a brush to Fill (the eraser fills nothing)")
 		return
 	}
-	// Per-floor scatter: once props/decor stack across floors the legacy grid is
-	// frozen (readers use the stack), so a grid fill would be invisible — refuse,
-	// mirroring floodFill. Single-floor maps (nil stack) fill normally below.
-	if (s.layer == LayerProps && len(s.area.PropStack) > 0) ||
-		(s.layer == LayerDecor && len(s.area.DecorStack) > 0) {
+	if layerBlocksBulkFill(s) {
 		s.flash("Fill all isn't available for per-floor props/decor — use the brush")
 		return
 	}
@@ -1349,34 +1355,19 @@ func fillEntireLayer(s *State) {
 		return
 	}
 	pushUndo(s)
+	var filled [][2]int
 	rewriteLayerRows(layer, func(rows [][]byte) {
 		for z := 0; z < s.area.Height && z < len(rows); z++ {
 			for x := 0; x < s.area.Width && x < len(rows[z]); x++ {
 				rows[z][x] = brush.Char
+				filled = append(filled, [2]int{x, z})
 			}
 		}
 	})
 	// A full content fill lifts the whole map to the active floor (no-op at level
 	// 0, so flat maps stay flat). Walls exempt (see stampActiveLevel).
 	if layerStampsActiveLevel(s.layer) {
-		if len(s.area.Solids) > 0 {
-			// Voxel map: lift every column via SetColumnTop (see setTileGroundLevel).
-			for z := 0; z < s.area.Height; z++ {
-				for x := 0; x < s.area.Width; x++ {
-					setTileGroundLevel(s, x, z, s.editLevel)
-				}
-			}
-		} else {
-			// Heightfield: batch the whole-map lift into one row-set rewrite.
-			ch := core.ElevationChar(s.editLevel)
-			rewriteLayerRows(&s.area.Elevation, func(rows [][]byte) {
-				for z := 0; z < s.area.Height && z < len(rows); z++ {
-					for x := 0; x < s.area.Width && x < len(rows[z]); x++ {
-						rows[z][x] = ch
-					}
-				}
-			})
-		}
+		liftCellsToActiveLevel(s, filled)
 	}
 	s.dirty = true
 	s.flash("Filled " + layerName(s.layer))
@@ -1406,6 +1397,30 @@ func centerViewOnTile(s *State, tx, tz int) {
 	s.flash("Centered on " + core.TileCoord(tx, tz))
 }
 
+// paintableCell reports whether a rect/line paint should stamp (x,z): in bounds
+// and not the player-start tile when the brush would wall it (TileRock). Shared by
+// paintRect/paintRectOutline/paintLine so the start-protection rule can't drift.
+func paintableCell(s *State, brushChar byte, x, z int) bool {
+	if !s.area.InBounds(x, z) {
+		return false
+	}
+	return !(brushChar == core.TileRock && s.area.StartTileX == x && s.area.StartTileZ == z)
+}
+
+// stampFootprintAnchor handles the multi-tile-footprint case for the rect/line
+// tools: such a brush can't tile across a region (every cell re-validates against
+// its neighbours and refuses), so it collapses to a single anchor stamp at
+// (x0,z0). Returns true when it handled the paint (the caller must then return).
+func stampFootprintAnchor(s *State, x0, z0 int) bool {
+	if !brushHasMultiTileFootprint(s) {
+		return false
+	}
+	if s.area.InBounds(x0, z0) {
+		applyTool(s, x0, z0)
+	}
+	return true
+}
+
 // paintRect paints the active brush across the rectangle (x0,z0)-(x1,z1). Player
 // start is left in place.
 func paintRect(s *State, x0, z0, x1, z1 int) {
@@ -1419,23 +1434,14 @@ func paintRect(s *State, x0, z0, x1, z1 int) {
 	if z0 > z1 {
 		z0, z1 = z1, z0
 	}
-	if brushHasMultiTileFootprint(s) {
-		// A multi-tile footprint can't tile across a rect (every cell re-validates
-		// against neighbours and refuses) — collapse to a single anchor stamp.
-		if s.area.InBounds(x0, z0) {
-			applyTool(s, x0, z0)
-		}
+	if stampFootprintAnchor(s, x0, z0) {
 		return
 	}
 	for z := z0; z <= z1; z++ {
 		for x := x0; x <= x1; x++ {
-			if !s.area.InBounds(x, z) {
-				continue
+			if paintableCell(s, brush.Char, x, z) {
+				applyTool(s, x, z)
 			}
-			if brush.Char == core.TileRock && s.area.StartTileX == x && s.area.StartTileZ == z {
-				continue
-			}
-			applyTool(s, x, z)
 		}
 	}
 }
@@ -1453,10 +1459,7 @@ func paintRectOutline(s *State, x0, z0, x1, z1 int) {
 	if z0 > z1 {
 		z0, z1 = z1, z0
 	}
-	if brushHasMultiTileFootprint(s) {
-		if s.area.InBounds(x0, z0) {
-			applyTool(s, x0, z0)
-		}
+	if stampFootprintAnchor(s, x0, z0) {
 		return
 	}
 	for z := z0; z <= z1; z++ {
@@ -1464,13 +1467,9 @@ func paintRectOutline(s *State, x0, z0, x1, z1 int) {
 			if x != x0 && x != x1 && z != z0 && z != z1 {
 				continue // interior cell — outline only
 			}
-			if !s.area.InBounds(x, z) {
-				continue
+			if paintableCell(s, brush.Char, x, z) {
+				applyTool(s, x, z)
 			}
-			if brush.Char == core.TileRock && s.area.StartTileX == x && s.area.StartTileZ == z {
-				continue
-			}
-			applyTool(s, x, z)
 		}
 	}
 }
@@ -1520,15 +1519,11 @@ func paintLine(s *State, x0, z0, x1, z1 int) {
 		return
 	}
 	brush := s.activeBrush()
-	if brushHasMultiTileFootprint(s) {
-		if s.area.InBounds(x0, z0) {
-			applyTool(s, x0, z0)
-		}
+	if stampFootprintAnchor(s, x0, z0) {
 		return
 	}
 	walkLine(x0, z0, x1, z1, func(cx, cz int) {
-		if s.area.InBounds(cx, cz) &&
-			!(brush.Char == core.TileRock && s.area.StartTileX == cx && s.area.StartTileZ == cz) {
+		if paintableCell(s, brush.Char, cx, cz) {
 			applyTool(s, cx, cz)
 		}
 	})

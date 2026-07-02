@@ -287,9 +287,19 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	// Validate crystals now the area's BlockedAt geometry is built: reject a
 	// hand-edited crystal on a blocked tile (renders embedded) or a duplicate
 	// (double-counts). Only fires on hand-edited maps.
-	seenCrystal := make(map[[2]int]bool, len(area.CrystalSpawns))
+	seenCrystal := make(map[[3]int]bool, len(area.CrystalSpawns))
 	for _, c := range area.CrystalSpawns {
-		if area.BlockedAt(c.TileX, c.TileZ) {
+		// Blocked-tile check mirrors the runtime's split: level-aware on a voxel
+		// map (a deck crystal is fine above a blocked ground floor), flat 2D
+		// BlockedAt on a heightfield.
+		if len(area.Solids) > 0 {
+			floor, ok := area.layerByteAt(area.Floor, c.TileX, c.TileZ)
+			blocked := (ok && IsBlockingFloor(floor)) ||
+				area.PropBlocksStanding(c.TileX, c.Level, c.TileZ)
+			if blocked {
+				return AreaDefinition{}, fmt.Errorf("crystal at (%d,%d) floor %d sits on a blocked spot (prop/deep water)", c.TileX, c.TileZ, c.Level)
+			}
+		} else if area.BlockedAt(c.TileX, c.TileZ) {
 			return AreaDefinition{}, fmt.Errorf("crystal at (%d,%d) sits on a blocked tile (wall/prop/deep water)", c.TileX, c.TileZ)
 		}
 		// Crystals now block their tile, so one on the player start would embed the
@@ -297,7 +307,9 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		if c.TileX == mf.StartX && c.TileZ == mf.StartZ {
 			return AreaDefinition{}, onStartErr("crystal", c.TileX, c.TileZ)
 		}
-		key := [2]int{c.TileX, c.TileZ}
+		// Duplicate key includes the floor: two crystals in one column on
+		// different voxel floors are distinct, runtime-supported placements.
+		key := [3]int{c.TileX, c.TileZ, c.Level}
 		if seenCrystal[key] {
 			return AreaDefinition{}, fmt.Errorf("duplicate crystal at (%d,%d)", c.TileX, c.TileZ)
 		}

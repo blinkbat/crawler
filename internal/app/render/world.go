@@ -427,7 +427,7 @@ func DrawSkyBackground(assets Resources, g *core.GameState) {
 	// (sparse pinpoints).
 	if profile.StarAlpha > 0 {
 		alpha := uint8(profile.StarAlpha * 255)
-		rl.DrawTexturePro(assets.starTexture, source, dest, rl.NewVector2(0, 0), 0, rl.NewColor(255, 255, 255, alpha))
+		rl.DrawTexturePro(assets.starTexture, source, dest, rl.NewVector2(0, 0), 0, colorWithAlpha(rl.White, alpha))
 	}
 }
 
@@ -799,15 +799,33 @@ func layersHash(layers ...[]string) uint64 {
 	return h
 }
 
+// foldFaceOverrides folds the per-tile face-skin overrides into digest h —
+// they feed tileElev.faceSkins, so an override edit must bust the cache.
+func foldFaceOverrides(h uint64, overrides []core.FaceOverride) uint64 {
+	for _, o := range overrides {
+		h = (h ^ uint64(o.X)) * core.FNVPrime64
+		h = (h ^ uint64(o.Z)) * core.FNVPrime64
+		for _, s := range o.Skins {
+			h = (h ^ uint64(s)) * core.FNVPrime64
+		}
+	}
+	return (h ^ 0xfd) * core.FNVPrime64 // layer separator
+}
+
 // elevGrid decodes every tile's level/ramp/skin into the reused flat buffer,
-// rebuilding only when the Floor/Elevation/Walls content (or dims/name) change.
+// rebuilding only when the content it caches (or dims/name) changes.
 func elevGrid(m *core.AreaDefinition, w, h int) []tileElev {
-	// Hash Floor/Elevation/Walls plus every Solids plane (so a voxel edit
-	// invalidates the cache), folded in sequence so the check allocates nothing.
+	// Hash every layer a tileElev is decoded FROM: Floor/Elevation/Walls, the
+	// Solids planes (voxel edits), the per-face overrides, and the prop/decor
+	// level tags — the buffer stores faceSkins + decorLevel/propLevel, so an
+	// editor edit to any of these must invalidate. Folded in sequence so the
+	// check allocates nothing.
 	hash := foldLayer(foldLayer(foldLayer(core.FNVOffset64, m.Floor), m.Elevation), m.Walls)
 	for _, plane := range m.Solids {
 		hash = foldLayer(hash, plane)
 	}
+	hash = foldFaceOverrides(hash, m.FaceOverrides)
+	hash = foldLayer(foldLayer(hash, m.PropLevels), m.DecorLevels)
 	k := &elevGridKey
 	if k.primed && k.name == m.Name && k.width == w && k.height == h &&
 		k.hash == hash && cap(elevGridBuf) >= w*h {
@@ -1160,25 +1178,23 @@ var propShadowRadiusTable = func() [256]float32 {
 }()
 
 // areaKey identifies the area a per-area cache was built for. Matched on name +
-// dims PLUS a ceiling fingerprint, so two same-named/sized areas with different
-// roofs can't share a stale verdict (the editor "untitled" case). Used by
-// enclosureCache and torchSiteCache.
+// dims PLUS a full-ceiling fingerprint, so two same-named/sized areas with
+// different roofs can't share a stale verdict (the editor "untitled" case).
+// Used by enclosureCache and torchSiteCache.
 type areaKey struct {
 	name          string
 	width, height int
-	rows          int
-	top, bot      string
+	ceilHash      uint64
 	primed        bool
 }
 
 func (k *areaKey) matches(m *core.AreaDefinition) bool {
-	rows, top, bot := core.CeilingFingerprint(m)
 	return k.primed && k.name == m.Name && k.width == m.Width && k.height == m.Height &&
-		k.rows == rows && k.top == top && k.bot == bot
+		k.ceilHash == core.CeilingFingerprint(m)
 }
 
 func (k *areaKey) set(m *core.AreaDefinition) {
-	k.rows, k.top, k.bot = core.CeilingFingerprint(m)
+	k.ceilHash = core.CeilingFingerprint(m)
 	k.name, k.width, k.height, k.primed = m.Name, m.Width, m.Height, true
 }
 
@@ -1240,43 +1256,67 @@ type torchSite struct {
 
 // torchSiteCache memoizes the brazier/torch tile list so the grid scan runs once
 // per area; per-frame work is then just distance + flicker over the cached sites.
+// contentHash fingerprints the layers torch sites derive from, so an editor
+// prop/elevation edit (same name/dims) rebuilds rather than serving stale lights.
 var torchSiteCache struct {
 	areaKey
-	sites []torchSite
+	contentHash uint64
+	sites       []torchSite
+}
+
+// torchContentHash folds every layer a torch site's position/height derives
+// from: prop placement (legacy grid + stack + level tags), elevation/solids
+// (light height), and floor (wall-facing probes read BlockedAt).
+func torchContentHash(m *core.AreaDefinition) uint64 {
+	h := foldLayer(foldLayer(foldLayer(core.FNVOffset64, m.Props), m.PropLevels), m.Elevation)
+	for _, plane := range m.PropStack {
+		h = foldLayer(h, plane)
+	}
+	for _, plane := range m.Solids {
+		h = foldLayer(h, plane)
+	}
+	return foldLayer(h, m.Floor)
 }
 
 func rebuildTorchSites(m *core.AreaDefinition) {
 	torchSiteCache.sites = torchSiteCache.sites[:0]
+	// Per-floor scan via PropAt — the legacy Props grid is FROZEN once a
+	// PropStack is materialized (floors.go), so indexing it directly would both
+	// miss editor-placed torches and light stale entries.
+	floors := max(m.ScatterStackHeight(), 1)
 	for z := 0; z < m.Height; z++ {
 		for x := 0; x < m.Width; x++ {
-			prop := m.Props[z][x]
-			isBrazier := prop == core.TileBrazier
-			isTorch := prop == core.TileTorch
-			if !isBrazier && !isTorch {
-				continue
+			for level := 0; level < floors; level++ {
+				prop := m.PropAt(x, level, z)
+				isBrazier := prop == core.TileBrazier
+				isTorch := prop == core.TileTorch
+				if !isBrazier && !isTorch {
+					continue
+				}
+				cx := core.TileCenter(x)
+				cz := core.TileCenter(z)
+				// Light origin rides the fixture's OWN floor height so a raised
+				// torch lights at its actual flame height.
+				elevY := m.StandGroundYAt(x, level, z)
+				var pos rl.Vector3
+				bright := float32(0.85) // wall torch — dimmer
+				if isBrazier {
+					// Floor brazier: flame at the bowl, brighter pool.
+					pos = rl.NewVector3(cx, elevY+torchFlameHeight, cz)
+					bright = 1.45
+				} else {
+					// Wall torch: light at the sconce, offset toward the wall + up.
+					fx, fz := wallTorchFacing(m, x, z)
+					pos = rl.NewVector3(cx-fx*wallTorchLightInset, elevY+wallTorchLightY, cz-fz*wallTorchLightInset)
+				}
+				torchSiteCache.sites = append(torchSiteCache.sites, torchSite{
+					pos: pos, cx: cx, cz: cz, hash: tileHash(x, z), bright: bright,
+				})
 			}
-			cx := core.TileCenter(x)
-			cz := core.TileCenter(z)
-			// Light origin rides the walkable-surface height so a raised torch
-			// lights at its actual flame height.
-			elevY := m.StandGroundY(x, z)
-			var pos rl.Vector3
-			bright := float32(0.85) // wall torch — dimmer
-			if isBrazier {
-				// Floor brazier: flame at the bowl, brighter pool.
-				pos = rl.NewVector3(cx, elevY+torchFlameHeight, cz)
-				bright = 1.45
-			} else {
-				// Wall torch: light at the sconce, offset toward the wall + up.
-				fx, fz := wallTorchFacing(m, x, z)
-				pos = rl.NewVector3(cx-fx*wallTorchLightInset, elevY+wallTorchLightY, cz-fz*wallTorchLightInset)
-			}
-			torchSiteCache.sites = append(torchSiteCache.sites, torchSite{
-				pos: pos, cx: cx, cz: cz, hash: tileHash(x, z), bright: bright,
-			})
 		}
 	}
 	torchSiteCache.set(m)
+	torchSiteCache.contentHash = torchContentHash(m)
 }
 
 // torchFlicker is the warm light-pool brightness in ~0.72..1.0 from two desynced
@@ -1302,7 +1342,7 @@ func torchFlicker(t, phase float32) float32 {
 // lockstep with the gem body. Both share one distance-ranked pool, so a near crystal
 // can out-prioritise a far torch (Grimrock-style: a live crystal is just a light).
 func collectTorches(m *core.AreaDefinition, crystals []core.Crystal, camera rl.Camera3D) []torchLight {
-	if !torchSiteCache.matches(m) {
+	if !torchSiteCache.matches(m) || torchSiteCache.contentHash != torchContentHash(m) {
 		rebuildTorchSites(m)
 	}
 	torchCandidateBuf = torchCandidateBuf[:0]
@@ -1323,7 +1363,7 @@ func collectTorches(m *core.AreaDefinition, crystals []core.Crystal, camera rl.C
 		if !c.Charged {
 			continue
 		}
-		base := tileWorldPos(c.TileX, c.TileZ, m.StandGroundY(c.TileX, c.TileZ))
+		base := tileWorldPos(c.TileX, c.TileZ, m.StandGroundYAt(c.TileX, c.Level, c.TileZ))
 		dx := base.X - camera.Position.X
 		dz := base.Z - camera.Position.Z
 		torchCandidateBuf = append(torchCandidateBuf, torchCandidate{

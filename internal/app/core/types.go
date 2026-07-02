@@ -1192,6 +1192,11 @@ type Battle struct {
 	// defend bar and routes to resolveEnemySpell. Cleared on turn end.
 	EnemyPendingSkill SkillID
 
+	// PendingSkillPaid records whether the party's committed cast actually spent
+	// MP at setup (false on a debug free cast or an Overcharge free-cast proc),
+	// so an apply-side cancel refunds only MP that was really paid.
+	PendingSkillPaid bool
+
 	// EnemyAttackMisses is set when a melee enemy turn rolled a clean miss — a basic
 	// swing or a single-target melee skill (Ingest). Suppresses the defend bar and
 	// wins the resolve switch over EnemyPendingSkill (the skill never lands). Cleared on turn end.

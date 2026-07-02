@@ -187,6 +187,17 @@ const (
 	contextMenuMinWidth = float32(180)
 )
 
+// contextMenuRowLabel is the drawn text for menu row i: row 0 carries the tile-
+// coord suffix. Shared by layout-measure and draw so the widened row-0 width can't
+// drift between the two.
+func contextMenuRowLabel(s *State, i int) string {
+	label := s.contextMenu.items[i].label
+	if i == 0 {
+		label = fmt.Sprintf("%s  (%s)", label, core.TileCoord(s.contextMenu.tileX, s.contextMenu.tileZ))
+	}
+	return label
+}
+
 // contextMenuLayout returns the open menu's per-row rects + background rect,
 // recomputed each frame so resizes/list edits reflow.
 func contextMenuLayout(s *State) (rl.Rectangle, []rl.Rectangle) {
@@ -199,14 +210,10 @@ func contextMenuLayout(s *State) (rl.Rectangle, []rl.Rectangle) {
 	// Approximate label width via per-char average (no font handle here). Doesn't
 	// share computeDropdownLayout's measure: the two surfaces size on different
 	// fonts/pads, so a shared helper would change one's sizing.
-	for i, it := range s.contextMenu.items {
+	for i := range s.contextMenu.items {
 		// Row 0 gets the tile-coord suffix at draw time; measure that widened
-		// string (no scissor clips the menu). Must mirror drawContextMenu's row 0.
-		label := it.label
-		if i == 0 {
-			label = fmt.Sprintf("%s  (%s)", label, core.TileCoord(s.contextMenu.tileX, s.contextMenu.tileZ))
-		}
-		w := approxTextWidth(label, editorFontLabel) + buttonLabelPadX
+		// string (no scissor clips the menu).
+		w := approxTextWidth(contextMenuRowLabel(s, i), editorFontLabel) + buttonLabelPadX
 		if w > width {
 			width = w
 		}
@@ -253,10 +260,7 @@ func drawContextMenu(s *State, font rl.Font, theme render.Theme) {
 			rl.DrawRectangleRec(r, bgRowHover)
 		}
 		// Tile coord on row 0 confirms which cell the menu refers to.
-		label := s.contextMenu.items[i].label
-		if i == 0 {
-			label = fmt.Sprintf("%s  (%s)", label, core.TileCoord(s.contextMenu.tileX, s.contextMenu.tileZ))
-		}
+		label := contextMenuRowLabel(s, i)
 		col := theme.TextPrimary
 		if !hovered {
 			col = theme.TextMuted

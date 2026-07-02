@@ -657,7 +657,7 @@ func loadArchwayDecor(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 		archMeshPlinth:   rl.LoadModelFromMesh(rl.GenMeshCube(0.48, 0.18, 0.48)),
 	}
 	textureAndShade(models, shader, marbleTex)
-	stone := rl.NewColor(220, 214, 198, 255)
+	stone := marblePaleBody
 	stoneCool := rl.NewColor(204, 196, 174, 255)
 	stoneDark := rl.NewColor(178, 170, 152, 255)
 	return propModel{
@@ -958,8 +958,8 @@ func loadPillarProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 	}
 	textureAndShade(models, shader, marbleTex)
 	baseTint := rl.NewColor(206, 200, 184, 255)
-	shaftTint := rl.NewColor(220, 214, 198, 255)
-	capTint := rl.NewColor(228, 222, 206, 255)
+	shaftTint := marblePaleBody
+	capTint := marblePaleCap
 	return propModel{
 		models: models,
 		parts: []treePart{
@@ -1008,8 +1008,8 @@ func loadStatueProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 	}
 	textureAndShade(models, shader, marbleTex)
 	pedTint := rl.NewColor(192, 184, 168, 255)
-	bodyTint := rl.NewColor(220, 214, 198, 255)
-	headTint := rl.NewColor(228, 222, 206, 255)
+	bodyTint := marblePaleBody
+	headTint := marblePaleCap
 	return propModel{
 		models: models,
 		parts: []treePart{

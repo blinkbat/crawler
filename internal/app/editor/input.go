@@ -140,6 +140,7 @@ func updateHotkeys(s *State) {
 		pasteSelection(s, s.hoverX, s.hoverZ)
 	case rl.IsKeyPressed(rl.KeyEscape) && s.selActive:
 		s.selActive = false
+		s.cancelHandled = true
 		s.flash("Selection cleared")
 	case ctrl && rl.IsKeyPressed(rl.KeyS):
 		saveCurrent(s)
@@ -173,9 +174,7 @@ func updateHotkeys(s *State) {
 	if rl.IsKeyPressed(rl.KeyF5) {
 		if ctrl {
 			tx, tz := -1, -1
-			if s.gridCursorX >= 0 {
-				tx, tz = s.gridCursorX, s.gridCursorZ
-			} else if s.hoverX >= 0 {
+			if s.hoverX >= 0 {
 				tx, tz = s.hoverX, s.hoverZ
 			}
 			if tx >= 0 && !s.area.BlockedAt(tx, tz) {
@@ -944,14 +943,7 @@ func applyToolBrushed(s *State, x, z int) {
 // brushHasMultiTileFootprint reports whether the active Props/Decor brush stamps
 // a multi-tile footprint — those collapse to a single anchor stamp under size>1.
 func brushHasMultiTileFootprint(s *State) bool {
-	c := s.activeBrush().Char
-	switch s.layer {
-	case LayerProps:
-		return core.PropFootprint(c) != nil
-	case LayerDecor:
-		return core.DecorFootprint(c) != nil
-	}
-	return false
+	return activeFootprint(s) != nil
 }
 
 func isGridLayer(l Layer) bool {
@@ -1039,8 +1031,13 @@ func activeLayerCharAt(s *State, x, z int) (byte, bool) {
 		return cellAt(s.area.Ceiling, x, z)
 	case LayerElevation:
 		return cellAt(s.area.Elevation, x, z)
+	case LayerEntities:
+		return 0, false // gridless — no per-tile char
+	default:
+		// A new grid layer must be handled above; panic loudly like activeGrid/
+		// applyTool/eraseAt rather than silently reading as empty here.
+		panic("editor: activeLayerCharAt missing case for layer — add it here and in activeGrid/applyTool/eraseAt")
 	}
-	return 0, false
 }
 
 // minZoom / maxZoom bound the editor canvas zoom.
@@ -1155,6 +1152,30 @@ func configForFocus(f focusField) textFieldConfig {
 func pumpFocusField(s *State, target *string) {
 	cfg := configForFocus(s.focus)
 	pumpPrintableASCII(target, cfg.MaxLen, cfg.Accept, s.markDirty)
+}
+
+// pumpFocusedTextField runs the shared focused-text-field control loop used by
+// every editor modal with an inline text field: drain keystrokes into target,
+// then Tab cycles focus (onTab; nil = no Tab handling), Enter defocuses, Esc backs
+// out (onCancel). A nil target means the field vanished — drop focus defensively.
+// The caller returns ActionNone afterward; the focused field owns the frame.
+func pumpFocusedTextField(s *State, target *string, onTab, onCancel func()) {
+	if target == nil {
+		s.focus = focusNone
+		return
+	}
+	pumpFocusField(s, target)
+	if onTab != nil && editorTabPressed() {
+		onTab()
+		return
+	}
+	if editorCommitPressed() {
+		s.focus = focusNone
+		return
+	}
+	if editorCancelPressed() && onCancel != nil {
+		onCancel()
+	}
 }
 
 // pumpPrintableASCII drains queued printable-ASCII into target (capped at maxLen,
@@ -1545,24 +1566,9 @@ func updateDoorEditModal(s *State) Action {
 	// confirms, Esc closes.
 	switch s.focus {
 	case focusDoorName, focusDoorTargetMap, focusDoorTargetDoor:
-		target := doorEditTextTarget(s)
-		if target != nil {
-			// pumpFocusField reads the cap from textFieldConfigs and its onChange
-			// is s.markDirty, so no second dirty guard is needed.
-			pumpFocusField(s, target)
-		}
-		if editorTabPressed() {
-			cycleDoorFocus(s)
-			return ActionNone
-		}
-		if editorCommitPressed() {
-			s.focus = focusNone
-			return ActionNone
-		}
-		if editorCancelPressed() {
-			closeModal(s)
-			return ActionNone
-		}
+		// pumpFocusField (inside the helper) reads the cap from textFieldConfigs and
+		// its onChange is s.markDirty, so no second dirty guard is needed.
+		pumpFocusedTextField(s, doorEditTextTarget(s), func() { cycleDoorFocus(s) }, func() { closeModal(s) })
 		return ActionNone
 	}
 

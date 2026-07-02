@@ -380,7 +380,7 @@ func performDefend(g *core.GameState) {
 func nextLivingSwapTarget(g *core.GameState, from, dir int) (int, bool) {
 	n := len(g.Party)
 	if n == 0 || dir == 0 {
-		return 0, false
+		return core.NoIndex, false
 	}
 	actor := g.Battle.CurrentParty
 	for step := 1; step <= n; step++ {
@@ -389,7 +389,7 @@ func nextLivingSwapTarget(g *core.GameState, from, dir int) (int, bool) {
 			return i, true
 		}
 	}
-	return 0, false
+	return core.NoIndex, false
 }
 
 // defaultSwapPartner is the member the Swap picker opens on: the first living

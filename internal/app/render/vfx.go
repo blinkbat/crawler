@@ -34,6 +34,17 @@ func ResetParticles() {
 	particles = particles[:0]
 }
 
+// ResetTransientVFX is the FULL scene-change reset: particles plus hit glyphs and
+// HP-bar ghosts. Scene teardown paths (quit-to-title, playtest exit) must use this,
+// not ResetParticles alone — a glyph live at quit time would freeze (Elapsed only
+// advances while drawn) and replay at a stale anchor on the next adventure entry,
+// and a surviving bar ghost plays a phantom drain over a loaded save's HP.
+func ResetTransientVFX() {
+	ResetParticles()
+	resetHitGlyphs()
+	resetBarGhosts()
+}
+
 // pushParticle is the spawn choke point; drops the particle at the hard cap to bound a runaway spawner.
 func pushParticle(p particle) {
 	if len(particles) >= particleHardCap {
@@ -82,9 +93,7 @@ func (p *particle) alive() bool { return p.Elapsed < p.Duration }
 func TickAndDrawVFX(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	// Reset before draining so the new frame's spawns land in a clean pool, not beside stale anchors.
 	if core.TakeVFXResetRequest(g) {
-		ResetParticles()
-		resetHitGlyphs()
-		resetBarGhosts()
+		ResetTransientVFX()
 	}
 	for _, req := range core.DrainVFXQueue(g) {
 		spawnFromRequest(camera, g, req, assets)

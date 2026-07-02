@@ -190,6 +190,11 @@ func CustomEnemyDefFromMap(ce mapfile.MapCustomEnemy) (CustomEnemyDef, error) {
 		if !ok {
 			return CustomEnemyDef{}, fmt.Errorf("custom enemy %q references unknown skill %q", ce.Name, name)
 		}
+		// Player-only skills have no enemy resolve path — the AI would roll the
+		// cast and burn the turn on the unhandled-skill fallback line.
+		if !IsEnemyCastable(id) {
+			return CustomEnemyDef{}, fmt.Errorf("custom enemy %q skill %q is not enemy-castable", ce.Name, name)
+		}
 		skills = append(skills, id)
 	}
 	return CustomEnemyDef{
@@ -225,6 +230,10 @@ func MapCustomEnemyFromDef(ce CustomEnemyDef) (mapfile.MapCustomEnemy, error) {
 		name := SkillOnDiskName(id)
 		if name == "" {
 			return mapfile.MapCustomEnemy{}, fmt.Errorf("custom enemy %q has unknown skill id %d", ce.Name, int(id))
+		}
+		// Mirror the loader: refuse to persist a skill the enemy AI can't resolve.
+		if !IsEnemyCastable(id) {
+			return mapfile.MapCustomEnemy{}, fmt.Errorf("custom enemy %q skill %q is not enemy-castable", ce.Name, name)
 		}
 		skillNames = append(skillNames, name)
 	}

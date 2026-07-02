@@ -481,6 +481,9 @@ func mpRefusalMessage(skill core.SkillID) string {
 // chargeMP spends the skill's MP cost or refuses, flashing mpRefusalMessage. The
 // single MP chokepoint.
 func chargeMP(g *core.GameState, skill core.SkillID) bool {
+	// Free casts (debug / Overcharge) must not later REFUND — stamp unpaid first
+	// so refundSkillMP can't mint MP that was never spent.
+	g.Battle.PendingSkillPaid = false
 	// Debug "all skills" makes every cast free; one bypass covers every skill.
 	if g.DebugAllSkills {
 		return true
@@ -500,6 +503,7 @@ func chargeMP(g *core.GameState, skill core.SkillID) bool {
 		setBattleStatus(g, mpRefusalMessage(skill))
 		return false
 	}
+	g.Battle.PendingSkillPaid = true
 	return true
 }
 
@@ -678,9 +682,10 @@ func applyStatusRoll(rng *rand.Rand, counter *int, defeated bool, chance float64
 }
 
 // refundSkillMP returns setup-committed MP when an action is cancelled at apply.
-// Skips DebugAllSkills (free casts — refunding would mint MP) and SkillNone.
+// Refunds ONLY what chargeMP actually spent (PendingSkillPaid): a debug or
+// Overcharge free cast paid nothing, so refunding it would mint MP.
 func refundSkillMP(g *core.GameState, refundSkill core.SkillID) {
-	if refundSkill != core.SkillNone && !g.DebugAllSkills {
+	if refundSkill != core.SkillNone && g.Battle.PendingSkillPaid {
 		if cost := core.SkillCost(refundSkill); cost > 0 {
 			// Mirror chargeMP's setup-side guard: bail if the caster's slot went out
 			// of range between confirm and apply rather than panicking on the index.
@@ -689,6 +694,7 @@ func refundSkillMP(g *core.GameState, refundSkill core.SkillID) {
 			}
 			actor := &g.Party[g.Battle.CurrentParty]
 			core.GainUpTo(&actor.MP, actor.MaxMP, cost)
+			g.Battle.PendingSkillPaid = false
 		}
 	}
 }
@@ -2077,9 +2083,12 @@ func applySecondWind(g *core.GameState, quality int) bool {
 	actor := beginPartyAction(g)
 	// Utility-kind: flat Effect.Heal (no WIS), timing-scaled by ScaleHeal.
 	heal := core.ScaleHeal(core.SkillHealFor(actor, core.SkillSecondWind), quality)
+	// Log the LANDED amount, not the intent — HealMember clamps at MaxHP (the
+	// Prayer convention: logged figures match the HP delta).
+	before := actor.HP
 	if healPartyMember(g, g.Battle.CurrentParty, heal) {
 		core.EnqueuePartyVFX(g, vfxKindFor(core.SkillSecondWind), g.Battle.CurrentParty)
-		setBattleMessageCat(g, qualityLine(quality, actor.Name, " catches a second wind — recovers %d HP.", heal), core.LogHeal)
+		setBattleMessageCat(g, qualityLine(quality, actor.Name, " catches a second wind — recovers %d HP.", actor.HP-before), core.LogHeal)
 	} else {
 		setBattleMessage(g, healFailedLine(actor,
 			qualityLine(quality, actor.Name, " is too starved to catch a second wind."),
@@ -2794,6 +2803,11 @@ func clearPartyStatusesOnDeath(member *core.PartyMember) {
 			*s.ptr(member) = 0
 		}
 	}
+	// Non-counter statuses the *Turns sweep can't reach (mirrors the enemy path's
+	// Debuffs clear): a corpse keeps neither its buff list nor a shield, else a
+	// mid-battle Resurrect revives with both live again.
+	member.Buffs = nil
+	member.ShieldHP = 0
 }
 
 // --- Result text ---

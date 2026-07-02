@@ -219,7 +219,9 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	// everything stays empty, not re-seeded). Prune drops unregistered/older
 	// kinds that'd sit as un-usable "Unknown Item" dead weight.
 	g.Inventory = pruneUnknownItems(data.Inventory)
-	g.Gold = data.Gold
+	// Same trust boundary as the party numerics: a hand-edited negative wallet
+	// would load as a permanently negative economy (nothing downstream floors it).
+	g.Gold = MaxZero(data.Gold)
 	// Loaded journal is authoritative — assign unconditionally (even empty) so a
 	// cleared journal doesn't re-seed StarterQuests.
 	g.Quests = pruneQuests(data.Quests)
@@ -228,7 +230,7 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	if pruned := pruneBestiary(data.Bestiary); len(pruned) > 0 {
 		g.Bestiary = pruned
 	}
-	g.StepCount = data.StepCount
+	g.StepCount = MaxZero(data.StepCount)
 	// Detached copy (nil stays nil, lazy-inited on fire).
 	g.TriggersFired = maps.Clone(data.TriggersFired)
 	// Overlay saved crystal charge by TILE, not index: an edited map can yield
@@ -257,7 +259,19 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	// clamping to an edge first could silently drop the party at a walkable corner.
 	x, z := data.PlayerTileX, data.PlayerTileZ
 	level := data.PlayerLevel
-	if area.BlockedAt(x, z) {
+	// Runtime blockers count too: a map edit can drop a chest or crystal onto the
+	// saved tile, and loading inside one is a state normal movement can't reach
+	// (the embedded chest can't even be opened — adjacency requires distance 1).
+	// g.Crystals (not CrystalSpawns) so the default entrance crystal counts.
+	blockedByCrystal := false
+	for i := range g.Crystals {
+		if g.Crystals[i].TileX == x && g.Crystals[i].TileZ == z {
+			blockedByCrystal = true
+			break
+		}
+	}
+	if area.BlockedAt(x, z) || blockedByCrystal ||
+		ChestSpawnIndexAt(area.ChestSpawns, x, z) >= 0 {
 		x, z = g.Player.TileX, g.Player.TileZ
 		// The saved level belonged to the blocked tile; on the fallback tile derive
 		// its own surface instead, else a coincidentally-standable saved level would

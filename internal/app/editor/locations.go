@@ -197,15 +197,7 @@ func updateLocationEditModal(s *State) Action {
 	}
 
 	if s.focus == focusLocationName {
-		pumpFocusField(s, &loc.Name)
-		if editorCommitPressed() {
-			s.focus = focusNone
-			return ActionNone
-		}
-		if editorCancelPressed() {
-			closeModal(s)
-			return ActionNone
-		}
+		pumpFocusedTextField(s, &loc.Name, nil, func() { closeModal(s) })
 		return ActionNone
 	}
 	if editorCancelPressed() || editorCommitPressed() {

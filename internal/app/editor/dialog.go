@@ -999,19 +999,7 @@ func updateDialogNodeEditModal(s *State) Action {
 
 	// Text field focused: Enter commits (defocus); Esc steps back up to the node list.
 	if target := dialogNodeTextTarget(s); target != nil {
-		pumpFocusField(s, target)
-		if editorTabPressed() {
-			cycleDialogNodeFocus(s)
-			return ActionNone
-		}
-		if editorCommitPressed() {
-			s.focus = focusNone
-			return ActionNone
-		}
-		if editorCancelPressed() {
-			returnToDialogNodes(s)
-			return ActionNone
-		}
+		pumpFocusedTextField(s, target, func() { cycleDialogNodeFocus(s) }, func() { returnToDialogNodes(s) })
 		return ActionNone
 	}
 
@@ -1197,50 +1185,43 @@ func updateDialogChoiceEditModal(s *State) Action {
 		s.focus = focusNone // click elsewhere defocuses fields
 	}
 
+	var choiceTarget *string
 	switch s.focus {
 	case focusDialogChoiceLabel:
-		pumpFocusField(s, &c.Label)
+		choiceTarget = &c.Label
 	case focusDialogChoiceNext:
-		pumpFocusField(s, &c.NextNodeID)
-	default:
-		// No field focused — list nav + shortcuts.
-		if editorCancelPressed() {
-			returnToDialogNodeEdit(s)
-			return ActionNone
-		}
-		if editorTabPressed() {
-			s.focus = focusDialogChoiceLabel
-			return ActionNone
-		}
-		if len(c.Conditions) > 0 {
-			s.modalCursor = input.CursorUpDown(s.modalCursor, len(c.Conditions))
-		}
-		if editorCommitPressed() {
-			if len(c.Conditions) > 0 {
-				openDialogCondEditModal(s, s.modalCursor)
-			}
-			return ActionNone
-		}
-		if editorAddPressed() {
-			addDialogCond(s)
-			return ActionNone
-		}
-		if len(c.Conditions) > 0 && editorDeletePressed() {
-			removeDialogCond(s, s.modalCursor)
-		}
+		choiceTarget = &c.NextNodeID
+	}
+	if choiceTarget != nil {
+		// A text field is focused. Tab cycles; Enter commits (defocus); Esc steps up.
+		pumpFocusedTextField(s, choiceTarget, func() { cycleDialogChoiceFocus(s) }, func() { returnToDialogNodeEdit(s) })
 		return ActionNone
 	}
-	// A text field is focused. Enter commits (defocus); Esc steps up.
-	if editorTabPressed() {
-		cycleDialogChoiceFocus(s)
-		return ActionNone
-	}
+
+	// No field focused — list nav + shortcuts.
 	if editorCancelPressed() {
 		returnToDialogNodeEdit(s)
 		return ActionNone
 	}
+	if editorTabPressed() {
+		s.focus = focusDialogChoiceLabel
+		return ActionNone
+	}
+	if len(c.Conditions) > 0 {
+		s.modalCursor = input.CursorUpDown(s.modalCursor, len(c.Conditions))
+	}
 	if editorCommitPressed() {
-		s.focus = focusNone
+		if len(c.Conditions) > 0 {
+			openDialogCondEditModal(s, s.modalCursor)
+		}
+		return ActionNone
+	}
+	if editorAddPressed() {
+		addDialogCond(s)
+		return ActionNone
+	}
+	if len(c.Conditions) > 0 && editorDeletePressed() {
+		removeDialogCond(s, s.modalCursor)
 	}
 	return ActionNone
 }
@@ -1453,19 +1434,7 @@ func updateDialogActionEditModal(s *State) Action {
 	}
 
 	if s.focus == focusDialogActionID {
-		if target := dialogActionIDTarget(s); target != nil {
-			pumpFocusField(s, target)
-		} else {
-			s.focus = focusNone
-		}
-		if editorCommitPressed() {
-			s.focus = focusNone
-			return ActionNone
-		}
-		if editorCancelPressed() {
-			returnFromDialogActionEdit(s)
-			return ActionNone
-		}
+		pumpFocusedTextField(s, dialogActionIDTarget(s), nil, func() { returnFromDialogActionEdit(s) })
 		return ActionNone
 	}
 	if editorCancelPressed() {
@@ -1921,11 +1890,7 @@ func drawScrollMoreHint(font rl.Font, theme render.Theme, x, y float32, hidden i
 	if hidden <= 0 {
 		return
 	}
-	arrow := "▼"
-	if up {
-		arrow = "▲"
-	}
-	render.DrawRichText(font, fmt.Sprintf("%s %d more", arrow, hidden), rl.NewVector2(x, y), editorFontHint, 1, theme.TextHint)
+	render.DrawRichText(font, fmt.Sprintf("%s %d more", scrollArrowGlyph(up), hidden), rl.NewVector2(x, y), editorFontHint, 1, theme.TextHint)
 }
 
 // drawScrollList draws a scrolling list's body: the ▲/▼ "N more" hints + each

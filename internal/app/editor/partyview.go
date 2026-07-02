@@ -25,11 +25,7 @@ func openPartyViewModal(s *State) {
 		seedPartyVisual(s)
 		s.partyInit = true
 	}
-	s.foeViewTab = foeTabLayout
-	s.foeViewZoom = 1
-	enterAssetEditing(s)
-	partyDrag.slider = noSliderDrag
-	partyDrag.asset = noSliderDrag
+	resetVisualizerView(s, &partyDrag)
 }
 
 // seedPartyVisual loads the class's live visual into the working copy + baseline.

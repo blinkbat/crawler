@@ -609,8 +609,9 @@ func tauntedAttackerTarget(g *GameState) (int, bool) {
 
 // PeekEnemyAttackerTarget returns the party slot the current enemy attacker will
 // hit, WITHOUT advancing the round-robin cursor. Precedence mirrors the commit
-// path: a live Taunt overrides any row; else a basic attack (EnemyPendingSkill ==
-// SkillNone) is melee and front-gated, while a pending skill casts at any row.
+// path: a live Taunt overrides any row; else a melee-class action (basic attack
+// OR a melee-class pending skill like Ingest — reach-gated like a swing, not an
+// any-row cast) is front-gated, while a casting skill reaches any row.
 // Shared by the battle commit (pickEnemyAttackTarget) and the render forecast so
 // the incoming-hit marker can't drift from who's actually struck. -1 = no target.
 func PeekEnemyAttackerTarget(g *GameState) int {
@@ -618,7 +619,7 @@ func PeekEnemyAttackerTarget(g *GameState) int {
 		return forced
 	}
 	var target int
-	if g.Battle.EnemyPendingSkill == SkillNone {
+	if enemyPendingActionIsMelee(g) {
 		target = PeekNextMeleeEnemyTarget(g)
 	} else {
 		target = PeekNextEnemyTarget(g)
@@ -626,6 +627,14 @@ func PeekEnemyAttackerTarget(g *GameState) int {
 	// Guard redirect rides here (like Taunt above) so the render forecast and the
 	// commit path agree on who's actually struck.
 	return redirectToGuardian(g, target)
+}
+
+// enemyPendingActionIsMelee reports whether the enemy attacker's committed
+// action is melee-class: a basic attack (no pending skill) or a melee-class
+// skill (Ingest — front-row reach-gated like a swing). Casting skills are not.
+func enemyPendingActionIsMelee(g *GameState) bool {
+	return g.Battle.EnemyPendingSkill == SkillNone ||
+		SkillAttackClassFor(g.Battle.EnemyPendingSkill).IsMelee()
 }
 
 // redirectToGuardian returns the slot a hit aimed at `target` actually lands on:
@@ -649,7 +658,7 @@ func redirectToGuardian(g *GameState, target int) int {
 	if !MemberAvailable(g.Party[guardian]) {
 		return target
 	}
-	if g.Battle.EnemyPendingSkill == SkillNone &&
+	if enemyPendingActionIsMelee(g) &&
 		!(g.Party[guardian].Row == RowFront || !PartyFrontHasLiving(g.Party)) {
 		return target
 	}

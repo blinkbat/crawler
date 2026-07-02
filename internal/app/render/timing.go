@@ -311,6 +311,10 @@ const timingHeadingGlyphGap = float32(10)
 // badge reads as a small chip leading the word rather than matching its cap height.
 const timingHeadingGlyphScale = float32(0.7)
 
+// timingHeadingSpacing is the engraved heading's letter tracking, shared by its
+// measure and draw so the cached width can't drift from the painted text.
+const timingHeadingSpacing = float32(1.5)
+
 // drawTimingHeading paints the centered prompt above the bar, shifting to the quality tint
 // during the flash hold. When glyph != noPromptGlyph it prepends the button to press
 // (e.g. "[A] STRIKE!") so a non-obvious minigame's input reads at a glance.
@@ -336,14 +340,14 @@ func drawTimingHeading(font rl.Font, text string, glyph InputGlyph, x, barW, y f
 		// centers on yPassed + size/2, so offset by the half-size difference).
 		drawInputGlyph(font, glyph, hx, hy+(size-glyphSize)/2, glyphSize, 1)
 	}
-	drawEngravedTextSpaced(font, text, hx+glyphW+gap, hy, size, 1.5, col)
+	drawEngravedTextSpaced(font, text, hx+glyphW+gap, hy, size, timingHeadingSpacing, col)
 }
 
 // timingHeadingMeasureCache memoizes drawTimingHeading's measure (keyed on the size flip).
 var timingHeadingMeasureCache measureCache
 
 func measureTimingHeading(font rl.Font, text string, size float32) rl.Vector2 {
-	return timingHeadingMeasureCache.measure(font, text, size, 1.5)
+	return timingHeadingMeasureCache.measure(font, text, size, timingHeadingSpacing)
 }
 
 // applyTimingFlashCursor draws the frozen-cursor halo during the flash hold and returns the
@@ -421,11 +425,17 @@ func drawTimingFrame(drawX, drawY, barW, drawnH, studRadius, studIns float32, ou
 	drawBrassStud(drawX+barW-studIns, drawY+drawnH-studIns, studRadius)
 }
 
+// candlelitGilt tints the gilt frame at brightness `base`, adding the shared
+// 0.3-amplitude candle flicker so every breathing gilt frame swings identically
+// and only the base differs (press/charge overlay vs locked reel cell).
+func candlelitGilt(base float32) color.RGBA {
+	return fadeColor(giltBright, base+0.3*candleFlicker())
+}
+
 // drawTimingFrameOverlay caps a press/charge bar with the full-size cabinet chrome.
 // Drawn AFTER the interior content so it seats over the edges.
 func drawTimingFrameOverlay(drawX, drawY, barW, drawnH float32) {
-	flick := candleFlicker()
-	drawTimingFrame(drawX, drawY, barW, drawnH, studR, studInset, fadeColor(giltBright, 0.55+0.3*flick))
+	drawTimingFrame(drawX, drawY, barW, drawnH, studR, studInset, candlelitGilt(0.55))
 }
 
 // drawExcellentShockwave paints the expanding ring from the frozen cursor on an Excellent
@@ -691,9 +701,8 @@ func drawReelBar(timing core.TimingState, g *core.GameState, assets Resources, x
 
 		// Frame: dim wood rail while spinning; breathing gilt frame + corner studs once locked.
 		if stopped {
-			flick := candleFlicker()
 			drawTimingFrame(cellX, y, cellW, barH, reelStudR, reelStudInset,
-				fadeForFlash(fadeColor(giltBright, 0.6+0.3*flick), flashing, flash))
+				fadeForFlash(candlelitGilt(0.6), flashing, flash))
 		} else {
 			drawGaugeBezel(ix, iy, iw, ih, true)
 			drawSmallPanelOutline(ix, iy, iw, ih, woodAccentSeam)
@@ -1003,13 +1012,13 @@ func DrawQualityPopup(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	baseSize := FontTitle
 	size := baseSize * scale
 	// Measure at the fixed base size (cache hits) and scale; the animating size would miss the cache.
-	base := qualityPopupMeasureCache.measure(assets.hudFont, label, baseSize, 1.5)
+	base := qualityPopupMeasureCache.measure(assets.hudFont, label, baseSize, qualityPopupSpacing)
 	measure := rl.NewVector2(base.X*scale, base.Y*scale)
 	x := screenPos.X - measure.X/2
 	y := screenPos.Y - measure.Y - rise
 
 	shadow := colorWithAlpha(shadowBase, alpha)
-	drawTextWithShadowStyle(assets.hudFont, label, x, y, size, 1.5, col, shadow, 3, 3)
+	drawTextWithShadowStyle(assets.hudFont, label, x, y, size, qualityPopupSpacing, col, shadow, 3, 3)
 }
 
 // qualityPopupAnchor returns the world position the quality text hovers above (a party
@@ -1088,13 +1097,13 @@ func drawFloatingDamage(camera rl.Camera3D, assets Resources, worldPos rl.Vector
 	baseSize := FontHeading
 	size := baseSize * scale
 	// Measure at the fixed base size (cache hits) and scale; see DrawQualityPopup.
-	base := damagePopupMeasureCache.measure(assets.hudFont, label, baseSize, 1.2)
+	base := damagePopupMeasureCache.measure(assets.hudFont, label, baseSize, damagePopupSpacing)
 	measure := rl.NewVector2(base.X*scale, base.Y*scale)
 	x := screenPos.X - measure.X/2
 	y := screenPos.Y - measure.Y - rise
 
 	shadow := colorWithAlpha(shadowBase, alpha)
-	drawTextWithShadowStyle(assets.hudFont, label, x, y, size, 1.2, col, shadow, 2, 2)
+	drawTextWithShadowStyle(assets.hudFont, label, x, y, size, damagePopupSpacing, col, shadow, 2, 2)
 }
 
 // damagePopupLabel formats the damage value (appending "!" on Excellent), from a 0..199
@@ -1128,6 +1137,13 @@ var damagePopupLabelCache = func() [200]struct{ plain, excellent string } {
 // popupWorldRise lifts a popup's anchor to torso height before projection. The Layout-tab
 // "Num" gizmo anchors add the same lift — keep all four sites on this const.
 const popupWorldRise = float32(0.6)
+
+// Popup letter tracking; each is shared by its measure↔draw pair so the cached
+// (base-size) measure can't drift from the animated draw.
+const (
+	qualityPopupSpacing = float32(1.5)
+	damagePopupSpacing  = float32(1.2)
+)
 
 // Popup punch-in curve breakpoints (peak scale + phase durations); popupPeakEnd = grow + shrink.
 const (

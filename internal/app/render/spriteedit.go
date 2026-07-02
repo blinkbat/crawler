@@ -651,6 +651,18 @@ func exportSpritePNGSlug(slug string, img *rl.Image) error {
 // replace. Boot textures (owned by Resources) untouched, so no double-free.
 var editorSpriteReloads = map[string]rl.Texture2D{}
 
+// closeEditorSpriteReloads frees every in-session reload texture (mirrors
+// closeEditorFXTextures). Called by Resources.Unload — without it each reload's
+// GPU texture would outlive the resource teardown.
+func closeEditorSpriteReloads() {
+	for slug, tex := range editorSpriteReloads {
+		if tex.ID != 0 {
+			rl.UnloadTexture(tex)
+		}
+		delete(editorSpriteReloads, slug)
+	}
+}
+
 // reloadSpriteTextureSlug loads <slug>.png into a fresh GPU texture (mipmaps +
 // trilinear + clamp, as boot), replacing any prior reload. ok=false if missing/undecodable.
 func reloadSpriteTextureSlug(slug string) (rl.Texture2D, bool) {
@@ -780,6 +792,16 @@ func applySpriteDisplayFilter(tex rl.Texture2D, f SpriteFilter) {
 // an in-session Save. Keyed by slug; prior derive freed on replace / when FX go
 // neutral. Boot textures (owned by Resources) never stored here, so no double-free.
 var editorFXTextures = map[string]rl.Texture2D{}
+
+// closeEditorFXTextures frees every derived FX texture and empties the map. Called
+// once at shutdown from Resources.Unload — these aren't in Resources.owned, so
+// nothing else would reclaim them before process exit.
+func closeEditorFXTextures() {
+	for slug, tex := range editorFXTextures {
+		rl.UnloadTexture(tex)
+		delete(editorFXTextures, slug)
+	}
+}
 
 // displayTextureForSlug returns the texture a live billboard should draw after FX
 // change: a re-baked texture (pristine → filter → upload) when any FX is active,

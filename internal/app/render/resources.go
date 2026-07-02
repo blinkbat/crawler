@@ -496,6 +496,7 @@ func (r Resources) Unload() {
 	r.chestBody.unload()
 	r.chestLid.unload()
 	rl.UnloadModel(r.rampModel)
+	rl.UnloadModel(r.underModel)
 	if groundShadowReady {
 		rl.UnloadModel(groundShadowModel)
 		groundShadowReady = false
@@ -528,6 +529,10 @@ func (r Resources) Unload() {
 	if r.hudFontOwned {
 		rl.UnloadFont(r.hudFont)
 	}
+	// Editor-derived FX textures live in a package map (not Resources.owned), so free them here too.
+	closeEditorFXTextures()
+	// Same for in-session sprite reload textures (editorSpriteReloads).
+	closeEditorSpriteReloads()
 }
 
 // Procedural-texture dimensions: gen size and upload size must agree, so the pairs
@@ -775,9 +780,12 @@ func enemyVisualsToSlice(m map[core.EnemyKind]enemyVisual) []enemyVisual {
 func partyVisualsToSlice(m map[core.PartyClass]enemyVisual) []enemyVisual {
 	out := make([]enemyVisual, len(core.PartyClasses()))
 	for class, v := range m {
-		if int(class) >= 0 && int(class) < len(out) {
-			out[class] = v
+		if int(class) < 0 || int(class) >= len(out) {
+			// A class whose iota falls outside PartyClasses() would silently render
+			// as a zero-value (blank) visual — panic instead so the drift is caught.
+			panic("render: PartyClass out of range for dense visual slice — PartyClasses() disagrees with the enum")
 		}
+		out[class] = v
 	}
 	return out
 }

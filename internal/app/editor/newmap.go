@@ -161,12 +161,23 @@ func updateNewMapModal(s *State) Action {
 			s.focus = focusNewHeight
 			s.numericBuf = ""
 		case pointIn(mp, l.widthMinus):
+			// Fold any typed-but-uncommitted digits into the value, then defocus so
+			// the field shows the stepped number (not a stale buffer) and Create
+			// can't overwrite the step with the old buffer.
+			commitNumericInput(s)
+			s.focus = focusNone
 			s.modalNewWidth = core.ClampMapDimension(s.modalNewWidth - 1)
 		case pointIn(mp, l.widthPlus):
+			commitNumericInput(s)
+			s.focus = focusNone
 			s.modalNewWidth = core.ClampMapDimension(s.modalNewWidth + 1)
 		case pointIn(mp, l.heightMinus):
+			commitNumericInput(s)
+			s.focus = focusNone
 			s.modalNewHeight = core.ClampMapDimension(s.modalNewHeight - 1)
 		case pointIn(mp, l.heightPlus):
+			commitNumericInput(s)
+			s.focus = focusNone
 			s.modalNewHeight = core.ClampMapDimension(s.modalNewHeight + 1)
 		case pointIn(mp, l.createBtn):
 			commitNumericInput(s)

@@ -171,9 +171,9 @@ func updateAdventureScene(state *appState) {
 		if state.testFromEditor {
 			state.testFromEditor = false
 			state.scene = sceneEditor
-			// Drop lingering particles: quitting a playtest mid-battle would
-			// otherwise thaw stale formation-relative particles onto the next F5.
-			render.ResetParticles()
+			// Drop lingering transient VFX: quitting a playtest mid-battle would
+			// otherwise thaw stale particles/glyphs/bar-ghosts onto the next F5.
+			render.ResetTransientVFX()
 			return
 		}
 		returnToTitleScene(state)
@@ -185,9 +185,10 @@ func updateAdventureScene(state *appState) {
 func returnToTitleScene(state *appState) {
 	state.scene = sceneTitle
 	state.title = title.New()
-	// Drop lingering particles — the title doesn't draw the adventure pipeline,
-	// so the pool would thaw onto the next adventure entry at stale positions.
-	render.ResetParticles()
+	// Drop lingering transient VFX — the title doesn't draw the adventure
+	// pipeline, so particles/glyphs/bar-ghosts would thaw onto the next
+	// adventure entry at stale positions.
+	render.ResetTransientVFX()
 }
 
 // applyAreaTransition loads the destination map and rebuilds the GameState so

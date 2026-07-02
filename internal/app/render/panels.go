@@ -773,8 +773,16 @@ func pickerRowRect(card rl.Rectangle, listY float32, i int, rowH float32) rl.Rec
 // bar. drawRow renders row i's content into its rect (and may capture the rect for clicks).
 func drawPickerList(font rl.Font, card rl.Rectangle, headerH, rowH float32, count, focused int, hints []HintSeg, drawRow func(i int, rect rl.Rectangle)) {
 	listY := card.Y + headerH
-	for i := 0; i < count; i++ {
-		rect := pickerRowRect(card, listY, i, rowH)
+	// Window rows to the card (scrolled around the focused row): the card height
+	// clamps at a screen fraction, so an over-tall list must not paint rows —
+	// or register click rects — past the card bottom / under the footer hints.
+	visible := int((card.Y + card.Height - equipPickerFooterH - listY) / rowH)
+	if visible < 1 {
+		visible = 1
+	}
+	first := journalScrollFirst(focused, count, visible)
+	for i := first; i < count && i < first+visible; i++ {
+		rect := pickerRowRect(card, listY, i-first, rowH)
 		drawFocusableRow(rect, i == focused)
 		drawRow(i, rect)
 	}
@@ -820,7 +828,14 @@ func drawEquipPicker(g *core.GameState, assets Resources) {
 	}
 	drawTextWithShadow(font, curText, card.X+pickerCardLeftInset, card.Y+equipPickerSubtitleDY, FontSmall, textMuted)
 
+	// Pre-size with zero rects and assign by ROW index: drawPickerList windows an
+	// over-tall list, and PickerRects must stay parallel to core.EquipPickerRows —
+	// an append here would misalign clicks once the window scrolls. A zero rect
+	// never collides, so hidden rows are simply unclickable.
 	lastEquipLayout.PickerRects = lastEquipLayout.PickerRects[:0]
+	for range rows {
+		lastEquipLayout.PickerRects = append(lastEquipLayout.PickerRects, rl.Rectangle{})
+	}
 	lastEquipLayout.PickerBounds = card
 	lastEquipLayout.PickerValid = true
 
@@ -828,7 +843,7 @@ func drawEquipPicker(g *core.GameState, assets Resources) {
 		drawTextWithShadow(font, "No eligible items in inventory.", card.X+pickerCardLeftInset, card.Y+headerH+8, FontBody, textDim)
 	}
 	drawPickerList(font, card, headerH, rowH, len(rows), g.EquipPickerCursor, equipPickerHints, func(i int, rect rl.Rectangle) {
-		lastEquipLayout.PickerRects = append(lastEquipLayout.PickerRects, rect)
+		lastEquipLayout.PickerRects[i] = rect
 		row := rows[i]
 		if row.Unequip {
 			drawTextWithShadow(font, "Unequip", rect.X+14, rect.Y+rect.Height/2-10, FontBody, inkAccent)
@@ -1050,11 +1065,17 @@ func drawPanelsItems(g *core.GameState, assets Resources, body rl.Rectangle) {
 	if cursor >= len(stacks) {
 		cursor = len(stacks) - 1
 	}
-	for i, stack := range stacks {
-		y := listRect.Y + float32(i)*rowH
-		if y+rowH > listRect.Y+listRect.Height {
-			break
-		}
+	// Scroll window around the cursor (journalScrollFirst, the Journal pattern):
+	// the input layer moves the cursor over the FULL stack list, so a large
+	// inventory would otherwise select rows below the visible window.
+	visible := int(listRect.Height / rowH)
+	if visible < 1 {
+		visible = 1
+	}
+	firstRow := journalScrollFirst(cursor, len(stacks), visible)
+	for i := firstRow; i < len(stacks) && i < firstRow+visible; i++ {
+		stack := stacks[i]
+		y := listRect.Y + float32(i-firstRow)*rowH
 		info := core.ItemInfo(stack.Kind)
 		highlight := i == cursor
 		if highlight {
