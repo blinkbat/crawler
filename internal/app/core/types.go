@@ -939,10 +939,7 @@ func MaxMPFor(class PartyClass, stats Stats) (int, bool) {
 	if !ok {
 		return 0, false
 	}
-	mp := proto.MaxMP + MPForINTDelta(stats.INT-proto.Stats.INT)
-	if mp < 0 {
-		mp = 0
-	}
+	mp := MaxZero(proto.MaxMP + MPForINTDelta(stats.INT-proto.Stats.INT))
 	return mp, true
 }
 

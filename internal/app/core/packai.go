@@ -487,9 +487,7 @@ func RevealRadius(g *GameState, cx, cz, radius int) {
 	if g == nil || g.Visited == nil {
 		return
 	}
-	if radius < 0 {
-		radius = 0
-	}
+	radius = MaxZero(radius)
 	for dz := -radius; dz <= radius; dz++ {
 		z := cz + dz
 		if z < 0 || z >= len(g.Visited) {

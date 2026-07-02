@@ -109,10 +109,7 @@ func buildScatterStack(a *AreaDefinition, grid, levelGrid []string, blank byte) 
 		if !ok || c == blank {
 			return
 		}
-		lv := a.levelGridAt(levelGrid, x, z)
-		if lv < 0 {
-			lv = 0
-		}
+		lv := MaxZero(a.levelGridAt(levelGrid, x, z))
 		if lv > maxL {
 			maxL = lv
 		}

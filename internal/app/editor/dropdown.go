@@ -35,6 +35,7 @@ const (
 	ddDialogActionKind                    // action editor: pick the end-action (none / start / complete quest / event)
 	ddLayer                               // top-bar layer picker: pick the active layer; each row carries a hide/show eye
 	ddFaceSkin                            // tile right-click: pick a cliff-face skin for one face (or all) of the tile
+	ddContext                             // grid right-click menu: edit/delete spawns, start facing, regions, erase (see context.go)
 
 	dropdownOwnerCount // sentinel; keep last. Every owner above ddNone needs a dropdownEntryBuilders entry.
 )
@@ -46,8 +47,11 @@ type dropdownState struct {
 	owner    dropdownOwner
 	cursor   int
 	anchor   rl.Rectangle
-	growDown bool // true = drops BELOW the anchor; false = grows UP
-	menu     int  // owner==ddMenu: open editorMenus group index
+	growDown bool       // true = drops BELOW the anchor; false = grows UP
+	menu     int        // owner==ddMenu: open editorMenus group index
+	at       rl.Vector2 // atPoint: the free-floating top-left (right-click menu)
+	atPoint  bool       // true = panel top-left sits at `at` (screen-clamped), not anchor-relative
+	rowH     float32    // per-owner row-height override; 0 = dropdownRowH (context menu wants taller rows)
 }
 
 const (
@@ -83,6 +87,13 @@ func openDropdownBelow(s *State, owner dropdownOwner, anchor rl.Rectangle) {
 
 func closeDropdown(s *State) { s.dropdown = dropdownState{} }
 
+// openDropdownAt arms owner as a free-floating menu whose top-left sits at pt (the
+// grid right-click context menu), with rowH-tall rows. Screen-clamped at layout.
+func openDropdownAt(s *State, owner dropdownOwner, pt rl.Vector2, rowH float32) {
+	s.dropdown = dropdownState{owner: owner, at: pt, atPoint: true, rowH: rowH}
+	input.ResetStickEdges()
+}
+
 // openFieldDropdown clears any lingering text-field focus, then opens dd below anchor.
 // Field rows always defocus before opening a picker (so Up/Down drive the list, not a
 // stale field) — this keeps that pairing in one place so a call site can't forget it.
@@ -110,6 +121,9 @@ type dropdownEntry struct {
 	// swatch, when opaque (A>0), draws a small color chip before the label — the
 	// Layer picker color-codes its rows this way.
 	swatch rl.Color
+	// danger draws the row's label in BorderDanger (destructive actions — the
+	// context menu's Delete rows).
+	danger bool
 }
 
 // disabledIn reports whether this entry is a disabled row (enabled set and false).
@@ -133,6 +147,7 @@ var dropdownEntryBuilders = map[dropdownOwner]func(*State) []dropdownEntry{
 	ddDialogActionKind:      dialogActionKindEntries,
 	ddLayer:                 layerSelectEntries,
 	ddFaceSkin:              faceSkinEntries,
+	ddContext:               contextEntries,
 }
 
 // faceSkinEntries builds the tile face-skin picker. Lists the FaceSkins roster;
@@ -414,35 +429,57 @@ func computeDropdownLayout(s *State, entries []dropdownEntry) dropdownLayout {
 	if w > sw-8 {
 		w = sw - 8
 	}
-	h := float32(visible)*dropdownRowH + 2*dropdownPad
+	rowH := dropdownRowH
+	if s.dropdown.rowH > 0 {
+		rowH = s.dropdown.rowH
+	}
+	h := float32(visible)*rowH + 2*dropdownPad
 
-	x := s.dropdown.anchor.X
-	if x+w > sw-4 {
-		x = sw - 4 - w
-	}
-	if x < 4 {
-		x = 4
-	}
-	// Grow UP from above the anchor, or DOWN from below it (top-anchored pickers).
-	// Clamp to the screen edge; overlapping the modal body is fine (drawn last).
-	var y float32
-	if s.dropdown.growDown {
-		y = s.dropdown.anchor.Y + s.dropdown.anchor.Height + 4
-		if y+h > sh-4 {
-			y = sh - 4 - h
+	var x, y float32
+	if s.dropdown.atPoint {
+		// Free-floating menu (right-click): top-left at the click point, clamped so
+		// an edge click doesn't push it off-screen.
+		x, y = s.dropdown.at.X, s.dropdown.at.Y
+		if x+w > sw {
+			x = sw - w
+		}
+		if y+h > sh {
+			y = sh - h
+		}
+		if x < 0 {
+			x = 0
+		}
+		if y < 0 {
+			y = 0
 		}
 	} else {
-		y = s.dropdown.anchor.Y - 4 - h
-	}
-	if y < 4 {
-		y = 4
+		x = s.dropdown.anchor.X
+		if x+w > sw-4 {
+			x = sw - 4 - w
+		}
+		if x < 4 {
+			x = 4
+		}
+		// Grow UP from above the anchor, or DOWN from below it (top-anchored pickers).
+		// Clamp to the screen edge; overlapping the modal body is fine (drawn last).
+		if s.dropdown.growDown {
+			y = s.dropdown.anchor.Y + s.dropdown.anchor.Height + 4
+			if y+h > sh-4 {
+				y = sh - 4 - h
+			}
+		} else {
+			y = s.dropdown.anchor.Y - 4 - h
+		}
+		if y < 4 {
+			y = 4
+		}
 	}
 
 	top, _ := scrollWindow(s.dropdown.cursor, n, visible)
 	rows := make([]rl.Rectangle, visible)
 	for i := 0; i < visible; i++ {
-		rows[i] = rl.NewRectangle(x+dropdownPad, y+dropdownPad+float32(i)*dropdownRowH,
-			w-2*dropdownPad, dropdownRowH)
+		rows[i] = rl.NewRectangle(x+dropdownPad, y+dropdownPad+float32(i)*rowH,
+			w-2*dropdownPad, rowH)
 	}
 	return dropdownLayout{panel: rl.NewRectangle(x, y, w, h), topRow: top, rows: rows, markerW: markerW}
 }
@@ -554,6 +591,8 @@ func drawDropdown(s *State, font rl.Font, theme render.Theme) {
 		}
 		if disabled {
 			col = render.FadeColor(theme.TextMuted, 0.45)
+		} else if e.danger {
+			col = theme.BorderDanger // destructive row reads red, hovered or not
 		}
 		// Left gutter marker: a hide/show EYE or an active-toggle ✓, not both.
 		if lay.markerW > 0 && e.toggle != nil {

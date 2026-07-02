@@ -823,13 +823,11 @@ type State struct {
 	// g.StepCount on F5 via PreviewStepCount().
 	previewPhase core.TimeOfDay
 
-	// contextMenu holds in-flight right-click menu state; absorbs clicks until a
-	// row/outside/Esc. See context.go.
-	contextMenu contextMenuState
-
 	// dropdown is the single open-dropdown slot. Zero value (ddNone) = closed.
-	// See dropdown.go.
+	// See dropdown.go. The grid right-click menu is the ddContext owner.
 	dropdown dropdownState
+	// ctxTile{X,Z} remember the tile the open ddContext right-click menu acts on.
+	ctxTileX, ctxTileZ int
 	// faceTarget* remember the tile + direction the open ddFaceSkin dropdown edits.
 	// faceTargetDir is a core direction (0=N..3=W), or -1 for all faces (base skin).
 	faceTargetX, faceTargetZ, faceTargetDir int
@@ -1087,12 +1085,10 @@ func Update(s *State, dt float32) Action {
 		return ActionNone
 	}
 
-	// An open context menu owns all input. updateContextMenu (in updateMouse)
-	// absorbs the mouse, but hotkeys run BEFORE updateMouse so gate them here too.
+	// (The right-click menu is a dropdown now, so the s.dropdownOpen() gate above
+	// already absorbs input while it's open — hotkeys and the mouse stay inert.)
 	s.cancelHandled = false
-	if !s.contextMenu.open {
-		updateHotkeys(s)
-	}
+	updateHotkeys(s)
 	updateMouse(s)
 
 	if s.testRequested {

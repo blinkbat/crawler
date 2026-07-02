@@ -1342,7 +1342,14 @@ func applyMassMend(g *core.GameState, quality int) bool {
 		}
 		core.EnqueuePartyVFX(g, vfxKindFor(core.SkillMassMend), i)
 	}
-	core.HealWholeParty(g, heal)
+	landed := false
+	core.HealWholePartyFunc(g, heal, func(i int) {
+		g.Party[i].DamageFlash = core.FlashDuration
+		landed = true
+	})
+	if landed {
+		audio.Play(audio.SoundHeal) // one cue for the party heal, matching the out-of-battle path
+	}
 	if healed == 0 {
 		setBattleMessage(g, qualityLine(quality, actor.Name, "'s Mass Mend finds no wounds."))
 	} else {
@@ -2177,17 +2184,18 @@ func applyTierDouble(raw int, actor *core.PartyMember, skill core.SkillID, quali
 	return raw
 }
 
-// applyCritMultiplier returns the post-crit damage; `double` (Backstab T2)
-// multiplies again on top of CritMultiplier.
+// applyCritMultiplier returns the post-crit damage, capped at core.MaxHitDamage —
+// the sanity ceiling vs extreme authored stats shared by both damage paths.
+// `double` (Backstab T2) multiplies again on top of CritMultiplier.
 func applyCritMultiplier(raw int, crit, double bool) int {
 	if !crit {
-		return raw
+		return min(raw, core.MaxHitDamage)
 	}
 	out := raw * core.CritMultiplier
 	if double {
 		out *= core.TierDamageDoubler
 	}
-	return out
+	return min(out, core.MaxHitDamage)
 }
 
 // targetActsLater reports whether the enemy at enemySlot has NOT acted yet this
@@ -2279,7 +2287,6 @@ func damageEnemyCrit(g *core.GameState, slot, rawDamage, quality int, tag core.S
 	// Crit multiplies the MITIGATED damage (post-armor), so a crit reliably beats a
 	// tank's armor floor instead of being swallowed by it.
 	damage = applyCritMultiplier(damage, crit, double)
-	damage = min(damage, core.MaxHitDamage) // sanity ceiling vs extreme authored stats
 
 	// Tally phys output this turn for Bloodthirst (finishActorTurn banks it as
 	// lifesteal). Off-turn counters (tryRiposte) snapshot/restore around this so
@@ -2289,12 +2296,7 @@ func damageEnemyCrit(g *core.GameState, slot, rawDamage, quality int, tag core.S
 	}
 	// Flash + HP-floor + popup + recoil (shared tail with the party path; popup/recoil
 	// only fire on real damage). Death-side handling stays below.
-	died := core.ApplyDamageWithPopup(core.HitTarget{
-		HP: &enemy.HP, Flash: &enemy.DamageFlash,
-		Popup: &enemy.DamagePopup, PopupQuality: &enemy.DamagePopupQuality, PopupTimer: &enemy.DamagePopupTimer,
-		PopupCrit: &enemy.DamagePopupCrit,
-		Knockback: &enemy.HitKnockback, Sleep: &enemy.SleepTurns,
-	}, damage, quality, crit)
+	died := core.ApplyDamageWithPopup(enemy.HitTarget(), damage, quality, crit)
 	// Every landing blow buzzes a little; grade/crit shake rumble stacks on top.
 	if damage > 0 {
 		core.AddRumble(&g.Battle, core.RumbleImpact, core.RumbleImpactDur)
@@ -2645,7 +2647,6 @@ func applyPartyDamage(g *core.GameState, member *core.PartyMember, rawAmount int
 	amount := mitigateDamage(rawAmount, tag, armorVal, mdefVal)
 	// Crit punches post-armor (mirror of the enemy path) before the shield soaks it.
 	amount = applyCritMultiplier(amount, crit, false)
-	amount = min(amount, core.MaxHitDamage) // sanity ceiling vs extreme authored stats
 
 	// Aegis shield soaks post-mitigation BEFORE HP; only overflow reaches HP, and
 	// the bookkeeping below reads the post-shield amount.
@@ -2664,12 +2665,7 @@ func applyPartyDamage(g *core.GameState, member *core.PartyMember, rawAmount int
 	}
 	// Flash + HP-floor + popup + recoil (shared tail with the enemy path). Incoming hits
 	// aren't player-timed, so quality is Miss (the draw colors party popups a fixed hurt tone).
-	died := core.ApplyDamageWithPopup(core.HitTarget{
-		HP: &member.HP, Flash: &member.DamageFlash,
-		Popup: &member.DamagePopup, PopupQuality: &member.DamagePopupQuality, PopupTimer: &member.DamagePopupTimer,
-		PopupCrit: &member.DamagePopupCrit,
-		Knockback: &member.HitKnockback, Sleep: &member.SleepTurns,
-	}, amount, int(core.TimingQualityMiss), crit)
+	died := core.ApplyDamageWithPopup(member.HitTarget(), amount, int(core.TimingQualityMiss), crit)
 	// Haptic buzz on a landing hit. Taking a hit doesn't shake the camera, so this
 	// arms rumble directly (AddCombatShake is for offensive impacts). Additive so
 	// back-to-back hits in one beat stack.

@@ -637,7 +637,7 @@ type dialogListKey struct {
 // drawDialogListModalGeneric renders one list-style dialog modal from its spec.
 func drawDialogListModalGeneric(s *State, font rl.Font, theme render.Theme, spec dialogListModalSpec) {
 	r := drawModalHeader(font, theme, entityEditModalW, entityEditModalH, spec.title, theme.BorderActive)
-	render.DrawTextWithShadow(font, spec.hint, r.X+modalContentInset, r.Y+40, editorFontTiny, theme.TextHint)
+	render.DrawTextWithShadow(font, spec.hint, r.X+modalContentInset, r.Y+modalSubheadingDY, editorFontTiny, theme.TextHint)
 	adds, actions := spec.cmds(s)
 	lay := entityModalLayoutFor(s.modalCursor, spec.count, cmdLabels(adds), cmdLabels(actions))
 	drawEntityListWindow(font, theme, lay, spec.count, s.modalCursor, spec.empty, spec.rowLabel)

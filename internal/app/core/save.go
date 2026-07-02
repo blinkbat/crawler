@@ -345,9 +345,7 @@ func sanitizeLoadedParty(party []PartyMember) {
 		if mp, ok := MaxMPFor(m.Class, m.Stats); ok {
 			m.MaxMP = mp
 		}
-		if m.MaxMP < 0 {
-			m.MaxMP = 0
-		}
+		m.MaxMP = MaxZero(m.MaxMP)
 		m.HP = Clamp(m.HP, 0, m.MaxHP)
 		m.MP = Clamp(m.MP, 0, m.MaxMP)
 		if m.Level < BaseLevel {
@@ -468,9 +466,7 @@ func pruneBestiary(b Bestiary) Bestiary {
 		if _, ok := EnemyInfoOk(kind); !ok {
 			continue
 		}
-		if e.Kills < 0 {
-			e.Kills = 0
-		}
+		e.Kills = MaxZero(e.Kills)
 		out[kind] = e
 	}
 	return out

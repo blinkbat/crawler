@@ -20,9 +20,7 @@ const TimeOfDayCount = int(Midnight) + 1
 // PhaseAtStep returns the current phase and intra-phase progress in [0,1)
 // (0 = just entered, →1 before the next phase), for smooth lighting interp.
 func PhaseAtStep(steps int) (phase TimeOfDay, progress float32) {
-	if steps < 0 {
-		steps = 0
-	}
+	steps = MaxZero(steps)
 	cycle := steps % StepsPerCycle
 	phase = TimeOfDay(cycle / StepsPerPhase)
 	progress = float32(cycle%StepsPerPhase) / float32(StepsPerPhase)

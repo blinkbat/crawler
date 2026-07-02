@@ -1,12 +1,12 @@
 {
   "version": 1,
   "mapID": "forest_path",
-  "playerTileX": 35,
-  "playerTileZ": 23,
-  "playerFacing": 3,
+  "playerTileX": 34,
+  "playerTileZ": 24,
+  "playerFacing": 0,
   "playerLevel": 10,
-  "stepCount": 154,
-  "gold": 13,
+  "stepCount": 298,
+  "gold": 40,
   "party": [
     {
       "Class": 0,
@@ -17,13 +17,13 @@
         "INT": 1,
         "WIS": 1,
         "VIT": 5,
-        "SPD": 3
+        "SPD": 6
       },
       "HP": 10,
       "MaxHP": 10,
       "MP": 4,
       "MaxMP": 4,
-      "Hunger": 90,
+      "Hunger": 174,
       "Armor": 0,
       "Equipped": [
         0,
@@ -39,7 +39,7 @@
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 2,
+      "DamagePopup": 1,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "DamagePopupCrit": false,
@@ -65,14 +65,16 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 1,
-      "XP": 40,
+      "Level": 2,
+      "XP": 17,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
+        "24": 0,
         "5": 0
       },
       "TreeRanks": {
+        "second-wind": 1,
         "shield-bash": 1
       },
       "SkillCursor": 0
@@ -86,13 +88,13 @@
         "INT": 2,
         "WIS": 6,
         "VIT": 4,
-        "SPD": 4
+        "SPD": 7
       },
       "HP": 8,
       "MaxHP": 8,
       "MP": 9,
       "MaxMP": 9,
-      "Hunger": 154,
+      "Hunger": 238,
       "Armor": 0,
       "Equipped": [
         11,
@@ -134,15 +136,17 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 1,
-      "XP": 40,
+      "Level": 2,
+      "XP": 17,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
+        "2": 0,
         "20": 0
       },
       "TreeRanks": {
-        "blessing": 1
+        "blessing": 1,
+        "prayer": 1
       },
       "SkillCursor": 0
     },
@@ -155,13 +159,13 @@
         "INT": 2,
         "WIS": 1,
         "VIT": 4,
-        "SPD": 6
+        "SPD": 9
       },
       "HP": 8,
       "MaxHP": 8,
-      "MP": 5,
+      "MP": 2,
       "MaxMP": 5,
-      "Hunger": 103,
+      "Hunger": 157,
       "Armor": 0,
       "Equipped": [
         0,
@@ -170,17 +174,17 @@
         0,
         0
       ],
-      "Row": 1,
+      "Row": 0,
       "Col": 1,
       "HomeRow": 0,
       "HomeCol": 1,
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 8,
+      "DamagePopup": 1,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
-      "DamagePopupCrit": true,
+      "DamagePopupCrit": false,
       "SwapSlide": 0,
       "SwapFromRow": 0,
       "SwapFromCol": 0,
@@ -203,15 +207,17 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 1,
-      "XP": 40,
+      "Level": 2,
+      "XP": 17,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
+        "10": 0,
         "3": 0
       },
       "TreeRanks": {
-        "steal": 1
+        "steal": 1,
+        "venom-strike": 1
       },
       "SkillCursor": 0
     },
@@ -224,13 +230,13 @@
         "INT": 6,
         "WIS": 2,
         "VIT": 4,
-        "SPD": 4
+        "SPD": 7
       },
       "HP": 8,
       "MaxHP": 8,
-      "MP": 10,
+      "MP": 3,
       "MaxMP": 10,
-      "Hunger": 154,
+      "Hunger": 298,
       "Armor": 0,
       "Equipped": [
         0,
@@ -239,7 +245,7 @@
         0,
         0
       ],
-      "Row": 0,
+      "Row": 1,
       "Col": 1,
       "HomeRow": 1,
       "HomeCol": 1,
@@ -272,31 +278,33 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 1,
-      "XP": 40,
+      "Level": 2,
+      "XP": 17,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
-        "11": 0
+        "11": 0,
+        "12": 0
       },
       "TreeRanks": {
+        "arc-bolt": 1,
         "frost-lance": 1
       },
-      "SkillCursor": 0
+      "SkillCursor": 1
     }
   ],
   "inventory": [
-    {
-      "Kind": 14,
-      "Count": 1
-    },
     {
       "Kind": 15,
       "Count": 2
     },
     {
-      "Kind": 1,
-      "Count": 2
+      "Kind": 2,
+      "Count": 1
+    },
+    {
+      "Kind": 11,
+      "Count": 1
     }
   ],
   "quests": [
@@ -311,12 +319,15 @@
   ],
   "bestiary": {
     "0": {
-      "kills": 4
+      "kills": 11
     },
     "1": {
-      "kills": 1
+      "kills": 3
     },
     "2": {
+      "kills": 2
+    },
+    "3": {
       "kills": 1
     }
   },
@@ -324,7 +335,7 @@
     {
       "tileX": 34,
       "tileZ": 23,
-      "charge": 0,
+      "charge": 26,
       "charged": false,
       "saved": true
     }

@@ -197,10 +197,9 @@ func Draw(s *State, assets render.Resources) {
 	if h, ok := modalHandlers[s.modal]; ok && h.draw != nil {
 		h.draw(s, font, theme)
 	}
-	// A modal's picker dropdown paints on top, once here. No-op when none open.
+	// A modal's picker dropdown paints on top, once here (also the right-click
+	// context menu — the ddContext owner). No-op when none open.
 	drawDropdown(s, font, theme)
-	// Right-click context menu paints last, over grid and any modal.
-	drawContextMenu(s, font, theme)
 }
 
 // modalHandler bundles a modal's draw + update functions in one table row.
@@ -693,6 +692,11 @@ const (
 	buttonLabelPadX   = float32(28)  // horizontal padding added around a measured label to size an auto-width button (buttonWidth + context menu)
 	textFieldH        = float32(28)  // single-line text-field / input row height (shared by rename, Save As, sound name, dialog rows)
 	modalFooterHintDY = float32(26)  // dismissal/help hint baseline up from the card's bottom edge
+	// modalSubheadingDY is the baseline of the first subheading/hint line below a
+	// modal's title (down from the card top) — the header-relative mirror of
+	// modalFooterHintDY. Named so the sub-title line shares one baseline instead of
+	// re-typing 40 per modal. Font/color stay per-call (the modals differ there).
+	modalSubheadingDY = float32(40)
 )
 
 // drawModalFooterHint paints a one-line dismissal/help hint at the modal card's
@@ -711,6 +715,11 @@ func modalContentWidth(card rl.Rectangle) float32 { return card.Width - 2*modalC
 func cardContentBox(card rl.Rectangle) (x, fw float32) {
 	return card.X + modalContentInset, modalContentWidth(card)
 }
+
+// drawSelectedListRow fills a list row's cursor plate with the editor's shared
+// bgActive tone. One home for the selected-row look so every editor list highlights
+// the cursor identically (the sound modal used the game-panel gilt style before).
+func drawSelectedListRow(rect rl.Rectangle) { rl.DrawRectangleRec(rect, bgActive) }
 
 // modalFooterButtonY is the bottom button row's Y: modalBottomInset up from the
 // card bottom. Shared by modalButtonRow + the gallery modals.
@@ -2983,7 +2992,7 @@ func drawSaveAsModal(s *State, font rl.Font, theme render.Theme) {
 		return
 	}
 
-	render.DrawRichText(font, "Filename (without .map):", rl.NewVector2(r.X+modalContentInset, r.Y+40), editorFontHint, 1, theme.TextLabel)
+	render.DrawRichText(font, "Filename (without .map):", rl.NewVector2(r.X+modalContentInset, r.Y+modalSubheadingDY), editorFontHint, 1, theme.TextLabel)
 
 	field := saveAsFieldRect(s)
 	drawTextField(font, field, s.modalFilename, true)
@@ -3044,7 +3053,7 @@ func drawChestEditModal(s *State, font rl.Font, theme render.Theme) {
 		"CHEST AT "+core.TileCoord(chest.TileX, chest.TileZ),
 		theme.BorderActive)
 	render.DrawTextWithShadow(font, "Up/Down select · Enter add · X remove · Esc close",
-		r.X+modalContentInset, r.Y+40, editorFontTiny, theme.TextHint)
+		r.X+modalContentInset, r.Y+modalSubheadingDY, editorFontTiny, theme.TextHint)
 
 	adds, actions := chestEditCmds(s)
 	lay := entityModalLayoutFor(s.modalCursor, len(chest.Items), cmdLabels(adds), cmdLabels(actions))
@@ -3251,7 +3260,7 @@ func drawEntityListModal(s *State, font rl.Font, theme render.Theme) {
 	for i := top; i < end; i++ {
 		rr := entityListRowRect(card, listTop, i-top)
 		if i == s.modalCursor {
-			rl.DrawRectangleRec(rr, bgActive)
+			drawSelectedListRow(rr)
 		} else if pointIn(mp, rr) {
 			rl.DrawRectangleRec(rr, bgEntryHover)
 		}
@@ -3272,7 +3281,7 @@ func drawEscMenuModal(s *State, font rl.Font, theme render.Theme) {
 	labels := cmdLabels(escMenuCmds(s))
 	drawModalButtonsSel(font, modalButtonStack(r, labels), labels, s.modalCursor)
 	render.DrawTextWithShadow(font, "(↑↓ select · Enter confirm · D/C/E hotkeys · Esc close)",
-		r.X+modalContentInset, r.Y+40, editorFontHint, theme.TextHint)
+		r.X+modalContentInset, r.Y+modalSubheadingDY, editorFontHint, theme.TextHint)
 }
 
 func drawConfirmDirtyModal(s *State, font rl.Font, theme render.Theme) {

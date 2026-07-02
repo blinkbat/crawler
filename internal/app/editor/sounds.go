@@ -875,7 +875,7 @@ func drawSoundsListCol(s *State, font rl.Font, theme render.Theme, l *soundLayou
 	for i := l.listTopRow; i < l.listEnd; i++ {
 		r := l.listRows[i]
 		if s.soundLeftPanel == soundPanelList && s.soundCursor == i {
-			render.DrawSelectedRow(r.Row)
+			drawSelectedListRow(r.Row)
 		}
 		render.DrawTextWithShadow(font, names[i],
 			r.Row.X+8, r.Row.Y+6, soundFontBody, theme.TextMuted)
@@ -901,7 +901,7 @@ func drawSoundsAssignCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 		cue := assignableCueList[i]
 		r := l.assignRows[i]
 		if s.soundLeftPanel == soundPanelAssign && s.soundCursor == i {
-			render.DrawSelectedRow(r.Row)
+			drawSelectedListRow(r.Row)
 		}
 		render.DrawTextWithShadow(font, audio.SoundName(cue),
 			r.Row.X+8, r.Row.Y+4, soundFontBody, theme.TextMuted)

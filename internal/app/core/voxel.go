@@ -257,10 +257,7 @@ func ElevationRowsFromSolids(a *AreaDefinition) []string {
 	for z := 0; z < a.Height; z++ {
 		buf := make([]byte, a.Width)
 		for x := 0; x < a.Width; x++ {
-			top := a.TopSolidLevel(x, z)
-			if top < 0 {
-				top = 0
-			}
+			top := MaxZero(a.TopSolidLevel(x, z))
 			buf[x] = ElevationChar(top)
 		}
 		rows[z] = string(buf)

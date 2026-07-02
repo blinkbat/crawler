@@ -535,6 +535,11 @@ const (
 	// modalValueInsetX pulls a right-aligned value/price column in from the card's
 	// right content edge (shop prices, level-up stat values).
 	modalValueInsetX = int32(12)
+	// modalHeaderBandH is the vertical band from a modal card's heading down to its
+	// first content row, sized to clear a title + a sub-title line. Shared by the
+	// equip picker (equipPickerHeaderH) and the victory spoils card (victoryHeaderH)
+	// so the two header bands can't drift apart.
+	modalHeaderBandH = float32(70)
 	uiFooterMargin   = int32(14) // visual gap below a footer hint's glyphs/text to the card bottom edge
 	// actionMenuHintMinH is the height floor below which the action menu drops its
 	// hint footer (it would collide with rows). Above the hudPanelMinH floor.

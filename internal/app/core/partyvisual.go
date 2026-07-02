@@ -1,9 +1,6 @@
 package core
 
-import (
-	"fmt"
-	"path/filepath"
-)
+import "fmt"
 
 // PartyVisualOverride is the on-disk, raylib-free billboard description for a
 // party CLASS. Field-for-field identical to EnemyVisualOverride, so it's a type
@@ -15,9 +12,7 @@ type PartyVisualOverride = EnemyVisualOverride
 const PartyVisualsFileName = "partyvisuals.json"
 
 // PartyVisualsPath resolves the party override file's on-disk path.
-func PartyVisualsPath() string {
-	return filepath.Join(ResolveAssetDir(SpritesDirName), PartyVisualsFileName)
-}
+func PartyVisualsPath() string { return spritesFilePath(PartyVisualsFileName) }
 
 // PartyClassSlug is the filesystem-safe key for a class (slugified display name,
 // "Warrior" → "warrior"). Doubles as the PNG basename and override-map key.

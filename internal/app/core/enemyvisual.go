@@ -81,12 +81,16 @@ func (o EnemyVisualOverride) ColorCap() (int, bool) {
 const EnemyVisualsFileName = "visuals.json"
 
 // EnemyVisualsPath resolves the override file's path via ResolveAssetDir.
-func EnemyVisualsPath() string {
-	return filepath.Join(ResolveAssetDir(SpritesDirName), EnemyVisualsFileName)
-}
+func EnemyVisualsPath() string { return spritesFilePath(EnemyVisualsFileName) }
 
 // SpritesDirName is the sprites asset folder (PNGs + visuals.json).
 const SpritesDirName = "maps/sprites"
+
+// spritesDir resolves the sprites asset folder; spritesFilePath joins a basename
+// onto it. Single home for the ResolveAssetDir(SpritesDirName) construction shared
+// by the enemy/party override path + save helpers.
+func spritesDir() string                   { return ResolveAssetDir(SpritesDirName) }
+func spritesFilePath(name string) string   { return filepath.Join(spritesDir(), name) }
 
 // EnemySlug is the filesystem-safe key for an enemy kind: slugify(Name)
 // ("Feral Rat" → "feral_rat"). Doubles as the PNG basename + override-map key.
@@ -175,7 +179,7 @@ func saveVisualOverrides(path string, all map[string]EnemyVisualOverride) error 
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(ResolveAssetDir(SpritesDirName), AssetDirMode); err != nil {
+	if err := os.MkdirAll(spritesDir(), AssetDirMode); err != nil {
 		return err
 	}
 	return atomicWriteFile(path, blob)

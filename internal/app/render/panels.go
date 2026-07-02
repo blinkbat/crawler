@@ -347,7 +347,7 @@ const cardSubLineStep = float32(30)
 var memberCardHeaderMetrics = cardIdentityMetrics{
 	nameStep: FontHeading, // 36 — name's own line height, no extra gap
 	subStep:  cardSubLineStep,
-	hpStep:   36,
+	hpStep:   FontHeading, // HP row is the same heading-sized line, so it tracks the name step
 	mpStep:   float32(uiRowPitch), // 42
 }
 
@@ -359,6 +359,14 @@ var memberCardHeaderMetrics = cardIdentityMetrics{
 var cardDetailRowMetrics = struct{ insetX, titleY, valueY, subY, footUp, belowGap float32 }{
 	insetX: 12, titleY: 8, valueY: 10, subY: 34, footUp: 22, belowGap: 4,
 }
+
+// Skills-tab tree summary rows: skillSummaryRowH is the per-tree stride; the glass
+// pane is drawn skillSummaryRowGap shorter than the stride so rows breathe. Named
+// (not bare 70 / -10 literals) so the stride and the pane height can't drift apart.
+const (
+	skillSummaryRowH   = float32(70)
+	skillSummaryRowGap = float32(10)
+)
 
 // Member-card column split: the right (vitals) column starts at memberCardBarSplit of
 // the card width and spans memberCardBarFracW. Two tokens (not one + 1-x) so the
@@ -716,7 +724,7 @@ const (
 const (
 	equipPickerCardW   = float32(440)
 	equipPickerRowH    = float32(46)
-	equipPickerHeaderH = float32(70)
+	equipPickerHeaderH = modalHeaderBandH
 	equipPickerFooterH = float32(34)
 	// equipPickerSubtitleDY is the "Equipped: …" sub-title baseline, kept next to the header tokens so it can't drift.
 	equipPickerSubtitleDY = float32(52)
@@ -1275,13 +1283,13 @@ func drawPanelsSkills(g *core.GameState, assets Resources, body rl.Rectangle) {
 
 		// One summary panel per tree: name + invested/total + theme.
 		trees := core.SkillTreesFor(m.Class)
-		rowH := float32(70)
 		for ti, tr := range trees {
-			rowY := contentY + float32(ti)*rowH
-			if rowY+rowH-10 > cols[i].Y+cols[i].Height {
+			rowY := contentY + float32(ti)*skillSummaryRowH
+			paneH := skillSummaryRowH - skillSummaryRowGap
+			if rowY+paneH > cols[i].Y+cols[i].Height {
 				break
 			}
-			rect := rl.NewRectangle(innerX, rowY, innerW, rowH-10)
+			rect := rl.NewRectangle(innerX, rowY, innerW, paneH)
 			drawGlassPaneRect(rect, glassMid)
 
 			md := cardDetailRowMetrics

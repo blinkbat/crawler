@@ -574,12 +574,7 @@ func updateIsoCanvas(s *State, mp rl.Vector2) {
 	}
 
 	if wheel := rl.GetMouseWheelMove(); wheel != 0 {
-		// Guard a zero seed: multiplicative zoom stuck at 0 never recovers.
-		if s.isoZoom <= 0 {
-			s.isoZoom = 1
-		}
-		s.isoZoom *= 1 + canvasZoomWheelRate*wheel
-		s.isoZoom = core.Clamp(s.isoZoom, isoMinZoom, isoMaxZoom)
+		s.isoZoom = wheelZoom(s.isoZoom, wheel, canvasZoomWheelRate, isoMinZoom, isoMaxZoom)
 	}
 
 	if hx < 0 {

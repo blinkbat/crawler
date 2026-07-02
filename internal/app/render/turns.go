@@ -45,6 +45,10 @@ const (
 	turnRowSpineX  = int32(6)
 	turnRowSpineW  = int32(4)
 	turnRowLabelX  = int32(22)
+	// turnRowInnerInsetY is the vertical breath inside a row: the plate is this much
+	// shorter than the row pitch, and the class rail is inset this much top+bottom
+	// within the plate. Named so the plate height and the rail can't drift apart.
+	turnRowInnerInsetY = int32(4)
 )
 
 // Per-row fill / outline alphas: active row glass fill + outline; inactive row spine tick.
@@ -110,7 +114,7 @@ func drawTurnPanel(g *core.GameState, assets Resources) {
 
 		rowX := x + turnRowInset
 		rowW := w - 2*turnRowInset
-		rowInnerH := rowH - 4
+		rowInnerH := rowH - turnRowInnerInsetY
 
 		if i == 0 {
 			drawGlassPane(rowX, rowY, rowW, rowInnerH, colorWithAlpha(col, turnRowActiveFillAlpha))
@@ -119,7 +123,7 @@ func drawTurnPanel(g *core.GameState, assets Resources) {
 			cy := float32(rowY) + float32(rowInnerH)/2
 			drawArrowMarker(rl.NewVector2(cx-2, cy), 8, 0, 6, col)
 		} else {
-			drawClassRail(rowX+turnRowSpineX, rowY+4, turnRowSpineW, rowInnerH-8, colorWithAlpha(col, turnRowSpineAlpha))
+			drawClassRail(rowX+turnRowSpineX, rowY+turnRowInnerInsetY, turnRowSpineW, rowInnerH-2*turnRowInnerInsetY, colorWithAlpha(col, turnRowSpineAlpha))
 		}
 
 		// Aim cue: the targeted actor gets a bright gilt ring + right-edge marker.

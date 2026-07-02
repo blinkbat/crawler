@@ -161,7 +161,7 @@ func updateObjectViewModal(s *State) Action {
 		if hoverThumb >= 0 {
 			idx := l.start + hoverThumb
 			v := s.objPreviewView(idx)
-			v.zoom = core.Clamp(v.zoom*(1+objViewZoomRate*w), objViewZoomMin, objViewZoomMax)
+			v.zoom = wheelZoom(v.zoom, w, objViewZoomRate, objViewZoomMin, objViewZoomMax)
 			s.setObjPreviewView(idx, v)
 		} else if w < 0 {
 			setObjectViewPage(s, s.objectViewPage+1, l.pageCount)

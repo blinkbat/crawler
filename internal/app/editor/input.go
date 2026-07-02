@@ -466,11 +466,6 @@ func (s *State) updateRightDrag(mp rl.Vector2) {
 func updateMouse(s *State) {
 	mp := rl.GetMousePosition()
 
-	// Context menu absorbs all input while open (both views).
-	if updateContextMenu(s) {
-		return
-	}
-
 	// Screen-space chrome (menu bar, toolbar, layer dropdown, Levels panel,
 	// palette, metadata, minimap, recents) works in BOTH the top-down and 3D
 	// views — only the grid canvas itself differs. Running it here keeps the
@@ -1029,6 +1024,18 @@ const (
 	// paletteWheelRows: brush-list rows scrolled per wheel notch.
 	paletteWheelRows = float32(1.5)
 )
+
+// wheelZoom applies a multiplicative wheel-notch zoom — cur·(1 + rate·wheel) —
+// clamped to [min,max]. Seeds a zero/negative cur to 1 so multiplicative zoom can't
+// get stuck at 0. Shared by the iso 3D view + the object-browser previews so the
+// gesture reads identically (zoomBy takes a precomputed factor; the foe/party
+// visualizers zoom additively — both stay their own shape).
+func wheelZoom(cur, wheel, rate, min, max float32) float32 {
+	if cur <= 0 {
+		cur = 1
+	}
+	return core.Clamp(cur*(1+rate*wheel), min, max)
+}
 
 func zoomBy(s *State, anchor rl.Vector2, factor float32) {
 	prev := s.zoom

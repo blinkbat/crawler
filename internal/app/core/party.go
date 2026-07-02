@@ -583,13 +583,19 @@ func HealMember(m *PartyMember, amount int) bool {
 
 // HealWholeParty applies HealMember(amount) to every LIVING (HP > 0) member —
 // the shared party-wide heal loop behind both Mass Mend paths.
-func HealWholeParty(g *GameState, amount int) {
+func HealWholeParty(g *GameState, amount int) { HealWholePartyFunc(g, amount, nil) }
+
+// HealWholePartyFunc heals every living member and invokes onHeal(i) for each
+// member the heal actually LANDED on (HealMember skips dead/ingested/full). The
+// callback is where callers hang per-member side effects (flash, cues) so those
+// stay consistent with the single-target heal seam. onHeal may be nil.
+func HealWholePartyFunc(g *GameState, amount int, onHeal func(i int)) {
 	if g == nil || amount <= 0 {
 		return
 	}
 	for i := range g.Party {
-		if partyAlive(g.Party[i]) {
-			HealMember(&g.Party[i], amount)
+		if partyAlive(g.Party[i]) && HealMember(&g.Party[i], amount) && onHeal != nil {
+			onHeal(i)
 		}
 	}
 }
@@ -867,6 +873,29 @@ type HitTarget struct {
 	PopupCrit    *bool
 	Knockback    *float32
 	Sleep        *int
+}
+
+// HitTarget wires this member's fields into the shared damage-tail struct, so the
+// party damage path can't drift from the field set (add a HitTarget field → update
+// this one builder, not every call site).
+func (m *PartyMember) HitTarget() HitTarget {
+	return HitTarget{
+		HP: &m.HP, Flash: &m.DamageFlash,
+		Popup: &m.DamagePopup, PopupQuality: &m.DamagePopupQuality, PopupTimer: &m.DamagePopupTimer,
+		PopupCrit: &m.DamagePopupCrit,
+		Knockback: &m.HitKnockback, Sleep: &m.SleepTurns,
+	}
+}
+
+// HitTarget wires this enemy's fields into the shared damage-tail struct (enemy
+// mirror of (*PartyMember).HitTarget).
+func (e *Enemy) HitTarget() HitTarget {
+	return HitTarget{
+		HP: &e.HP, Flash: &e.DamageFlash,
+		Popup: &e.DamagePopup, PopupQuality: &e.DamagePopupQuality, PopupTimer: &e.DamagePopupTimer,
+		PopupCrit: &e.DamagePopupCrit,
+		Knockback: &e.HitKnockback, Sleep: &e.SleepTurns,
+	}
 }
 
 // ApplyDamageWithPopup runs the shared post-mitigation tail: ApplyFlatDamage, then a
@@ -1400,9 +1429,7 @@ func DebugBoostParty(party []PartyMember, amount int) {
 		}
 		m.MaxHP = MaxHPFor(m.Stats)
 		m.MaxMP += MPForINTDelta(m.Stats.INT - beforeINT)
-		if m.MaxMP < 0 {
-			m.MaxMP = 0
-		}
+		m.MaxMP = MaxZero(m.MaxMP)
 		m.HP = m.MaxHP
 		m.MP = m.MaxMP
 	}
