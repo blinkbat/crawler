@@ -214,6 +214,11 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 		// save maps 1:1; a malformed one can't violate the seating contract —
 		// extra/unknown members dropped, unmatched slots keep their fresh default.
 		overlaySavedParty(g.Party, data.Party)
+		// Re-validate seating after the merge: a partial/hand-edited save can seat
+		// two members on one cell (each saved member carries its own HomeRow/HomeCol
+		// while unmatched slots keep NewParty defaults). Normalize re-seeds only an
+		// invalid grid, so clean custom swaps survive.
+		NormalizePartyFormation(g.Party)
 	}
 	// Copy inventory/quests through as-is even when empty (a player who sold
 	// everything stays empty, not re-seeded). Prune drops unregistered/older
@@ -263,15 +268,14 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	// saved tile, and loading inside one is a state normal movement can't reach
 	// (the embedded chest can't even be opened — adjacency requires distance 1).
 	// g.Crystals (not CrystalSpawns) so the default entrance crystal counts.
-	blockedByCrystal := false
-	for i := range g.Crystals {
-		if g.Crystals[i].TileX == x && g.Crystals[i].TileZ == z {
-			blockedByCrystal = true
-			break
-		}
-	}
+	// Level-aware on voxel maps, mirroring runtime entry (crystalIndexOn/chestIndexOn):
+	// a crystal/chest under a walkable deck must not block a party legitimately saved
+	// on the deck above it. Use g.Chests (runtime) not the authored spawns so the
+	// per-floor Level is available.
+	voxel := area.IsVoxel()
+	blockedByCrystal := crystalIndexOn(g.Crystals, x, z, level, voxel) >= 0
 	if area.BlockedAt(x, z) || blockedByCrystal ||
-		ChestSpawnIndexAt(area.ChestSpawns, x, z) >= 0 {
+		chestIndexOn(g.Chests, x, z, level, voxel) >= 0 {
 		x, z = g.Player.TileX, g.Player.TileZ
 		// The saved level belonged to the blocked tile; on the fallback tile derive
 		// its own surface instead, else a coincidentally-standable saved level would

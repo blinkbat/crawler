@@ -892,6 +892,7 @@ func finishDrag(s *State) {
 			// Snapshot-then-compare (not eager pushUndo): an empty / all-refused
 			// rect must not bank a junk undo. Mirrors strokePaint's lazy commit.
 			wasDirty := s.dirty
+			wasHidden := s.layerHidden[s.layer]
 			before := core.CloneArea(s.area)
 			if s.rectHollow {
 				paintRectOutline(s, s.rectAnchorX, s.rectAnchorZ, s.hoverX, s.hoverZ)
@@ -900,6 +901,7 @@ func finishDrag(s *State) {
 			}
 			if core.AreaContentEqual(s.area, before) {
 				s.dirty = wasDirty // no-op rect — undo the optimistic dirty flip
+				s.layerHidden[s.layer] = wasHidden // ...and applyTool's layer-reveal flip
 			} else {
 				commitUndoSnapshot(s, before)
 			}
@@ -907,10 +909,12 @@ func finishDrag(s *State) {
 	case dragLine:
 		if s.hoverX >= 0 {
 			wasDirty := s.dirty
+			wasHidden := s.layerHidden[s.layer]
 			before := core.CloneArea(s.area)
 			paintLine(s, s.rectAnchorX, s.rectAnchorZ, s.hoverX, s.hoverZ)
 			if core.AreaContentEqual(s.area, before) {
 				s.dirty = wasDirty // no-op line — don't bank undo / clobber redo
+				s.layerHidden[s.layer] = wasHidden // ...and applyTool's layer-reveal flip
 			} else {
 				commitUndoSnapshot(s, before)
 			}

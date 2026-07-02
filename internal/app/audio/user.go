@@ -107,7 +107,10 @@ func reloadCueSlot(cue Sound, assigns map[string]string) (failed bool) {
 	if soundLoaded(bank[cue]) {
 		rl.SetSoundVolume(bank[cue], sfx.effective())
 	}
-	return !fromFile && assigned
+	// Only a genuine user override (file differs from the canonical slug) counts as a
+	// failure worth surfacing: ensureBankOnDisk backfills defaults as canonical→canonical,
+	// so a missing default correctly synth-falls-back rather than being a load "failure".
+	return !fromFile && assigned && fileName != row.Canonical
 }
 
 // CurrentAssignment returns the user-sound name assigned to a cue, or "" for

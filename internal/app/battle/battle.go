@@ -1424,6 +1424,11 @@ func clearBattleResidual(g *core.GameState) {
 	// cast, and spoils snapshot so the next fight starts clean.
 	resetBattleTransients(&g.Battle)
 	resetBattleAction(g)
+	// Drop held-turn auto-repeat carry: it isn't ticked during a battle, so a turn
+	// key held through the fight would otherwise start the first post-battle turn
+	// mid-cooldown instead of firing instantly (mirrors explore.ResetTurnRepeat).
+	g.TurnHeldLast = false
+	g.TurnRepeatCooldown = 0
 }
 
 func recoverFromLoss(g *core.GameState) {

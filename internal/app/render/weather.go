@@ -108,13 +108,13 @@ func DrawWeather(g *core.GameState) {
 			if n > len(rainStreakTraits) {
 				n = len(rainStreakTraits)
 			}
-			t := float32(frameTime())
+			t := frameTime() // float64 wall-clock: keep full precision so streaks don't quantize after long play
 			streakCol := colorWithAlpha(rainStreakColor, uint8(intensity*vis.streakAlpha))
 			for i := 0; i < n; i++ {
 				tr := rainStreakTraits[i]
 				// y wraps over `span`; per-streak phase offsets each so they don't fall in lockstep.
 				span := sh + tr.length
-				y := float32(math.Mod(float64(t*tr.speed+tr.phase*span), float64(span))) - tr.length
+				y := float32(math.Mod(t*float64(tr.speed)+float64(tr.phase)*float64(span), float64(span))) - tr.length
 				x := tr.colFrac * sw
 				rl.DrawLineEx(
 					rl.NewVector2(x, y),

@@ -694,6 +694,7 @@ func placeRamp(s *State, x, z int) {
 			continue
 		}
 		pushUndo(s)
+		s.layerHidden[s.layer] = false // reveal so the placed ramp isn't invisible (mirrors applyTool)
 		setLayerCell(&s.area.Floor, x, z, core.RampCharForFacing(ascend))
 		setTileGroundLevel(s, x, z, low)
 		s.dirty = true
@@ -1208,6 +1209,7 @@ func floodFill(s *State, x, z int, b byte, erase bool) {
 	}
 	// Snapshot only now that the fill will change cells (no useless undo step).
 	pushUndo(s)
+	s.layerHidden[s.layer] = false // reveal so the fill isn't invisible (mirrors applyTool)
 	var filled [][2]int
 	rewriteLayerRows(layer, func(rows [][]byte) {
 		stack := [][2]int{{x, z}}
@@ -1325,6 +1327,7 @@ func fillEntireLayer(s *State) {
 	if s.layer == LayerElevation && len(s.area.Solids) > 0 {
 		lvl := core.ElevationLevelFromChar(brush.Char)
 		pushUndo(s)
+		s.layerHidden[s.layer] = false // reveal so the fill isn't invisible (mirrors applyTool)
 		for z := 0; z < s.area.Height; z++ {
 			for x := 0; x < s.area.Width; x++ {
 				s.area.SetColumnTop(x, z, lvl)
@@ -1335,6 +1338,7 @@ func fillEntireLayer(s *State) {
 		return
 	}
 	pushUndo(s)
+	s.layerHidden[s.layer] = false // reveal so the fill isn't invisible (mirrors applyTool)
 	var filled [][2]int
 	rewriteLayerRows(layer, func(rows [][]byte) {
 		for z := 0; z < s.area.Height && z < len(rows); z++ {

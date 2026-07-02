@@ -572,6 +572,8 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 		drawTextWithShadow(assets.hudFont, "Choose a target", float32(contentX), float32(subY), FontSmall, textLabel)
 	case core.ActionPartyTarget:
 		drawAllyTargetPrompt(g, assets, core.SkillName(g.Battle.PendingSkill), contentX, contentY, subY)
+	case core.ActionSwapTarget:
+		drawAllyTargetPrompt(g, assets, "Swap", contentX, contentY, subY)
 	case core.ActionItemMenu:
 		drawEngravedText(assets.hudFont, "Items", float32(contentX), float32(contentY), FontHeading, textPrimary)
 		drawItemMenuList(g, assets, contentX, subY, rightX, listMaxY)

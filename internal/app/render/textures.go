@@ -2113,6 +2113,12 @@ func makePartyPixels(w, h int, class core.PartyClass) []color.RGBA {
 }
 
 func fillEllipsePixels(pixels []color.RGBA, w, h, cx, cy, rx, ry int, col color.RGBA) {
+	if rx < 1 {
+		rx = 1
+	}
+	if ry < 1 {
+		ry = 1
+	}
 	for y := cy - ry; y <= cy+ry; y++ {
 		if y < 0 || y >= h {
 			continue

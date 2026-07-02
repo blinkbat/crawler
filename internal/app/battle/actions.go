@@ -1658,6 +1658,9 @@ func applyRecklessSwing(g *core.GameState, quality int) bool {
 	enqueueSkillVFXAtEnemy(g, core.SkillRecklessSwing)
 	// Self-debuff magnitudes live in the skill's registered Effect (net-negative
 	// BuffArmor, so no Blessed pill); stamp them straight off the resolved effect.
+	// Self-cast +1 correction (offsets finishActorTurn's immediate tick), else the
+	// Armor penalty drains this same turn before any enemy acts — see selfCastTurnBonus.
+	effect.BuffTurns += selfCastTurnBonus(g, g.Battle.CurrentParty)
 	core.StampPartyBuff(actor, core.SkillRecklessSwing, effect)
 	foe := core.EnemySingularNoun(&target)
 	msg := killOrPlainLine(quality, actor.Name, " swings wildly at the %s for %d — guard down.", " caves the %s in for %d — guard down.", defeated, foe, damage)
@@ -2677,6 +2680,15 @@ func applyPartyDamage(g *core.GameState, member *core.PartyMember, rawAmount int
 		return amount, false
 	}
 	clearPartyStatusesOnDeath(member)
+	// Release any Guard cover the downed member anchored: dropping the ward's
+	// GuardedBy link here stops a later Resurrect from silently resuming the tank
+	// (redirectToGuardian only masks it while the guardian is dead).
+	for i := range g.Party {
+		if &g.Party[i] == member {
+			core.ClearGuardBy(g.Party, i)
+			break
+		}
+	}
 	// A downed member yields the front line: sink it to the back and pull a living
 	// backliner up (same column first). Single hook for every death path (melee,
 	// cast, DoT all land here). A future Raise re-runs ShuntPartyFormation to restore
@@ -2805,9 +2817,13 @@ func clearPartyStatusesOnDeath(member *core.PartyMember) {
 	}
 	// Non-counter statuses the *Turns sweep can't reach (mirrors the enemy path's
 	// Debuffs clear): a corpse keeps neither its buff list nor a shield, else a
-	// mid-battle Resurrect revives with both live again.
+	// mid-battle Resurrect revives with both live again. Same for its own Guard
+	// cover state (the ward-side link is dropped by the caller via ClearGuardBy).
 	member.Buffs = nil
 	member.ShieldHP = 0
+	member.Guarding = false
+	member.Guarded = false
+	member.GuardedBy = 0
 }
 
 // --- Result text ---

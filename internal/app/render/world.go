@@ -404,6 +404,9 @@ func DrawSkyBackground(assets Resources, g *core.GameState) {
 	// (clouds stay round).
 	srcX, srcW := float32(0), texW
 	srcY, srcH := float32(0), texH
+	if screenH <= 0 || texH <= 0 {
+		return // minimized/zero-size window: aspect math would be Inf/NaN
+	}
 	screenAspect := screenW / screenH
 	texAspect := texW / texH
 	if texAspect > screenAspect {

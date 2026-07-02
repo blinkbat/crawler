@@ -214,7 +214,7 @@ var qualityVisuals = [core.TimingQualityCount]struct {
 // init asserts qualityVisuals covers every grade (a zero-alpha slot trips at startup).
 func init() {
 	for q := 0; q < int(core.TimingQualityCount); q++ {
-		if qualityVisuals[q].AttackColor.A == 0 {
+		if qualityVisuals[q].AttackColor.A == 0 || qualityVisuals[q].DefendColor.A == 0 {
 			panic("render/timing: qualityVisuals missing a row for a timing grade")
 		}
 	}

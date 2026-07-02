@@ -455,7 +455,10 @@ func DrawPartyRibbon(g *core.GameState, assets Resources) {
 	if startX < float32(hudEdgePad) {
 		startX = float32(hudEdgePad)
 	}
-	topY := screenH - partyRibbonHeight(len(g.Party)) - ribbonBottom
+	// Reserve the full 2×2 height (cards tile by formation slot, spanning both rows
+	// regardless of member count) so this matches PartyRibbonTopY and a back-row card
+	// on a short party can't slide off the bottom edge.
+	topY := screenH - partyRibbonHeight(core.PartyMemberCount) - ribbonBottom
 
 	activeIdx := core.ActiveActorIndex(g)
 	selectedIdx := -1

@@ -174,10 +174,21 @@ func updateAdventureScene(state *appState) {
 			// Drop lingering transient VFX: quitting a playtest mid-battle would
 			// otherwise thaw stale particles/glyphs/bar-ghosts onto the next F5.
 			render.ResetTransientVFX()
+			stopSceneRumble(state)
 			return
 		}
 		returnToTitleScene(state)
 	}
+}
+
+// stopSceneRumble cuts the controller motors AND clears the battle rumble envelope
+// when leaving the adventure scene. ApplyRumble runs every frame off state.game.Battle
+// regardless of scene, so a rumble armed just before a mid-battle quit would keep
+// buzzing on the title/editor screen until it decayed without this.
+func stopSceneRumble(state *appState) {
+	input.StopRumble()
+	state.game.Battle.RumbleTimer = 0
+	state.game.Battle.RumbleStrength = 0
 }
 
 // returnToTitleScene resets to the title menu and rebuilds a fresh title.State.
@@ -189,6 +200,7 @@ func returnToTitleScene(state *appState) {
 	// pipeline, so particles/glyphs/bar-ghosts would thaw onto the next
 	// adventure entry at stale positions.
 	render.ResetTransientVFX()
+	stopSceneRumble(state)
 }
 
 // applyAreaTransition loads the destination map and rebuilds the GameState so

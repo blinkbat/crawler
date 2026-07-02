@@ -339,6 +339,9 @@ func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32
 		if i == v.dropIdx {
 			continue
 		}
+		if i >= len(v.parts) {
+			break // variance cached by seed alone; guard a model with more parts than the seed's cache
+		}
 		pv := v.parts[i]
 
 		// Height stretch lifts canopy Y offsets and scales the trunk mesh by the
