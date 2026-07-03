@@ -810,6 +810,17 @@ func beginPartyAction(g *core.GameState) *core.PartyMember {
 	return actor
 }
 
+// beginEnemyTargetAction is the shared opener for single-enemy-target skills that
+// pre-roll their own damage (so they bypass beginSingleTargetSkill's fixed rawDamage):
+// it cancels + refunds MP on a dead/gone target (ok=false, caller returns false), else
+// commits the actor's bump and returns the acting member + the live target foe.
+func beginEnemyTargetAction(g *core.GameState, skill core.SkillID) (actor *core.PartyMember, enemy *core.Enemy, ok bool) {
+	if !ensureAliveTargetOrCancel(g, skill) {
+		return nil, nil, false
+	}
+	return beginPartyAction(g), core.BattleMemberAt(g, g.Battle.EnemyIndex), true
+}
+
 // stampPartyBump / stampEnemyBump arm the attack-lunge offset on a combatant, so
 // the bump duration is applied from one place across every attacker path.
 func stampPartyBump(m *core.PartyMember) { m.AttackBump = core.BumpDuration }
@@ -1125,11 +1136,10 @@ func rollSteal(g *core.GameState, live *core.Enemy, effect core.SkillEffect, qua
 
 func applySteal(g *core.GameState, quality int) bool {
 	// Steal costs 0 MP; pass the skill anyway in case a cost is added.
-	if !ensureAliveTargetOrCancel(g, core.SkillSteal) {
+	actor, enemy, ok := beginEnemyTargetAction(g, core.SkillSteal)
+	if !ok {
 		return false
 	}
-	actor := beginPartyAction(g)
-	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	if enemy.Item == core.ItemNone {
 		setBattleMessage(g, msgNothingToSteal)
 		finishActorTurn(g)
@@ -1172,11 +1182,10 @@ func applySteal(g *core.GameState, quality int) bool {
 // timing is cosmetic.
 func applyScan(g *core.GameState, quality int) bool {
 	// Setup committed MP; the shared head refunds it on a dead target.
-	if !ensureAliveTargetOrCancel(g, core.SkillScan) {
+	actor, enemy, ok := beginEnemyTargetAction(g, core.SkillScan)
+	if !ok {
 		return false
 	}
-	actor := beginPartyAction(g)
-	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	g.Bestiary.MarkScanned(enemy.Kind)
 	core.EnqueueEnemyVFX(g, core.VFXScan, g.Battle.EnemyIndex)
 	setBattleMessage(g, fmt.Sprintf("%s scans %s — %d/%d HP. Identified.",
@@ -1264,11 +1273,10 @@ func frostbiteMessage(name string, target core.Enemy, damage, quality int, defea
 // mutates live Enemy.Armor, not a turn-counted debuff, so re-casts stack down. No damage.
 func applyCorrosiveVial(g *core.GameState, quality int) bool {
 	// Setup committed MP; the shared head refunds it on a dead target.
-	if !ensureAliveTargetOrCancel(g, core.SkillCorrosiveVial) {
+	actor, enemy, ok := beginEnemyTargetAction(g, core.SkillCorrosiveVial)
+	if !ok {
 		return false
 	}
-	actor := beginPartyAction(g)
-	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	effect := core.EffectiveSkillEffect(actor, core.SkillCorrosiveVial)
 	before := enemy.Armor
 	core.SubFloorZero(&enemy.Armor, effect.ArmorReduction)
@@ -1335,9 +1343,9 @@ func applyMassMend(g *core.GameState, quality int) bool {
 	// (shared with the out-of-battle Mass Mend; no-ops dead/ingested, clamps at MaxHP).
 	healed := 0
 	for _, i := range core.AvailablePartyTargets(g.Party) {
-		// A starving wounded ally is counted only if HealWholeParty can actually mend it;
-		// HealMember no-ops while Starving, so counting it would overstate "mends N allies".
-		if g.Party[i].HP < g.Party[i].MaxHP && !core.MemberStarving(g.Party[i]) {
+		// Count only allies HealWholeParty can actually mend (HealMember no-ops on
+		// full/starving), so "mends N allies" can't overstate. Shares core's heal guard.
+		if core.CanBenefitFromHeal(g.Party[i]) {
 			healed++
 		}
 		core.EnqueuePartyVFX(g, vfxKindFor(core.SkillMassMend), i)
@@ -1577,11 +1585,10 @@ func applyMug(g *core.GameState, quality int) bool {
 // floored at 1), dealt SkillTagNone so it bypasses Armor/MDef — a fixed fraction, not
 // a normal hit. Hits hardest on a healthy foe.
 func applyStaticField(g *core.GameState, quality int) bool {
-	if !ensureAliveTargetOrCancel(g, core.SkillStaticField) {
+	actor, live, ok := beginEnemyTargetAction(g, core.SkillStaticField)
+	if !ok {
 		return false
 	}
-	actor := beginPartyAction(g)
-	live := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	target := *live
 	effect := core.EffectiveSkillEffect(actor, core.SkillStaticField)
 	raw := max(core.ScaleDamage(int(float64(live.HP)*effect.PercentCurrentHP), quality), 1)
@@ -1621,11 +1628,10 @@ func applyConsecrate(g *core.GameState, quality int) bool {
 // applyJudgment executes a foe at/under JudgmentExecuteFraction of its HP (lethal,
 // defense-bypassing), else deals heavy WIS-scaled magic. Capstone, no upgrades.
 func applyJudgment(g *core.GameState, quality int) bool {
-	if !ensureAliveTargetOrCancel(g, core.SkillJudgment) {
+	actor, live, ok := beginEnemyTargetAction(g, core.SkillJudgment)
+	if !ok {
 		return false
 	}
-	actor := beginPartyAction(g)
-	live := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	target := *live
 	executed := float64(live.HP) <= float64(max(live.MaxHP, 1))*core.JudgmentExecuteFraction
 	raw := scaleSkillDamage(actor, core.SkillJudgment, quality)
@@ -1770,10 +1776,7 @@ func applyResurrect(g *core.GameState, quality int) bool {
 	}
 	actor := beginPartyAction(g)
 	m := &g.Party[idx]
-	m.HP = int(float64(m.MaxHP) * core.ResurrectHealPercent)
-	if m.HP < 1 {
-		m.HP = 1
-	}
+	m.HP = max(int(float64(m.MaxHP)*core.ResurrectHealPercent), 1)
 	// Pull the revived member back to a manned slot (the anticipated Raise hook).
 	core.ShuntPartyFormation(g.Party)
 	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillResurrect), idx)
@@ -1829,7 +1832,7 @@ func applyArcBolt(g *core.GameState, quality int) bool {
 // applyAoEStatusSkill is the single body for every whole-pack AoE skill: one crit
 // roll for the sweep, hits every living enemy, and per target rolls the skill's
 // Burn / Poison (chance 0 short-circuits, so a status-free skill is pure damage).
-// applyAoEDamage remains for the multi-PASS Swipe.
+// applyAoEDamageToSlots remains for the multi-PASS Swipe.
 func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, hitVerb, emptyVerb string, quality int) bool {
 	skillNoun := core.SkillName(skill)
 	actor := beginPartyAction(g)

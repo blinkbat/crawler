@@ -713,10 +713,12 @@ const (
 	pickerRowH    = float32(44)
 	pickerHeaderH = float32(56)
 	pickerFooterH = float32(32)
-	// Per-picker card widths + the use-target picker's taller row (name + status pill +
-	// HP/MP bars). Heal picker rows use the stock pickerRowH.
-	useTargetPickerCardW = float32(430)
-	useTargetPickerRowH  = float32(58)
+	// Per-picker card widths + the use-target picker's tall, roomy row: a two-column
+	// readout (identity + full status-chip row on the left, HP/MP bars + item effect
+	// preview on the right). Sized so a 4-member party never scrolls. Heal picker rows
+	// use the stock pickerRowH.
+	useTargetPickerCardW = float32(600)
+	useTargetPickerRowH  = float32(120)
 	healPickerCardW      = float32(360)
 )
 
@@ -894,15 +896,21 @@ func drawUseTargetPicker(g *core.GameState, assets Resources) {
 		title = "Cast " + core.SkillName(g.UsePendingSkill)
 	}
 
-	// Taller rows than the stock picker: name + status pill + live HP/MP bars (same readout the party ribbon shows).
+	// Tall, roomy rows: a two-column readout (identity + full status-chip row on the
+	// left, HP/MP bars + item effect preview on the right), same chips the party ribbon
+	// shows in battle so the two surfaces read identically.
 	const rowH = useTargetPickerRowH
 	const headerH = pickerHeaderH
 	visibleRows := len(living)
 	if visibleRows < 1 {
 		visibleRows = 1
 	}
+	_, sh := screenSizeF()
 	cardW := useTargetPickerCardW
 	cardH := headerH + float32(visibleRows)*rowH + pickerFooterH
+	if maxH := sh * 0.9; cardH > maxH { // windows gracefully on a short screen
+		cardH = maxH
+	}
 	card := drawPickerCard(font, cardW, cardH, title)
 
 	if len(living) == 0 {
@@ -911,23 +919,29 @@ func drawUseTargetPicker(g *core.GameState, assets Resources) {
 	drawPickerList(font, card, headerH, rowH, len(living), g.UseTargetCursor, useTargetPickerHints, func(i int, rect rl.Rectangle) {
 		m := &g.Party[living[i]]
 		classCol := classAccent(m.Class)
-		// Left column: class sigil + name.
-		drawClassGlyph(rect.X+24, rect.Y+22, 10, m.Class, classCol)
-		nameX := rect.X + 46
-		drawTextWithShadow(font, m.Name, nameX, rect.Y+8, FontBody, textPrimary)
-		// Status pill beside the name (poison etc. survive out of battle), same glyph + accent as the party cards.
-		if kind, _ := core.PartyStatus(m); kind != core.PartyStatusNone {
-			col, flicker := partyStatusVisual(kind)
-			if flicker {
-				col = fadeColor(col, pulseFlicker())
-			}
-			drawPartyStatusIcon(nameX+8, rect.Y+38, 7, kind, col)
-		}
-		// Right column: compact HP over MP bars (drawBarLive keyed by the stable member name).
+		inset := rect.X + 20
+		// Left column: class medallion + name, then the full status-chip readout below.
+		drawClassMedallion(inset+11, rect.Y+26, 14, classCol, false)
+		drawClassGlyph(inset+11, rect.Y+26, 10, m.Class, classCol)
+		nameX := inset + 34
+		drawTextWithShadow(font, m.Name, nameX, rect.Y+13, FontBody, textPrimary)
+		chipMaxW := rect.Width*memberCardBarSplit - (nameX - rect.X) - 12
+		drawMemberReadoutChips(font, m, nameX, rect.Y+48, chipMaxW)
+
+		// Right column: roomy HP over MP bars, then the item's live effect preview.
 		barX := rect.X + rect.Width*memberCardBarSplit
-		barW := rect.Width*memberCardBarFracW - 16
-		drawBarLive(font, "use:hp:"+m.Name, barX, rect.Y+8, barW, barHeightMini, "HP", m.HP, m.MaxHP, hpFillColor(m.HP, m.MaxHP), false)
-		drawBar(font, barX, rect.Y+30, barW, barHeightMini, "MP", m.MP, m.MaxMP, barMP, false)
+		barW := rect.Width*memberCardBarFracW - 20
+		drawBarLive(font, "use:hp:"+m.Name, barX, rect.Y+16, barW, barHeightCard, "HP", m.HP, m.MaxHP, hpFillColor(m.HP, m.MaxHP), false)
+		drawBar(font, barX, rect.Y+16+barHeightCard+6, barW, barHeightCard, "MP", m.MP, m.MaxMP, barMP, false)
+		if g.UsePendingItem != core.ItemNone {
+			res := core.PreviewRestorative(*m, core.ItemInfo(g.UsePendingItem))
+			label := itemEffectPreviewLabel(res)
+			col := inkAccent
+			if res.HP == 0 && res.MP == 0 && res.Satiety == 0 {
+				col = textDim
+			}
+			drawTextWithShadow(font, label, barX, rect.Y+16+2*(barHeightCard+6)+4, FontSmall, col)
+		}
 	})
 }
 

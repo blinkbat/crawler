@@ -1,6 +1,8 @@
 package explore
 
 import (
+	"fmt"
+
 	"crawler/internal/app/audio"
 	"crawler/internal/app/core"
 	"crawler/internal/app/input"
@@ -38,6 +40,11 @@ func updateLevelUpModal(g *core.GameState) {
 			// Commit staged picks; advanceLevelUpMember resets the pendings.
 			core.CommitLevelUp(m, g.LevelUpPending)
 			advanceLevelUpMember(g)
+		default:
+			// CursorUpDown clamps to LevelUpRowCount, so every row is a stat row or the
+			// apply row — fail loud if the row layout ever grows a third kind (matches the
+			// package's other menu switches).
+			panic(fmt.Sprintf("updateLevelUpModal: LevelUpRowCursor %d is neither a stat row nor the apply row", g.LevelUpRowCursor))
 		}
 	}
 	// Back on a staged stat row decrements it; on an empty focused row it closes

@@ -490,7 +490,17 @@ func faceOverridesFromMap(faces []mapfile.MapFace) []FaceOverride {
 	}
 	out := make([]FaceOverride, len(faces))
 	for i, f := range faces {
-		out[i] = FaceOverride{X: f.X, Z: f.Z, Skins: f.Skins}
+		sk := f.Skins // array copy — safe to sanitize without touching the source
+		// Sanitize on load: the mapfile parser accepts any 4-char NESW token, so a
+		// corrupt/hand-edited skin byte that's neither blank ('.') nor a known face skin
+		// normalizes to blank here — it renders as base rock (the same fallback the
+		// renderer already applies) but the stored data stays clean and in-alphabet.
+		for d := range sk {
+			if sk[d] != TileOpen && !IsFaceSkinChar(sk[d]) {
+				sk[d] = TileOpen
+			}
+		}
+		out[i] = FaceOverride{X: f.X, Z: f.Z, Skins: sk}
 	}
 	return out
 }

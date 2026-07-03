@@ -132,9 +132,11 @@ func FeedMember(m *PartyMember, amount int) int {
 	return before - m.Hunger
 }
 
-// StarvingStatPenalty is the flat per-stat hit a Starving member suffers (floored
-// at 0 in the Effective* fold). Reaches every combat stat: damage, accuracy,
-// magic, defenses, turn order.
+// StarvingStatPenalty is the flat hit a Starving member takes on each of the SIX
+// core stats — STR/DEX/INT/WIS/VIT/SPD (floored at 0 in the Effective* fold). It
+// reaches everything those stats drive: damage, accuracy, magic, turn order, and
+// stat-derived defenses (WIS→MDef). It does NOT touch flat physical Armor, which is
+// not a Stat and so stays at full value while starving.
 const StarvingStatPenalty = 3
 
 // starvingPenalty returns the stat delta to fold while Starving (zero otherwise),

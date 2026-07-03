@@ -581,6 +581,14 @@ func HealMember(m *PartyMember, amount int) bool {
 	return true
 }
 
+// CanBenefitFromHeal reports whether a plain heal would actually raise this member's
+// HP: a valid HealMember target (available, not starving) that isn't already full.
+// Lets callers predict "mends N allies" without re-deriving HealMember's guard.
+// Ignores revival — a dead member never benefits.
+func CanBenefitFromHeal(m PartyMember) bool {
+	return partyAvailable(m) && !MemberStarving(m) && m.HP < m.MaxHP
+}
+
 // HealWholeParty applies HealMember(amount) to every LIVING (HP > 0) member —
 // the shared party-wide heal loop behind both Mass Mend paths.
 func HealWholeParty(g *GameState, amount int) { HealWholePartyFunc(g, amount, nil) }
@@ -1122,6 +1130,28 @@ func PartyStatus(m *PartyMember) (kind PartyStatusKind, turns int) {
 	return PartyStatusNone, 0
 }
 
+// PartyStatusView is one active status for display: its kind + remaining turns
+// (0 for boolean statuses). The all-statuses counterpart to PartyStatus's single
+// highest-priority pick.
+type PartyStatusView struct {
+	Kind  PartyStatusKind
+	Turns int
+}
+
+// ActivePartyStatuses appends EVERY active status band for m (partyStatusBands
+// priority order) to buf and returns it — the full set behind the item-target
+// readouts, where PartyStatus's single top pick isn't enough. buf is truncated
+// first, so callers can reuse one scratch slice across members.
+func ActivePartyStatuses(buf []PartyStatusView, m *PartyMember) []PartyStatusView {
+	buf = buf[:0]
+	for _, band := range partyStatusBands {
+		if active, t := band.Active(m); active {
+			buf = append(buf, PartyStatusView{Kind: band.Kind, Turns: t})
+		}
+	}
+	return buf
+}
+
 // PartyStatusLabel returns the short uppercase label for a status kind. Pair
 // with PartyStatus(m) — never branch on the kind enum at the call site.
 func PartyStatusLabel(kind PartyStatusKind) string {
@@ -1249,9 +1279,9 @@ func previewSPD(current, after Stats, _ Stat) string {
 
 // init self-tests the hand-unrolled stat folds (SumStats / addStatsFloored /
 // Total). They're unrolled for hot-path inlining, so a newly-added Stat field can
-// silently slip past one. Probe every stat index via statTable/statSetters and
-// assert each contributes — a missed field panics at startup instead of zeroing
-// silently in combat.
+// silently slip past one. Probe every stat index via statTable's Get/Set/Add
+// accessors and assert each contributes — a missed field panics at startup instead
+// of zeroing silently in combat.
 func init() {
 	var a, b Stats
 	var arr [StatCount]int
@@ -1507,8 +1537,9 @@ func init() {
 			panic(fmt.Sprintf("core: statTable[%d] (%s) missing Get/Add/Set accessor", int(i), statTable[i].Label))
 		}
 	}
-	// StatPreviewLine's per-stat switch is the one parallel table the asserts
-	// above can't cover — force coverage so a missing case panics at STARTUP.
+	// StatPreviewLine dispatches through each row's Preview func — the one accessor the
+	// asserts above can't reach — so force coverage: a stat whose Preview yields "" (or
+	// a nil func) panics at STARTUP instead of showing a blank level-up projection.
 	var probe Stats
 	for i := Stat(0); i < StatCount; i++ {
 		if StatPreviewLine(i, probe, 1, StatSTR) == "" {

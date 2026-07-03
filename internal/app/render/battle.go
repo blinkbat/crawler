@@ -508,13 +508,18 @@ func arrowPrompt(a, b string) string {
 
 // drawAllyTargetPrompt paints the "verb → ally / Choose an ally" prompt shared by the
 // skill- and item-target arms. verb is the skill/item name; ally falls back to "Ally".
-func drawAllyTargetPrompt(g *core.GameState, assets Resources, verb string, contentX, contentY, subY int32) {
+// drawAllyTargetPrompt draws the ally-target header (verb → target name) with subLabel
+// beneath it. subLabel carries the mode's context line: "Choose an ally" for a skill/
+// swap, or the consumable's own effect ("Heals 14 HP", "heals hunger") for item use —
+// the item's descrip belongs on THIS menu panel, while the party cards stay reserved
+// for each member's status.
+func drawAllyTargetPrompt(g *core.GameState, assets Resources, verb, subLabel string, contentX, contentY, subY int32) {
 	targetName := "Ally"
 	if g.Battle.PartyTarget >= 0 && g.Battle.PartyTarget < len(g.Party) {
 		targetName = g.Party[g.Battle.PartyTarget].Name
 	}
 	drawTextWithShadow(assets.hudFont, arrowPrompt(verb, targetName), float32(contentX), float32(contentY), FontBody, textPrimary)
-	drawTextWithShadow(assets.hudFont, "Choose an ally", float32(contentX), float32(subY), FontSmall, textLabel)
+	drawTextWithShadow(assets.hudFont, subLabel, float32(contentX), float32(subY), FontSmall, textLabel)
 }
 
 func drawActionMenuPanel(g *core.GameState, assets Resources) {
@@ -570,9 +575,9 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 		drawEngravedText(assets.hudFont, actionLabel, float32(contentX), float32(contentY), FontHeading, textPrimary)
 		drawTextWithShadow(assets.hudFont, "Choose a target", float32(contentX), float32(subY), FontSmall, textLabel)
 	case core.ActionPartyTarget:
-		drawAllyTargetPrompt(g, assets, core.SkillName(g.Battle.PendingSkill), contentX, contentY, subY)
+		drawAllyTargetPrompt(g, assets, core.SkillName(g.Battle.PendingSkill), "Choose an ally", contentX, contentY, subY)
 	case core.ActionSwapTarget:
-		drawAllyTargetPrompt(g, assets, "Swap", contentX, contentY, subY)
+		drawAllyTargetPrompt(g, assets, "Swap", "Choose an ally", contentX, contentY, subY)
 	case core.ActionItemMenu:
 		drawEngravedText(assets.hudFont, "Items", float32(contentX), float32(contentY), FontHeading, textPrimary)
 		drawItemMenuList(g, assets, contentX, subY, rightX, listMaxY)
@@ -580,7 +585,7 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 		drawEngravedText(assets.hudFont, "Skills", float32(contentX), float32(contentY), FontHeading, textPrimary)
 		drawSkillMenuList(g, assets, contentX, subY, rightX, listMaxY)
 	case core.ActionItemTarget:
-		drawAllyTargetPrompt(g, assets, core.ItemInfo(g.Battle.PendingItem).Name, contentX, contentY, subY)
+		drawAllyTargetPrompt(g, assets, core.ItemInfo(g.Battle.PendingItem).Name, panelsItemEffectLabel(core.ItemInfo(g.Battle.PendingItem)), contentX, contentY, subY)
 	case core.ActionFleeConfirm:
 		drawEngravedText(assets.hudFont, "Flee", float32(contentX), float32(contentY), FontHeading, textPrimary)
 		drawTextWithShadow(assets.hudFont, "Retreat from this battle?", float32(contentX), float32(subY), FontSmall, textLabel)

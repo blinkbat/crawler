@@ -5,8 +5,8 @@
   "playerTileZ": 24,
   "playerFacing": 0,
   "playerLevel": 10,
-  "stepCount": 298,
-  "gold": 40,
+  "stepCount": 704,
+  "gold": 93,
   "party": [
     {
       "Class": 0,
@@ -23,7 +23,7 @@
       "MaxHP": 10,
       "MP": 4,
       "MaxMP": 4,
-      "Hunger": 174,
+      "Hunger": 160,
       "Armor": 0,
       "Equipped": [
         0,
@@ -66,7 +66,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 2,
-      "XP": 17,
+      "XP": 171,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
@@ -94,7 +94,7 @@
       "MaxHP": 8,
       "MP": 9,
       "MaxMP": 9,
-      "Hunger": 238,
+      "Hunger": 224,
       "Armor": 0,
       "Equipped": [
         11,
@@ -137,7 +137,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 2,
-      "XP": 17,
+      "XP": 171,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
@@ -163,9 +163,9 @@
       },
       "HP": 8,
       "MaxHP": 8,
-      "MP": 2,
+      "MP": 5,
       "MaxMP": 5,
-      "Hunger": 157,
+      "Hunger": 293,
       "Armor": 0,
       "Equipped": [
         0,
@@ -181,7 +181,7 @@
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 1,
+      "DamagePopup": 2,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "DamagePopupCrit": false,
@@ -208,7 +208,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 2,
-      "XP": 17,
+      "XP": 171,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
@@ -234,9 +234,9 @@
       },
       "HP": 8,
       "MaxHP": 8,
-      "MP": 3,
+      "MP": 10,
       "MaxMP": 10,
-      "Hunger": 298,
+      "Hunger": 273,
       "Armor": 0,
       "Equipped": [
         0,
@@ -279,7 +279,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 2,
-      "XP": 17,
+      "XP": 171,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
@@ -295,16 +295,8 @@
   ],
   "inventory": [
     {
-      "Kind": 15,
-      "Count": 2
-    },
-    {
-      "Kind": 2,
-      "Count": 1
-    },
-    {
       "Kind": 11,
-      "Count": 1
+      "Count": 3
     }
   ],
   "quests": [
@@ -319,23 +311,23 @@
   ],
   "bestiary": {
     "0": {
-      "kills": 11
+      "kills": 25
     },
     "1": {
-      "kills": 3
+      "kills": 7
     },
     "2": {
-      "kills": 2
+      "kills": 4
     },
     "3": {
-      "kills": 1
+      "kills": 3
     }
   },
   "crystals": [
     {
       "tileX": 34,
       "tileZ": 23,
-      "charge": 26,
+      "charge": 0,
       "charged": false,
       "saved": true
     }

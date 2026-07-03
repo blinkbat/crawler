@@ -72,6 +72,14 @@ func modifiers() (ctrl, shift, alt bool) {
 	return ctrl, shift, alt
 }
 
+// anyDismissPressed reports whether the user pressed anything that should close a
+// read-only viewer modal: confirm, cancel, Space, or a left click. Shared by the
+// validate + hit-glyphs viewers so their dismiss set can't drift.
+func anyDismissPressed() bool {
+	return editorCancelPressed() || editorCommitPressed() || rl.IsKeyPressed(rl.KeySpace) ||
+		rl.IsMouseButtonPressed(rl.MouseLeftButton)
+}
+
 // updateHotkeys handles keyboard shortcuts when no text field is focused.
 func updateHotkeys(s *State) {
 	ctrl, shift, alt := modifiers()
@@ -742,10 +750,8 @@ func strokePaint(s *State, x, z int) {
 	applyToolBrushed(s, x, z)
 	if s.dragSnapshotDone {
 		// Snapshot already banked, but later cells in the drag still mutate content —
-		// invalidate the reachability + per-epoch draw caches (3D preview, fade, tooltip,
-		// reach badge) that commitUndoSnapshot would otherwise refresh on the first cell only.
-		s.reachValid = false
-		s.contentEpoch++
+		// invalidate the caches commitUndoSnapshot would otherwise refresh on cell one only.
+		invalidateContentCaches(s)
 		return
 	}
 	if core.AreaContentEqual(s.area, s.dragUndoBefore) {
@@ -778,11 +784,18 @@ func continueDrag(s *State, x, z int) {
 }
 
 // paintLineBetween stamps the brush from (x0,z0) to (x1,z1), skipping the start.
-// Each step goes through strokePaint (shared Bresenham walkLine, ops.go).
+// Each step goes through strokePaint (shared Bresenham walkLine, ops.go). In the 3D
+// view the interpolated cells are level-gated the same way the live hover is (iso.go):
+// a sweep that crosses a wrong-level column must NOT stamp those intervening cells,
+// or the gate that blocks editing raised/lowered columns is defeated between two
+// valid endpoints.
 func paintLineBetween(s *State, x0, z0, x1, z1 int) {
 	walkLine(x0, z0, x1, z1, func(cx, cz int) {
 		if cx == x0 && cz == z0 {
 			return // start already painted
+		}
+		if s.isoView && s.isoWrongLevel(cx, cz) {
+			return // 3D: skip columns not on the active edit level (leaves a gap, by design)
 		}
 		strokePaint(s, cx, cz)
 	})
@@ -810,20 +823,28 @@ func finishEntityDragRelease(s *State, valid bool, curX, curZ int, blockers func
 	s.dirty = true
 }
 
+// commitPaintIfChanged runs paint under a lazy-undo guard: it snapshots first and,
+// if paint changed nothing, reverts the optimistic dirty + layer-reveal flips its
+// callees make; otherwise it banks ONE undo step. Shared by the rect/line drag commits
+// and the context-menu erase so an empty/all-refused bulk op can't leave a junk undo.
+func commitPaintIfChanged(s *State, paint func()) {
+	wasDirty := s.dirty
+	wasHidden := s.layerHidden[s.layer]
+	before := core.CloneArea(s.area)
+	paint()
+	if core.AreaContentEqual(s.area, before) {
+		s.dirty = wasDirty
+		s.layerHidden[s.layer] = wasHidden
+	} else {
+		commitUndoSnapshot(s, before)
+	}
+}
+
 func finishDrag(s *State) {
 	switch s.drag {
 	case dragStart:
 		if s.hoverX >= 0 && (s.hoverX != s.area.StartTileX || s.hoverZ != s.area.StartTileZ) {
-			// Shared startBlockers so the drag path can't drift from the
-			// entity-brush / right-click paths (it once missed the door check).
-			if msg := firstBlocker(startBlockers(&s.area, s.hoverX, s.hoverZ)...); msg != "" {
-				s.flash(msg)
-			} else {
-				pushUndo(s)
-				s.area.StartTileX = s.hoverX
-				s.area.StartTileZ = s.hoverZ
-				s.dirty = true
-			}
+			moveStartTo(s, s.hoverX, s.hoverZ) // shared with the entity-brush / right-click paths
 		}
 	case dragPack:
 		sp := core.PackSpawn{}
@@ -874,35 +895,21 @@ func finishDrag(s *State) {
 			})
 	case dragRect:
 		if s.hoverX >= 0 {
-			// Snapshot-then-compare (not eager pushUndo): an empty / all-refused
-			// rect must not bank a junk undo. Mirrors strokePaint's lazy commit.
-			wasDirty := s.dirty
-			wasHidden := s.layerHidden[s.layer]
-			before := core.CloneArea(s.area)
-			if s.rectHollow {
-				paintRectOutline(s, s.rectAnchorX, s.rectAnchorZ, s.hoverX, s.hoverZ)
-			} else {
-				paintRect(s, s.rectAnchorX, s.rectAnchorZ, s.hoverX, s.hoverZ)
-			}
-			if core.AreaContentEqual(s.area, before) {
-				s.dirty = wasDirty // no-op rect — undo the optimistic dirty flip
-				s.layerHidden[s.layer] = wasHidden // ...and applyTool's layer-reveal flip
-			} else {
-				commitUndoSnapshot(s, before)
-			}
+			// Lazy commit (not eager pushUndo): an empty / all-refused rect must not bank
+			// a junk undo. Shared with the line drag + context erase via commitPaintIfChanged.
+			commitPaintIfChanged(s, func() {
+				if s.rectHollow {
+					paintRectOutline(s, s.rectAnchorX, s.rectAnchorZ, s.hoverX, s.hoverZ)
+				} else {
+					paintRect(s, s.rectAnchorX, s.rectAnchorZ, s.hoverX, s.hoverZ)
+				}
+			})
 		}
 	case dragLine:
 		if s.hoverX >= 0 {
-			wasDirty := s.dirty
-			wasHidden := s.layerHidden[s.layer]
-			before := core.CloneArea(s.area)
-			paintLine(s, s.rectAnchorX, s.rectAnchorZ, s.hoverX, s.hoverZ)
-			if core.AreaContentEqual(s.area, before) {
-				s.dirty = wasDirty // no-op line — don't bank undo / clobber redo
-				s.layerHidden[s.layer] = wasHidden // ...and applyTool's layer-reveal flip
-			} else {
-				commitUndoSnapshot(s, before)
-			}
+			commitPaintIfChanged(s, func() {
+				paintLine(s, s.rectAnchorX, s.rectAnchorZ, s.hoverX, s.hoverZ)
+			})
 		}
 	case dragSelect:
 		// Commit the marquee as the active selection (normalized inclusive bounds).
@@ -1335,8 +1342,7 @@ func (s *State) markDirty() {
 	s.dirty = true
 	// A focused-field edit (door targets especially) can change reachability and the
 	// hover tooltip's content; invalidate the lazy caches so neither shows stale data.
-	s.reachValid = false
-	s.contentEpoch++
+	invalidateContentCaches(s)
 }
 
 func activeTextTarget(s *State) *string {
@@ -1725,10 +1731,7 @@ func activateEntityRow(s *State, row entityListRow) {
 
 // updateValidateModal: any key closes; it's a read-only viewer.
 func updateValidateModal(s *State) Action {
-	if editorCancelPressed() || editorCommitPressed() || rl.IsKeyPressed(rl.KeySpace) {
-		closeModal(s)
-	}
-	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
+	if anyDismissPressed() {
 		closeModal(s)
 	}
 	return ActionNone
@@ -1939,12 +1942,7 @@ func packMoveSelected(s *State, pack *core.PackSpawn, dir int) {
 // with Up/Down. Close is Esc-only so Enter is free to open the add dropdown.
 // Returns false when the modal closed.
 func updateEntityListCursor(s *State, count int) bool {
-	if s.modalCursor >= count {
-		s.modalCursor = count - 1
-	}
-	if s.modalCursor < 0 {
-		s.modalCursor = 0
-	}
+	clampModalCursor(s, count)
 	if editorCancelPressed() {
 		closeModal(s)
 		return false
@@ -2031,12 +2029,7 @@ func chestRemoveSelected(s *State, chest *core.ChestSpawn) {
 	pushUndo(s)
 	chest.Items = removeModalListItem(chest.Items, s.modalCursor)
 	s.dirty = true
-	if s.modalCursor >= len(chest.Items) {
-		s.modalCursor = len(chest.Items) - 1
-	}
-	if s.modalCursor < 0 {
-		s.modalCursor = 0
-	}
+	clampModalCursor(s, len(chest.Items))
 }
 
 func updateOpenModal(s *State) Action {
@@ -2111,8 +2104,7 @@ func openSelectedMap(s *State) Action {
 	surfaceAreaLevels(s)
 	// Area replaced wholesale — invalidate content-derived caches (like
 	// performNewMap / undo / redo) or stale reachability/tooltip data lingers.
-	s.reachValid = false
-	s.contentEpoch++
+	invalidateContentCaches(s)
 	rememberLastMap(path) // reopen here next session (NewDefault)
 	closeModal(s)
 	s.flash("Opened " + core.MapIDFromPath(path))
@@ -2134,12 +2126,7 @@ func openDuplicateSelected(s *State) {
 		}
 	}
 	// Defensive clamp if the copy isn't in the refreshed list.
-	if s.modalCursor >= len(s.modalPaths) {
-		s.modalCursor = len(s.modalPaths) - 1
-	}
-	if s.modalCursor < 0 {
-		s.modalCursor = 0
-	}
+	clampModalCursor(s, len(s.modalPaths))
 	s.flash("Duplicated to " + core.MapIDFromPath(newPath))
 }
 
@@ -2211,12 +2198,7 @@ func openDeleteSelected(s *State) {
 	}
 	s.flash("Deleted " + core.MapIDFromPath(path))
 	refreshOpenList(s)
-	if s.modalCursor >= len(s.modalPaths) {
-		s.modalCursor = len(s.modalPaths) - 1
-	}
-	if s.modalCursor < 0 {
-		s.modalCursor = 0
-	}
+	clampModalCursor(s, len(s.modalPaths))
 	s.modalConfirmDelete = false
 }
 

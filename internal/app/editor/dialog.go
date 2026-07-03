@@ -1342,14 +1342,18 @@ func dialogActionKindEntries(s *State) []dropdownEntry {
 			}
 			// No-change guard: re-picking the action the holder already has shouldn't
 			// bank a no-op undo or dirty the map (mirrors the sibling field pickers).
+			// Probe by applying set to a COPY of the current action, not to a zero value:
+			// a setter only rewrites the fields it owns (Kind/QuestOp), leaving QuestID/
+			// EventID intact, so a zero-value probe would spuriously differ from a holder
+			// that already carries an ID and bank a redundant undo/dirty on a true no-op.
 			if set == nil {
 				if *holder == nil {
 					return
 				}
-			} else {
-				var probe core.DialogAction
+			} else if *holder != nil {
+				probe := **holder
 				set(&probe)
-				if *holder != nil && **holder == probe {
+				if probe == **holder {
 					return
 				}
 			}

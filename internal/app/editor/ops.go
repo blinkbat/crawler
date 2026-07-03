@@ -58,7 +58,7 @@ func applyTool(s *State, x, z int) {
 		return
 	}
 	// Reveal the layer so a stroke on a hidden layer isn't invisible.
-	s.layerHidden[s.layer] = false
+	revealActiveLayer(s)
 	brush := s.activeBrush()
 	if brush.Erase {
 		eraseAt(s, x, z)
@@ -106,14 +106,18 @@ func applyFaceBrush(s *State, x, z int, c byte) {
 	setLayerCell(&s.area.Walls, x, z, c)
 }
 
-func applyDecorBrush(s *State, x, z int, c byte) {
+// applyDecorBrush paints decor at (x,z) and reports whether a placement actually
+// landed — false on every refusal (blocked footprint / wall / prop-occupied / player
+// start), so paintContentCell won't lift the column's elevation or dirty the map for
+// a stroke that only flashed a rejection.
+func applyDecorBrush(s *State, x, z int, c byte) bool {
 	// Multi-tile decor anchor: validate the whole footprint before committing any
 	// cell, then auto-paint the tail chars.
 	if footprint := core.DecorFootprint(c); footprint != nil {
 		tail := core.DecorFootprintTail(c)
 		if msg := footprintBlocker(s, x, z, footprint, true); msg != "" {
 			s.flash(msg)
-			return
+			return false
 		}
 		for _, off := range footprint {
 			fx, fz := x+off.DX, z+off.DZ
@@ -123,23 +127,24 @@ func applyDecorBrush(s *State, x, z int, c byte) {
 			}
 			setDecorFloor(s, fx, fz, ch)
 		}
-		return
+		return true
 	}
 	if s.area.WallAt(x, z) {
 		s.flash("Decor needs an open cell")
-		return
+		return false
 	}
 	// Per-floor: only a prop on the SAME floor blocks decor (a prop on another
 	// floor of this column is independent).
 	if core.IsPropChar(s.area.PropAt(x, s.editLevel, z)) {
 		s.flash("Decor cell is occupied by a prop")
-		return
+		return false
 	}
 	if s.area.StartTileX == x && s.area.StartTileZ == z {
 		s.flash("Cell holds the player start")
-		return
+		return false
 	}
 	setDecorFloor(s, x, z, c)
+	return true
 }
 
 // clearPropCell clears the prop on the ACTIVE floor at (x,z). A multi-tile prop
@@ -162,10 +167,14 @@ func clearPropCell(s *State, x, z int) {
 	setPropFloor(s, x, z, core.TilePropEmpty)
 }
 
-func applyPropBrush(s *State, x, z int, c byte) {
+// applyPropBrush paints a prop at (x,z) and reports whether the map changed — false
+// on every refusal (blocked footprint / wall / player start), so paintContentCell
+// won't lift the column's elevation or dirty the map for a stroke that only flashed a
+// rejection. An empty-char brush erases and counts as a change.
+func applyPropBrush(s *State, x, z int, c byte) bool {
 	if c == core.TilePropEmpty {
 		clearPropCell(s, x, z)
-		return
+		return true
 	}
 	// Multi-tile prop anchor: validate the whole footprint, then auto-paint the
 	// tail cells. Any blocked cell refuses the whole placement (no partial commits).
@@ -173,7 +182,7 @@ func applyPropBrush(s *State, x, z int, c byte) {
 		tail := core.PropFootprintTail(c)
 		if msg := footprintBlocker(s, x, z, footprint, false); msg != "" {
 			s.flash(msg)
-			return
+			return false
 		}
 		for _, off := range footprint {
 			fx, fz := x+off.DX, z+off.DZ
@@ -186,20 +195,21 @@ func applyPropBrush(s *State, x, z int, c byte) {
 			setDecorFloor(s, fx, fz, core.DecorAuto)
 			removeAllEntitiesAt(&s.area, fx, fz)
 		}
-		return
+		return true
 	}
 	if s.area.WallAt(x, z) {
 		s.flash("Props need an open cell (remove the wall first)")
-		return
+		return false
 	}
 	if s.area.StartTileX == x && s.area.StartTileZ == z {
 		s.flash("Cell holds the player start")
-		return
+		return false
 	}
 	setPropFloor(s, x, z, c)
 	// A prop occupies the floor square (on its floor); reset decor + clear entities.
 	setDecorFloor(s, x, z, core.DecorAuto)
 	removeAllEntitiesAt(&s.area, x, z)
+	return true
 }
 
 // setTileLevel records the level a placed thing sits on into a per-tile grid
@@ -361,6 +371,23 @@ func setDecorFloor(s *State, x, z int, c byte) {
 	setTileLevel(s, &s.area.DecorLevels, x, z, s.editLevel)
 }
 
+// moveStartTo relocates the player start to (x,z) when startBlockers allows, banking
+// ONE undo and dirtying on success (flashing the first blocker otherwise). The single
+// home for the three move-start paths — entity brush, start-drag, right-click "Move
+// start here" — which had drifted: the entity-brush copy skipped the undo snapshot.
+// Returns whether the start actually moved.
+func moveStartTo(s *State, x, z int) bool {
+	if msg := firstBlocker(startBlockers(&s.area, x, z)...); msg != "" {
+		s.flash(msg)
+		return false
+	}
+	pushUndo(s)
+	s.area.StartTileX = x
+	s.area.StartTileZ = z
+	s.dirty = true
+	return true
+}
+
 func applyEntityBrush(s *State, x, z int, kind entityKind) {
 	if !s.area.InBounds(x, z) {
 		return
@@ -374,13 +401,7 @@ func applyEntityBrush(s *State, x, z int, kind entityKind) {
 	// Player start has its own rule set (startBlockers — matches the right-click
 	// "Move start here" path), handled before the generic guard for its wording.
 	if kind == entityPlayerStart {
-		if msg := firstBlocker(startBlockers(&s.area, x, z)...); msg != "" {
-			s.flash(msg)
-			return
-		}
-		s.area.StartTileX = x
-		s.area.StartTileZ = z
-		s.dirty = true
+		moveStartTo(s, x, z)
 		return
 	}
 	if s.area.WallAt(x, z) {
@@ -644,7 +665,7 @@ func eraseAt(s *State, x, z int) {
 	if !s.area.InBounds(x, z) {
 		return
 	}
-	s.layerHidden[s.layer] = false // reveal so an erase isn't invisible
+	revealActiveLayer(s) // reveal so an erase isn't invisible
 	// Per-layer clear; the returned bool drives dirty so an entity clear that removed
 	// nothing leaves the map clean. See layerDefs in layerdef.go.
 	if layerDefs[s.layer].erase(s, x, z) {
@@ -684,7 +705,7 @@ func placeRamp(s *State, x, z int) {
 			continue
 		}
 		pushUndo(s)
-		s.layerHidden[s.layer] = false // reveal so the placed ramp isn't invisible (mirrors applyTool)
+		revealActiveLayer(s) // reveal so the placed ramp isn't invisible (mirrors applyTool)
 		setLayerCell(&s.area.Floor, x, z, core.RampCharForFacing(ascend))
 		setTileGroundLevel(s, x, z, low)
 		s.dirty = true
@@ -809,6 +830,22 @@ func clearSelection(s *State) {
 	s.selActive = false
 }
 
+// revealActiveLayer un-hides the layer being edited so a paint/erase/fill on a hidden
+// layer isn't invisible. Shared by applyTool, eraseAt, placeRamp, floodFill, and
+// fillEntireLayer so the reveal can't be forgotten on a new edit path.
+func revealActiveLayer(s *State) {
+	s.layerHidden[s.layer] = false
+}
+
+// invalidateContentCaches drops the derived-state caches after any edit that changes
+// map content: the reachability cache and the content-epoch-keyed caches (3D preview,
+// fade, tooltip, reach badge) that rebuild lazily next frame. Single seam so none of
+// the mutation paths (paint, undo/redo, new/open, resize) can forget one.
+func invalidateContentCaches(s *State) {
+	s.reachValid = false
+	s.contentEpoch++
+}
+
 // pushUndo snapshots the current area before a mutation, invalidating redo. Capped
 // at undoLimit; on trim, the window shifts in place and freed tail slots are nil'd
 // for GC (avoids a fresh array alloc every stroke at the cap).
@@ -821,8 +858,7 @@ func pushUndo(s *State) {
 // so a multi-cell drag banks ONE step (only when it changed something). Every
 // forward mutation routes through here.
 func commitUndoSnapshot(s *State, before core.AreaDefinition) {
-	s.reachValid = false
-	s.contentEpoch++
+	invalidateContentCaches(s)
 	s.undo = append(s.undo, before)
 	if excess := len(s.undo) - undoLimit; excess > 0 {
 		// Shift the kept window to the front, then release the tail slots for GC.
@@ -844,8 +880,7 @@ func undoOne(s *State) {
 	s.undo = s.undo[:len(s.undo)-1]
 	s.redo = append(s.redo, core.CloneArea(s.area))
 	s.area = last
-	s.reachValid = false // area replaced — recompute reachability lazily
-	s.contentEpoch++
+	invalidateContentCaches(s) // area replaced — rebuild reachability + epoch caches lazily
 	// Drop the dirty marker if we stepped back to the on-disk baseline.
 	s.dirty = !core.AreaContentEqual(s.area, s.baseline)
 }
@@ -859,8 +894,7 @@ func redoOne(s *State) {
 	s.redo = s.redo[:len(s.redo)-1]
 	s.undo = append(s.undo, core.CloneArea(s.area))
 	s.area = last
-	s.reachValid = false // area replaced — recompute reachability lazily
-	s.contentEpoch++
+	invalidateContentCaches(s) // area replaced — rebuild reachability + epoch caches lazily
 	s.dirty = !core.AreaContentEqual(s.area, s.baseline)
 }
 
@@ -1199,7 +1233,7 @@ func floodFill(s *State, x, z int, b byte, erase bool) {
 	}
 	// Snapshot only now that the fill will change cells (no useless undo step).
 	pushUndo(s)
-	s.layerHidden[s.layer] = false // reveal so the fill isn't invisible (mirrors applyTool)
+	revealActiveLayer(s) // reveal so the fill isn't invisible (mirrors applyTool)
 	var filled [][2]int
 	rewriteLayerRows(layer, func(rows [][]byte) {
 		stack := [][2]int{{x, z}}
@@ -1226,6 +1260,9 @@ func floodFill(s *State, x, z int, b byte, erase bool) {
 		// PAINT: the flooded region joins the active floor (mirror of applyTool's
 		// per-cell stamp). Walls exempt.
 		liftCellsToActiveLevel(s, filled)
+	}
+	if !erase {
+		guardStartTileAfterBulkFill(s)
 	}
 	s.dirty = true
 }
@@ -1279,6 +1316,22 @@ func pruneBlockedSpawns(a *core.AreaDefinition) {
 	a.CrystalSpawns = removeSpawnsWhere(a.CrystalSpawns, blocked)
 }
 
+// guardStartTileAfterBulkFill reverts a bulk Props/Decor fill's write on the player-
+// start tile back to the layer sentinel. The per-cell brush refuses content on the
+// start (a prop there BLOCKS movement and silently soft-locks the spawn), but flood/
+// fill-all write straight into the grid and would otherwise sneak it in. No-op on
+// other layers or when the start is out of bounds.
+func guardStartTileAfterBulkFill(s *State) {
+	if s.layer != LayerProps && s.layer != LayerDecor {
+		return
+	}
+	sx, sz := s.area.StartTileX, s.area.StartTileZ
+	if !s.area.InBounds(sx, sz) {
+		return
+	}
+	setLayerCell(activeGrid(s), sx, sz, layerDefs[s.layer].sentinel)
+}
+
 // rewriteLayerRows clones the layer into a mutable [][]byte, runs visit on it,
 // and writes back. The shared "build fresh byte rows then commit" idiom.
 func rewriteLayerRows(layer *[]string, visit func(rows [][]byte)) {
@@ -1317,7 +1370,7 @@ func fillEntireLayer(s *State) {
 	if s.layer == LayerElevation && len(s.area.Solids) > 0 {
 		lvl := core.ElevationLevelFromChar(brush.Char)
 		pushUndo(s)
-		s.layerHidden[s.layer] = false // reveal so the fill isn't invisible (mirrors applyTool)
+		revealActiveLayer(s) // reveal so the fill isn't invisible (mirrors applyTool)
 		for z := 0; z < s.area.Height; z++ {
 			for x := 0; x < s.area.Width; x++ {
 				s.area.SetColumnTop(x, z, lvl)
@@ -1328,7 +1381,7 @@ func fillEntireLayer(s *State) {
 		return
 	}
 	pushUndo(s)
-	s.layerHidden[s.layer] = false // reveal so the fill isn't invisible (mirrors applyTool)
+	revealActiveLayer(s) // reveal so the fill isn't invisible (mirrors applyTool)
 	var filled [][2]int
 	rewriteLayerRows(layer, func(rows [][]byte) {
 		for z := 0; z < s.area.Height && z < len(rows); z++ {
@@ -1343,6 +1396,7 @@ func fillEntireLayer(s *State) {
 	if layerStampsActiveLevel(s.layer) {
 		liftCellsToActiveLevel(s, filled)
 	}
+	guardStartTileAfterBulkFill(s)
 	s.dirty = true
 	s.flash("Filled " + layerName(s.layer))
 }
@@ -1823,15 +1877,12 @@ func performNewMap(s *State, w, h int, floor byte) {
 	s.baseline = core.CloneArea(s.area)
 	s.undo = nil
 	s.redo = nil
-	s.reachValid = false // fresh area — recompute reachability lazily
-	s.contentEpoch++
+	invalidateContentCaches(s) // fresh area — rebuild reachability + epoch caches lazily
 	s.dirty = false
 	clearSelection(s) // new map — old selection coords no longer apply
-	// Reset Levels-panel / active-floor state (as openSelectedMap does) so a stale
+	// Reset Levels-panel / active-floor state (shared with openSelectedMap) so a stale
 	// editLevel can't lift the first paint onto a nonexistent floor.
-	s.topLevel, s.bottomLevel = surfaceLevelSpan(&s.area)
-	s.editLevel = clampLevel(s.area.ElevationLevelAt(s.area.StartTileX, s.area.StartTileZ))
-	s.levelHidden = [maxEditLevel + 1]bool{}
+	surfaceAreaLevels(s)
 	s.zoom = 1
 	s.panX, s.panY = 0, 0
 	s.flash("New map")

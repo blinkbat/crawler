@@ -591,10 +591,9 @@ const (
 	barValuePadRight    = float32(10)
 	barLabelPadLeft     = float32(8)
 
-	// Canonical HP/MP gauge heights: Character tab (compact), use-item picker row
-	// (mini), and the in-card gauge shared by the party ribbon + victory spoils (card).
+	// Canonical HP/MP gauge heights: Character tab (compact) and the in-card gauge
+	// shared by the party ribbon + victory spoils + use-item picker (card).
 	barHeightCompact = float32(28)
-	barHeightMini    = float32(18)
 	barHeightCard    = float32(22)
 
 	// World-popup horizontal slack: pixels past the screen edge a projected popup

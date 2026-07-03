@@ -77,13 +77,11 @@ func init() {
 	}
 }
 
-// menuAnchorRect is the on-bar rect menu i's pull-down drops from (walks drawButtonStrip's widths).
+// menuAnchorRect is the on-bar rect menu i's pull-down drops from — via the shared
+// stripButtonRect so it uses the SAME per-button widths (honoring any width override)
+// the bar draws with, not a label-only recompute that would misplace the dropdown.
 func menuAnchorRect(i int) rl.Rectangle {
-	x := buttonStripStartX
-	for j := 0; j < i && j < len(menuBarBtns); j++ {
-		x += buttonWidth(menuBarBtns[j].label) + tightBtnGap
-	}
-	return rl.NewRectangle(x, menuBarBtnY, buttonWidth(menuBarBtns[i].label), menuBarBtnH)
+	return stripButtonRect(menuBarBtns, i, menuBarBtnY, menuBarBtnH)
 }
 
 // openMenu toggles menu i's pull-down (drops down from the bar label).

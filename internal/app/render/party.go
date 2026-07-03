@@ -3,6 +3,7 @@ package render
 import (
 	"fmt"
 	"image/color"
+	"strconv"
 
 	"crawler/internal/app/core"
 
@@ -148,12 +149,21 @@ func measurePartyNameWithSpace(font rl.Font, name string) rl.Vector2 {
 
 const (
 	// Wide short cards in a 2×2 grid: left = sigil + name + status, right = HP/MP bars.
-	partyCardW    = float32(300)
-	partyCardH    = float32(72)
-	partyCardGap  = float32(14)
-	partyRowGap   = float32(10) // vertical gap between the two card rows
-	partyCardCols = 2
-	partyCardBarH = barHeightCard // shorter gauge so HP+MP stack in the right column
+	partyCardW = float32(300)
+	partyCardH = float32(72)
+	// partyCardItemH is the taller card used ONLY while targeting an item or ally-cast
+	// skill: the extra height carries the full char-status chip readout so the player
+	// can compare targets without opening a panel. See DrawPartyRibbon.
+	partyCardItemH = float32(116)
+	partyCardGap   = float32(14)
+	partyRowGap    = float32(10) // vertical gap between the two card rows
+	partyCardCols  = 2
+	partyCardBarH  = barHeightCard // shorter gauge so HP+MP stack in the right column
+	// Party-card content geometry (named so the paired insets can't drift; distinct
+	// from panels.go's member-card tokens, which carry different tuned values).
+	partyCardInsetX   = float32(14)  // left/right content inset from the card edge
+	partyCardNameGap  = float32(10)  // gap from the class sigil to the name
+	partyCardBarSplit = float32(0.5) // fraction of card width where the HP/MP column starts
 	// cardGlowMargin: per-side inset shared by active halo + selected outline.
 	cardGlowMargin = int32(3)
 	// activeCardJut nudges the active card OUTWARD by column so "whose turn" reads
@@ -172,9 +182,139 @@ func drawCardScrim(x, y, w, h int32) {
 	drawCardFill(x, y, w, h, surfaceDimScrim)
 }
 
-// drawPartyCard renders one party member card. `dim` requests the inactive-member
-// wash (applied last, over the whole card).
-func drawPartyCard(font rl.Font, member *core.PartyMember, x, y float32, active, selected, down, dim bool) {
+// itemEffectPreviewLabel formats a pending consumable's projected restore on one
+// member as a compact "+N HP  +N MP  heals hunger" line (empty axes dropped), or
+// "No effect" when the item would do nothing (full on every axis it restores, or a
+// starving-blocked heal). Shared by the battle ribbon and the out-of-battle Use picker.
+func itemEffectPreviewLabel(res core.RestorativeResult) string {
+	out := ""
+	add := func(s string) {
+		if out == "" {
+			out = s
+		} else {
+			out += "  " + s
+		}
+	}
+	if res.HP > 0 {
+		add("+" + strconv.Itoa(res.HP) + " HP")
+	}
+	if res.MP > 0 {
+		add("+" + strconv.Itoa(res.MP) + " MP")
+	}
+	if res.Satiety > 0 {
+		add("heals hunger")
+	}
+	if out == "" {
+		return "No effect"
+	}
+	return out
+}
+
+// Status/satiety chip geometry — a compact icon+label pill, shared by the in-battle
+// expanded card and the out-of-battle Use picker so the two readouts read identically.
+const (
+	statusChipH        = float32(22)
+	statusChipIconR    = float32(6)
+	statusChipIconGap  = float32(6)
+	statusChipPadL     = float32(7)
+	statusChipPadR     = float32(9)
+	statusChipGap      = float32(5)               // horizontal gap between chips in a row
+	statusChipRowPitch = statusChipH + float32(5) // vertical stride when chips wrap
+	// chipFillAlpha / chipOutlineAlpha tint the pill fill + border by the status accent.
+	chipFillAlpha    = float32(0.22)
+	chipOutlineAlpha = float32(0.85)
+)
+
+// statusGlyphFor returns the glyph painter for a status kind (nil if out of range),
+// so chip drawing can share the init-asserted partyStatusVisuals table.
+func statusGlyphFor(kind core.PartyStatusKind) func(cx, cy, r float32, col rl.Color) {
+	if kind < 0 || int(kind) >= len(partyStatusVisuals) {
+		return nil
+	}
+	return partyStatusVisuals[kind].Glyph
+}
+
+// chipWidth is the drawn width of drawChip for a given glyph presence + label. Kept
+// next to drawChip so the two can't drift.
+func chipWidth(font rl.Font, hasGlyph bool, label string) float32 {
+	w := statusChipPadL + measurePanelStatValue(font, label, FontTiny).X + statusChipPadR
+	if hasGlyph {
+		w += statusChipIconR*2 + statusChipIconGap
+	}
+	return w
+}
+
+// drawChip paints one compact pill at (x,y): an optional status glyph then a FontTiny
+// label, filled + outlined in col. Returns the chip width. The shared primitive
+// behind the satiety chip (no glyph) and the status-effect chips (with glyph).
+func drawChip(font rl.Font, x, y float32, glyph func(cx, cy, r float32, col rl.Color), label string, col rl.Color) float32 {
+	w := chipWidth(font, glyph != nil, label)
+	drawSmallPanel(int32(x), int32(y), int32(w), int32(statusChipH), fadeColor(col, chipFillAlpha))
+	drawSmallPanelOutline(int32(x), int32(y), int32(w), int32(statusChipH), fadeColor(col, chipOutlineAlpha))
+	tx := x + statusChipPadL
+	if glyph != nil {
+		cx := x + statusChipPadL + statusChipIconR
+		glyph(cx, y+statusChipH/2, statusChipIconR, col)
+		tx = cx + statusChipIconR + statusChipIconGap
+	}
+	drawTextWithShadow(font, label, tx, y+statusChipH/2-FontTiny/2, FontTiny, col)
+	return w
+}
+
+// statusChipScratch avoids a per-frame alloc in the readout-chip flow (drawn for up
+// to PartyMemberCount members per frame; consumed immediately each call).
+var statusChipScratch []core.PartyStatusView
+
+// drawMemberReadoutChips flows a member's full status readout from (x,y), wrapping
+// within maxW (statusChipRowPitch per row): the satiety-stage chip first (dropped
+// when Starving — the Starving effect chip below already carries it), then EVERY
+// active status effect as an icon+label chip. Returns the height consumed. Shared by
+// the item-target surfaces so "all their status effects" reads the same in and out
+// of battle.
+func drawMemberReadoutChips(font rl.Font, m *core.PartyMember, x, y, maxW float32) float32 {
+	cx, cy := x, y
+	used := statusChipH
+	// place advances the cursor for a chip of width w, wrapping to a new row when it
+	// would overflow maxW, and returns the chip's top-left.
+	place := func(w float32) (float32, float32) {
+		if cx > x && cx+w > x+maxW {
+			cx = x
+			cy += statusChipRowPitch
+			used += statusChipRowPitch
+		}
+		px, py := cx, cy
+		cx += w + statusChipGap
+		return px, py
+	}
+
+	stage := core.MemberStage(*m)
+	if stage != core.SatietyStarving { // Starving shows as its own effect chip below
+		satLabel := core.SatietyStageLabel(stage)
+		satCol := satietyStageColors[stage]
+		px, py := place(chipWidth(font, false, satLabel))
+		drawChip(font, px, py, nil, satLabel, satCol)
+	}
+
+	statusChipScratch = core.ActivePartyStatuses(statusChipScratch, m)
+	for _, s := range statusChipScratch {
+		col, flicker := partyStatusVisual(s.Kind)
+		if flicker {
+			col = fadeColor(col, pulseFlicker())
+		}
+		glyph := statusGlyphFor(s.Kind)
+		label := partyStatusTurnLabel(s.Kind, s.Turns)
+		px, py := place(chipWidth(font, glyph != nil, label))
+		drawChip(font, px, py, glyph, label, col)
+	}
+	return used
+}
+
+// drawPartyCard renders one party member card of height cardH. `dim` requests the
+// inactive-member wash (applied last, over the whole card). When cardH is the tall
+// partyCardItemH (item/ally-skill targeting) the card's lower band shows the full
+// char-status chip readout (satiety + every active status effect) so the player can
+// compare targets from the ribbon without opening a panel.
+func drawPartyCard(font rl.Font, member *core.PartyMember, x, y, cardH float32, active, selected, down, dim bool) {
 	classCol := classAccent(member.Class)
 	accent := classCol
 	bg := surfacePrimary
@@ -207,7 +347,8 @@ func drawPartyCard(font rl.Font, member *core.PartyMember, x, y float32, active,
 	}
 
 	ix, iy := int32(x), int32(y)
-	iw, ih := int32(partyCardW), int32(partyCardH)
+	iw, ih := int32(partyCardW), int32(cardH)
+	expanded := cardH > partyCardH+1 // item-target readout mode (see partyCardItemH)
 
 	if active && !down {
 		// Layered gilt halo (solid inner + pulsing outer ring), shared with the
@@ -226,7 +367,7 @@ func drawPartyCard(font rl.Font, member *core.PartyMember, x, y float32, active,
 	}
 
 	// LEFT column: class sigil + name on top, status icon (+ turns) below.
-	leftX := x + 14
+	leftX := x + partyCardInsetX
 	glyphR := float32(9)
 	glyphCX := leftX + glyphR
 	glyphCY := y + 18
@@ -236,7 +377,7 @@ func drawPartyCard(font rl.Font, member *core.PartyMember, x, y float32, active,
 	}
 	drawClassMedallion(glyphCX, glyphCY, glyphR+4, glyphCol, down)
 	drawClassGlyph(glyphCX, glyphCY, glyphR, member.Class, glyphCol)
-	nameX := glyphCX + glyphR + 10
+	nameX := glyphCX + glyphR + partyCardNameGap
 
 	// Soft "+" badge on the name when the member has unspent stat/skill points.
 	hasPoints := core.HasUnspentPoints(member)
@@ -250,32 +391,47 @@ func drawPartyCard(font rl.Font, member *core.PartyMember, x, y float32, active,
 		drawTextWithShadow(font, "+", nameX+nameMeasure.X, y+10, FontBody, inkAccent)
 	}
 
-	// Status icon + turn count below the name. Resolves through core.PartyStatus
-	// so the card agrees with the Tome badge; only color/flicker are render-side.
-	kind, turns := core.PartyStatus(member)
-	if kind != core.PartyStatusNone {
-		col, flicker := partyStatusVisual(kind)
-		iconCol := col
-		if flicker {
-			iconCol = fadeColor(col, pulseFlicker())
-		}
-		const statusIconR = float32(7)
-		icx := nameX + statusIconR
-		icy := y + partyCardH - 16
-		drawPartyStatusIcon(icx, icy, statusIconR, kind, iconCol)
-		if turns > 0 {
-			num := statusTurnDigit(turns)
-			drawTextWithShadow(font, num, icx+statusIconR+4, icy-FontTiny/2, FontTiny, iconCol)
-		}
-	}
-
 	// RIGHT column: HP over MP. HP rides the live gauge (hit-ghost + low-HP
-	// breathing); MP is static.
-	barX := x + partyCardW*0.5
-	barW := x + partyCardW - 14 - barX
+	// breathing); MP is static. Expanded cards stack both near the top so the wide
+	// lower band is free for the readout; compact cards pin MP to the bottom.
+	barX := x + partyCardW*partyCardBarSplit
+	barW := x + partyCardW - partyCardInsetX - barX
 	hpFill := hpFillColor(member.HP, member.MaxHP)
 	drawBarLive(font, partyHPBarKey(member.Name), barX, y+10, barW, partyCardBarH, "HP", member.HP, member.MaxHP, hpFill, down)
-	drawBar(font, barX, y+partyCardH-10-partyCardBarH, barW, partyCardBarH, "MP", member.MP, member.MaxMP, barMP, down)
+	mpY := y + partyCardH - 10 - partyCardBarH
+	if expanded {
+		mpY = y + 10 + partyCardBarH + 4
+	}
+	drawBar(font, barX, mpY, barW, partyCardBarH, "MP", member.MP, member.MaxMP, barMP, down)
+
+	if expanded {
+		// Item/skill targeting: the card's lower band shows this member's full CHAR
+		// STATUS readout — satiety + every active status effect (Starving included) as a
+		// wrapping chip row — so the player compares WHO to target from the ribbon. The
+		// item's own effect ("Heals N HP", "heals hunger") lives on the action menu
+		// panel, not here (see drawAllyTargetPrompt's item sub-line).
+		drawMemberReadoutChips(font, member, leftX, y+62, partyCardW-2*partyCardInsetX)
+	} else {
+		// Compact card: single status glyph (+ turns) below the name. Resolves through
+		// core.PartyStatus so the card agrees with the Tome badge; only color/flicker
+		// are render-side.
+		kind, turns := core.PartyStatus(member)
+		if kind != core.PartyStatusNone {
+			col, flicker := partyStatusVisual(kind)
+			iconCol := col
+			if flicker {
+				iconCol = fadeColor(col, pulseFlicker())
+			}
+			const statusIconR = float32(7)
+			icx := nameX + statusIconR
+			icy := y + partyCardH - 16
+			drawPartyStatusIcon(icx, icy, statusIconR, kind, iconCol)
+			if turns > 0 {
+				num := statusTurnDigit(turns)
+				drawTextWithShadow(font, num, icx+statusIconR+4, icy-FontTiny/2, FontTiny, iconCol)
+			}
+		}
+	}
 
 	// Dim wash over inactive cards, painted last (active + targeted-ally opt out).
 	if dim {
@@ -455,10 +611,22 @@ func DrawPartyRibbon(g *core.GameState, assets Resources) {
 	if startX < float32(hudEdgePad) {
 		startX = float32(hudEdgePad)
 	}
+	// Targeting a consumable OR an ally-cast skill grows every card TALL and fills its
+	// lower band with the full char-status chip readout (satiety + every active status
+	// effect) so the player compares targets from the ribbon. The item's own effect
+	// ("Heals N HP", "heals hunger") shows on the action menu panel, not here. Any other
+	// mode keeps the compact card.
+	expandReadout := g.Battle.Active() &&
+		(g.Battle.ActionMode == core.ActionItemTarget || g.Battle.ActionMode == core.ActionPartyTarget)
+	cardH := partyCardH
+	if expandReadout {
+		cardH = partyCardItemH
+	}
+
 	// Reserve the full 2×2 height (cards tile by formation slot, spanning both rows
-	// regardless of member count) so this matches PartyRibbonTopY and a back-row card
-	// on a short party can't slide off the bottom edge.
-	topY := screenH - partyRibbonHeight(core.PartyMemberCount) - ribbonBottom
+	// regardless of member count) with the bottom pinned, so the expanded ribbon grows
+	// UPWARD over the scene and a back-row card can't slide off the bottom edge.
+	topY := screenH - partyRibbonHeightH(core.PartyMemberCount, cardH) - ribbonBottom
 
 	activeIdx := core.ActiveActorIndex(g)
 	selectedIdx := -1
@@ -482,7 +650,7 @@ func DrawPartyRibbon(g *core.GameState, assets Resources) {
 			col, row = int(member.Col), int(member.Row)
 		}
 		x := startX + (partyCardW+partyCardGap)*float32(col)
-		y := topY + (partyCardH+partyRowGap)*float32(row)
+		y := topY + (cardH+partyRowGap)*float32(row)
 		// Active/selected glow only on a member who can act AND be targeted (not
 		// ingested) — defensive against a stale PartyTarget on a swallowed member.
 		available := core.PartyMemberAvailable(g.Party, i)
@@ -494,7 +662,7 @@ func DrawPartyRibbon(g *core.GameState, assets Resources) {
 		drawPartyCard(
 			assets.hudFont,
 			member,
-			x, y,
+			x, y, cardH,
 			active,
 			selected,
 			member.HP <= 0,
@@ -504,13 +672,20 @@ func DrawPartyRibbon(g *core.GameState, assets Resources) {
 }
 
 // partyRibbonHeight is the total height of the tiled ribbon for memberCount, in
-// 2-wide rows. Single source so DrawPartyRibbon and PartyRibbonTopY can't drift.
+// 2-wide rows at the compact card height. Single source so DrawPartyRibbon and
+// PartyRibbonTopY can't drift.
 func partyRibbonHeight(memberCount int) float32 {
+	return partyRibbonHeightH(memberCount, partyCardH)
+}
+
+// partyRibbonHeightH is partyRibbonHeight for an explicit card height — the item-
+// target ribbon reserves its taller cards through this so the bottom stays pinned.
+func partyRibbonHeightH(memberCount int, cardH float32) float32 {
 	rows := (memberCount + partyCardCols - 1) / partyCardCols
 	if rows < 1 {
 		rows = 1
 	}
-	return partyCardH*float32(rows) + partyRowGap*float32(rows-1)
+	return cardH*float32(rows) + partyRowGap*float32(rows-1)
 }
 
 // PartyRibbonTopY reports the screen Y of the ribbon's top so other panels can

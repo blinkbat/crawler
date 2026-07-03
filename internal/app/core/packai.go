@@ -101,7 +101,7 @@ func PlanPackSteps(g *GameState) []packAIStep {
 		return packPlanBuf
 	}
 	plans := packPlanBuf[:0]
-	occupied := buildPackOccupancy(g.Packs, -1)
+	occupied := buildPackOccupancy(g.Packs)
 	engagePlanned := false
 	for i := range g.Packs {
 		if !PackAlive(g.Packs[i]) {
@@ -408,9 +408,10 @@ func packCanMoveTo(g *GameState, p Pack, occupied map[[2]int]bool, tx, tz int, a
 	return CanEnterTile(g, tx, tz, opts)
 }
 
-// buildPackOccupancy returns the tiles held by alive packs, optionally
-// excluding one index (so a moving pack doesn't see its own tile as blocked).
-func buildPackOccupancy(packs []Pack, exclude int) map[[2]int]bool {
+// buildPackOccupancy returns the tiles held by alive packs. PlanPackSteps frees the
+// moving pack's own tile from this map (and re-reserves its destination) as it walks
+// the plan loop, so no per-pack exclusion is needed here.
+func buildPackOccupancy(packs []Pack) map[[2]int]bool {
 	// Reuse packOccupancyBuf (cleared, not re-made) — see PlanPackSteps.
 	occ := packOccupancyBuf
 	if occ == nil {
@@ -419,10 +420,7 @@ func buildPackOccupancy(packs []Pack, exclude int) map[[2]int]bool {
 	} else {
 		clear(occ)
 	}
-	for i, p := range packs {
-		if i == exclude {
-			continue
-		}
+	for _, p := range packs {
 		if !PackAlive(p) {
 			continue
 		}

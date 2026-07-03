@@ -173,6 +173,15 @@ var (
 
 	// rampConnectorColor strokes the ramp low→high connector on the canvas.
 	rampConnectorColor = rl.NewColor(120, 230, 140, 220)
+	rampGlyphColor     = rl.NewColor(150, 240, 165, 245) // ramp direction glyph on the connector
+
+	// In-grid marker chrome (pack size badge, facing arrows, minimap frame) —
+	// named here so the on-canvas overlay tones can't drift.
+	packBadgeBG           = rl.NewColor(20, 20, 24, 230)
+	packBadgeText         = rl.NewColor(240, 240, 240, 255)
+	doorFacingArrowColor  = rl.NewColor(40, 24, 12, 255)
+	startFacingArrowColor = rl.NewColor(20, 14, 0, 255)
+	minimapViewportFrame  = rl.NewColor(255, 240, 180, 230)
 )
 
 // tintSwatch nudges a base swatch by per-channel deltas (clamped [0,255]),

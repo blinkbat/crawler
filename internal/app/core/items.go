@@ -143,6 +143,14 @@ type ItemDefinition struct {
 	ArmorBonus int
 	MDefBonus  int
 	// StatBonus is the per-stat additive applied while equipped, indexed by Stat.
+	// CONTRACT: bonuses fold into EffectiveStats (combat math — damage/accuracy/magic/
+	// defenses/turn order) but NOT into the derived pools MaxHP/MaxMP, which are
+	// computed from BASE stats only (MaxHPFor/MaxMPFor at level-up/load, never on
+	// equip). So a StatVIT bonus is effectively INERT (VIT's only consumer is MaxHP),
+	// and a StatINT bonus raises magic damage but NOT the MP pool. Shipped gear grants
+	// only STR/DEX (which fully work); granting VIT/INT is a design decision (recompute
+	// pools on equip + clamp) that hasn't been made — don't add such an item expecting
+	// the pool to grow without wiring that first.
 	StatBonus [StatCount]int
 	// Weapon classifies a SlotHand weapon (WeaponType); WeaponNone for non-weapons
 	// (unarmed STR melee). Drives the basic attack's to-hit stat and damage.
@@ -169,7 +177,7 @@ var itemDefinitions = []ItemDefinition{
 		Description: "A thimble of cold blue draught that beads like frost on the glass. One bitter swallow and spent mana comes trickling back."},
 	{Kind: ItemHealthPotion, Name: "Health Potion", HealAmount: 14, Price: 18,
 		Description: "A stoppered vial of ruby tonic, warm against the palm and tasting of iron and crushed herbs. It knits cuts closed as you drink."},
-	{Kind: ItemMagicalBerries, Name: "Magical Berries", HealAmount: 8, SatietyGain: 45, Price: 16,
+	{Kind: ItemMagicalBerries, Name: "Sundew Berries", HealAmount: 8, SatietyGain: 45, Price: 16,
 		Description: "A cupped handful of dusk-glowing berries off a deep-grove bramble. They burst sweet on the tongue and mend you as they go down."},
 
 	// Equipment. Bonuses are modest — a starting kit, not a power spike.
@@ -425,15 +433,44 @@ func ApplyRestorative(m *PartyMember, def ItemDefinition) RestorativeResult {
 	if m == nil {
 		return RestorativeResult{}
 	}
-	sat := FeedMember(m, def.SatietyGain)
-	hp := 0
-	if def.HealAmount > 0 {
-		before := m.HP
-		if HealMember(m, def.HealAmount) {
-			hp = m.HP - before
-		}
+	// Compute the exact deltas once, then apply them — the mutation can't diverge from
+	// the preview because both read the SAME restorativeDeltas source.
+	res := restorativeDeltas(*m, def)
+	m.Hunger -= res.Satiety // deltas already clamp (see restorativeDeltas)
+	m.HP += res.HP
+	m.MP += res.MP
+	return res
+}
+
+// PreviewRestorative computes what def WOULD restore for m WITHOUT mutating it — the
+// non-applying twin of ApplyRestorative, so the item-target UI can show the projected
+// +HP/+MP/feed before the player commits. Same source as the apply path, so they can't drift.
+func PreviewRestorative(m PartyMember, def ItemDefinition) RestorativeResult {
+	return restorativeDeltas(m, def)
+}
+
+// restorativeDeltas is the single source for what def restores on m — the clamped,
+// post-gate HP/MP/Satiety amounts. Both ApplyRestorative (which then mutates by these
+// deltas) and PreviewRestorative consume it, so the projected and applied results are
+// identical by construction. Feed-first ordering: the local Hunger is dropped by the
+// modeled meal BEFORE the starving-gated HP check, so a meal big enough to lift
+// Starving lets the same item's heal land. Per-axis gates mirror the FeedMember/
+// HealMember/RestoreMP helpers: feeding has NO availability gate (a downed member can
+// still be fed), while HP/MP restore require partyAvailable.
+func restorativeDeltas(m PartyMember, def ItemDefinition) RestorativeResult {
+	sat := 0
+	if def.SatietyGain > 0 {
+		sat = min(def.SatietyGain, m.Hunger) // FeedMember floors Hunger at 0
+		m.Hunger -= sat                      // model the feed on the local copy for the gate below
 	}
-	mp := RestoreMP(m, def.MPAmount)
+	hp := 0
+	if def.HealAmount > 0 && partyAvailable(m) && !MemberStarving(m) {
+		hp = max(min(def.HealAmount, m.MaxHP-m.HP), 0)
+	}
+	mp := 0
+	if def.MPAmount > 0 && partyAvailable(m) {
+		mp = max(min(def.MPAmount, m.MaxMP-m.MP), 0)
+	}
 	return RestorativeResult{HP: hp, MP: mp, Satiety: sat}
 }
 

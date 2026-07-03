@@ -466,6 +466,13 @@ func startActorTurn(g *core.GameState) {
 			if winIfEnemiesWiped(g, core.ActivePack(g), core.BattleMembers(g), "The fire finishes them.") {
 				return
 			}
+			// This turn slot is still consumed, so advance any pending Meteor fuse (as
+			// finishActorTurn/advanceSkippedTurn do) — else it freezes for the burn-death
+			// turn. Meteor only hits enemies, so a fresh enemy-wipe check covers its kills.
+			resolveMeteorIfDue(g)
+			if winIfEnemiesWiped(g, core.ActivePack(g), core.BattleMembers(g), "The meteor finishes them.") {
+				return
+			}
 			g.Battle.QueueCursor++
 			continue
 		}
@@ -517,6 +524,10 @@ func advanceSkippedTurn(g *core.GameState, actor core.ActorRef) bool {
 	// No first-slot guard here (unlike startActorTurn): runs once per real turn end.
 	tickPoisonAfterPartyTurn(g, actor)
 	tickEnemyEndOfTurnDoTs(g, actor)
+	// A pending Meteor counts down on THIS turn slot too — same reasoning as the DoT
+	// ticks above: a fuse that only advanced on un-skipped turns would freeze through a
+	// Sleep/Stun lockout and land late. Its kills are caught by the wipeout check below.
+	resolveMeteorIfDue(g)
 	// Zero the phys tally (symmetry with finishActorTurn) so no stale figure leaks
 	// into the next actor's Bloodthirst.
 	g.Battle.PhysDamageThisTurn = 0
@@ -1301,13 +1312,10 @@ func updateVictorySpoils(g *core.GameState, dt float32) {
 		g.Battle.VictoryLootSfxCursor++
 	}
 	// Count-up blip per VictoryXPPerTick of shown XP, tied to the eased fill;
-	// capped to one Play per frame so a huge haul can't machine-gun. Guard the divisor
-	// so a config drift to 0 can't panic the victory tick.
-	if core.VictoryXPPerTick > 0 {
-		if tickIdx := xpShownAt(g, fill) / core.VictoryXPPerTick; tickIdx > g.Battle.VictoryTickSfxCursor {
-			audio.Play(audio.SoundXPTick)
-			g.Battle.VictoryTickSfxCursor = tickIdx
-		}
+	// capped to one Play per frame so a huge haul can't machine-gun.
+	if tickIdx := xpTicksAt(g, fill); tickIdx > g.Battle.VictoryTickSfxCursor {
+		audio.Play(audio.SoundXPTick)
+		g.Battle.VictoryTickSfxCursor = tickIdx
 	}
 	if input.ConfirmPressed() {
 		if !core.VictorySpoilsAnimDone(g.Battle.VictoryElapsed) {
@@ -1316,9 +1324,7 @@ func updateVictorySpoils(g *core.GameState, dt float32) {
 			g.Battle.VictoryElapsed = core.VictorySpoilsAnimEnd()
 			g.Battle.VictoryLevelSfxCursor = levelsShownAt(g, 1)
 			g.Battle.VictoryLootSfxCursor = len(g.Battle.Spoils.Drops)
-			if core.VictoryXPPerTick > 0 {
-				g.Battle.VictoryTickSfxCursor = xpShownAt(g, 1) / core.VictoryXPPerTick
-			}
+			g.Battle.VictoryTickSfxCursor = xpTicksAt(g, 1)
 			return
 		}
 		leaveBattle(g, g.Area.QuietMessage)
@@ -1334,6 +1340,16 @@ func xpShownAt(g *core.GameState, p float32) int {
 		total += int(ms.AddedAt(p))
 	}
 	return total
+}
+
+// xpTicksAt is how many XP count-up blips have sounded by fill fraction p — the shown
+// XP divided into VictoryXPPerTick steps, with the divisor guard (0 → no ticks) that
+// both the running cue and the skip-to-end snap need, folded into one place.
+func xpTicksAt(g *core.GameState, p float32) int {
+	if core.VictoryXPPerTick <= 0 {
+		return 0
+	}
+	return xpShownAt(g, p) / core.VictoryXPPerTick
 }
 
 // levelsShownAt totals the level-ups visible at fill fraction p, via the same

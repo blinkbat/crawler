@@ -30,8 +30,7 @@ func openHitGlyphsModal(s *State) { openModal(s, modalHitGlyphs) }
 
 // updateHitGlyphsModal: read-only viewer, so any key/click dismisses.
 func updateHitGlyphsModal(s *State) Action {
-	if editorCancelPressed() || editorCommitPressed() || rl.IsKeyPressed(rl.KeySpace) ||
-		rl.IsMouseButtonPressed(rl.MouseLeftButton) {
+	if anyDismissPressed() {
 		closeModal(s)
 	}
 	return ActionNone

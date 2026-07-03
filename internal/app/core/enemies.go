@@ -742,16 +742,11 @@ var clearedEnemyTurnsCounters = map[string]bool{
 }
 
 func init() {
-	t := reflect.TypeOf(Enemy{})
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
-		if f.Type.Kind() != reflect.Int || len(f.Name) < len("Turns") || f.Name[len(f.Name)-len("Turns"):] != "Turns" {
-			continue
+	forEachTurnsField(reflect.TypeOf(Enemy{}), func(name string) {
+		if !clearedEnemyTurnsCounters[name] {
+			panic("core: Enemy." + name + " is an unlisted timed-status counter — add it to ClearEnemyCombatTransients/clearedEnemyTurnsCounters so it can't survive a Flee")
 		}
-		if !clearedEnemyTurnsCounters[f.Name] {
-			panic("core: Enemy." + f.Name + " is an unlisted timed-status counter — add it to ClearEnemyCombatTransients/clearedEnemyTurnsCounters so it can't survive a Flee")
-		}
-	}
+	})
 }
 
 // RestorePackFull resets a pack to its spawn condition: drops mid-fight summons

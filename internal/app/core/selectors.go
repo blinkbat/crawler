@@ -100,6 +100,11 @@ func partyAlive(m PartyMember) bool     { return m.HP > 0 }
 func partyAvailable(m PartyMember) bool { return MemberAvailable(m) }
 func enemyAlive(e Enemy) bool           { return e.Alive }
 
+// enemyCanTarget reports whether an enemy attack may land on this member: available
+// (alive + not ingested) AND not Vanished (untargetable). One rule so the enemy
+// targeting scans (PeekNextEnemyTarget/Melee, tauntedAttackerTarget) can't drift.
+func enemyCanTarget(m PartyMember) bool { return MemberAvailable(m) && m.VanishTurns == 0 }
+
 // EnemyDefeated is the shared "counts as killed" test behind both loot payout and
 // bestiary credit: dead by EITHER the Alive flag or a drained HP bar, so a
 // degenerate "alive corpse" (HP<=0 yet Alive) counts once, consistently across both.
@@ -166,9 +171,7 @@ func WrapNextAvailablePartyMember(party []PartyMember, start int) int {
 // Shared so battle (commits) and render (previews) don't drift.
 func PeekNextEnemyTarget(g *GameState) int {
 	// Skip a Vanished member (untargetable) so a back-row caster can't strike it.
-	return wrapNextWhere(g.Party, g.Battle.EnemyAttackCursor+1, func(m PartyMember) bool {
-		return partyAvailable(m) && m.VanishTurns == 0
-	})
+	return wrapNextWhere(g.Party, g.Battle.EnemyAttackCursor+1, enemyCanTarget)
 }
 
 // AvailablePartyTargets returns indices of members choosable as a heal/item target
@@ -252,24 +255,32 @@ func transientStatusCounters(m *PartyMember) []*int {
 	return []*int{&m.SleepTurns, &m.StunTurns, &m.WebbedTurns, &m.ConfusedTurns}
 }
 
+// forEachTurnsField calls fn with the name of every `int` field of struct type t
+// whose name ends in "Turns" — the shared reflection walk behind the Enemy and
+// PartyMember timed-status-counter init guards, so "which fields are status counters"
+// is decided one way and can't drift between the two.
+func forEachTurnsField(t reflect.Type, fn func(name string)) {
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if f.Type.Kind() == reflect.Int && strings.HasSuffix(f.Name, "Turns") {
+			fn(f.Name)
+		}
+	}
+}
+
 func init() {
 	// Every PartyMember `*Turns int` field must be classified, forcing a deliberate
 	// cure/clear decision on any new counter instead of a silent lingering bug.
 	curable := 0
-	t := reflect.TypeOf(PartyMember{})
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
-		if f.Type.Kind() != reflect.Int || !strings.HasSuffix(f.Name, "Turns") {
-			continue
-		}
-		class, ok := partyTurnsCounterClass[f.Name]
+	forEachTurnsField(reflect.TypeOf(PartyMember{}), func(name string) {
+		class, ok := partyTurnsCounterClass[name]
 		if !ok {
-			panic("core: PartyMember." + f.Name + " is an unclassified timed-status counter — add it to partyTurnsCounterClass (and transientStatusCounters if curable) so CureDebuffs/ClearPartyTransientStatuses can't skip it")
+			panic("core: PartyMember." + name + " is an unclassified timed-status counter — add it to partyTurnsCounterClass (and transientStatusCounters if curable) so CureDebuffs/ClearPartyTransientStatuses can't skip it")
 		}
 		if class == turnsCurableTransient {
 			curable++
 		}
-	}
+	})
 	// Pin the pointer list to the map's curable-transient count so the two stay in sync.
 	if got := len(transientStatusCounters(&PartyMember{})); got != curable {
 		panic("core: transientStatusCounters must list exactly the turnsCurableTransient entries in partyTurnsCounterClass")
@@ -606,7 +617,7 @@ func PeekNextMeleeEnemyTarget(g *GameState) int {
 	// value-only wrapNextWhere predicate carry it.
 	frontHasLiving := PartyFrontHasLiving(g.Party)
 	return wrapNextWhere(g.Party, g.Battle.EnemyAttackCursor+1, func(m PartyMember) bool {
-		return partyAvailable(m) && m.VanishTurns == 0 && (m.Row == RowFront || !frontHasLiving)
+		return enemyCanTarget(m) && (m.Row == RowFront || !frontHasLiving)
 	})
 }
 
@@ -622,7 +633,7 @@ func tauntedAttackerTarget(g *GameState) (int, bool) {
 	if t < 0 || t >= len(g.Party) {
 		return -1, false
 	}
-	if !MemberAvailable(g.Party[t]) || g.Party[t].VanishTurns > 0 {
+	if !enemyCanTarget(g.Party[t]) {
 		return -1, false
 	}
 	return t, true
@@ -679,8 +690,7 @@ func redirectToGuardian(g *GameState, target int) int {
 	if !MemberAvailable(g.Party[guardian]) {
 		return target
 	}
-	if enemyPendingActionIsMelee(g) &&
-		!(g.Party[guardian].Row == RowFront || !PartyFrontHasLiving(g.Party)) {
+	if enemyPendingActionIsMelee(g) && !PartyInEffectiveFront(g.Party, guardian) {
 		return target
 	}
 	return guardian

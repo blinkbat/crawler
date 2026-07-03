@@ -51,17 +51,12 @@ func updateShop(g *core.GameState) {
 func buyShopItem(g *core.GameState) {
 	catalog := core.ShopCatalog()
 	def, ok := stackAtCursor(catalog, g.ShopCursor)
-	if !ok {
-		audio.Play(audio.SoundInputMiss)
-		return
+	bought := ok && g.Gold >= def.Price
+	if bought {
+		g.Gold -= def.Price
+		g.Inventory = core.AddItem(g.Inventory, def.Kind, 1)
 	}
-	if g.Gold < def.Price {
-		audio.Play(audio.SoundInputMiss)
-		return
-	}
-	g.Gold -= def.Price
-	g.Inventory = core.AddItem(g.Inventory, def.Kind, 1)
-	audio.Play(audio.SoundInputGreat)
+	audio.PlayResult(bought) // Great on buy, Miss when off-list or short on gold
 }
 
 // sellShopItem sells one unit of the cursored stack at its half-price value.
@@ -69,19 +64,15 @@ func buyShopItem(g *core.GameState) {
 func sellShopItem(g *core.GameState) {
 	stacks := core.SellableStacks(g.Inventory)
 	stack, ok := stackAtCursor(stacks, g.ShopCursor)
-	if !ok {
-		audio.Play(audio.SoundInputMiss)
-		return
+	sold := false
+	if ok {
+		if inv, consumed := core.ConsumeItem(g.Inventory, stack.Kind); consumed {
+			g.Inventory = inv
+			g.Gold += core.ShopSellPrice(core.ItemInfo(stack.Kind).Price)
+			sold = true
+			// Selling the last unit shrinks the list; keep the cursor in range.
+			g.ShopCursor = core.ClampIndex(g.ShopCursor, len(core.SellableStacks(g.Inventory)))
+		}
 	}
-	kind := stack.Kind
-	inv, ok := core.ConsumeItem(g.Inventory, kind)
-	if !ok {
-		audio.Play(audio.SoundInputMiss)
-		return
-	}
-	g.Inventory = inv
-	g.Gold += core.ShopSellPrice(core.ItemInfo(kind).Price)
-	audio.Play(audio.SoundInputGreat)
-	// Selling the last unit shrinks the list; keep the cursor in range.
-	g.ShopCursor = core.ClampIndex(g.ShopCursor, len(core.SellableStacks(g.Inventory)))
+	audio.PlayResult(sold)
 }

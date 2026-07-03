@@ -543,8 +543,7 @@ func updateIsoCanvas(s *State, mp rl.Vector2) {
 	// code (which reads the hover tile) resolves the right cell in 3D too.
 	s.hoverX, s.hoverZ = s.isoHoverX, s.isoHoverZ
 	hx, hz := s.isoHoverX, s.isoHoverZ
-	shift := rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
-	ctrl := rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl)
+	ctrl, shift, _ := modifiers() // shared "either side counts" reader (input.go)
 
 	// Camera: right-drag orbits (tumble); Shift+right-drag pans the target. Before
 	// the on-canvas gate so a drag leaving the panel keeps tracking. The mousewheel

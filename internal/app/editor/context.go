@@ -83,15 +83,7 @@ func contextItemsAt(s *State, x, z int) []dropdownEntry {
 		}
 	} else {
 		items = append(items, dropdownEntry{label: "Move start here", apply: func(s *State) {
-			// Shared startBlockers so this and the entity-brush start tool can't drift.
-			if msg := firstBlocker(startBlockers(&s.area, x, z)...); msg != "" {
-				s.flash(msg)
-				return
-			}
-			pushUndo(s)
-			s.area.StartTileX = x
-			s.area.StartTileZ = z
-			s.dirty = true
+			moveStartTo(s, x, z) // shared with the entity-brush / start-drag paths
 		}})
 	}
 	// Regions: edit/delete the one under the cursor (on the active level), and
@@ -124,17 +116,8 @@ func contextItemsAt(s *State, x, z int) []dropdownEntry {
 		items = append(items, dropdownEntry{label: "Set wall faces…", apply: func(s *State) { openWallFacesModal(s, x, z) }})
 	}
 	items = append(items, dropdownEntry{label: "Erase " + layerName(s.layer) + " here", apply: func(s *State) {
-		// Snapshot, commit only if changed — a no-op erase banks no undo.
-		before := core.CloneArea(s.area)
-		wasDirty := s.dirty
-		wasHidden := s.layerHidden[s.layer]
-		eraseAt(s, x, z)
-		if core.AreaContentEqual(s.area, before) {
-			s.dirty = wasDirty                 // eraseAt flips dirty unconditionally — undo a no-op
-			s.layerHidden[s.layer] = wasHidden // eraseAt also reveals unconditionally — undo that too
-		} else {
-			commitUndoSnapshot(s, before)
-		}
+		// Commit only if changed — a no-op erase banks no undo (shared lazy-commit tail).
+		commitPaintIfChanged(s, func() { eraseAt(s, x, z) })
 	}})
 	return items
 }

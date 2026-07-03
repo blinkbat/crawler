@@ -129,7 +129,7 @@ func drawSpriteOutline(camera rl.Camera3D, tex rl.Texture2D, pos rl.Vector3, siz
 	dist := rl.Vector3Distance(pos, camera.Position)
 	pad := px * 2 * dist * tanHalfFovY(camera.Fovy) / scrH
 	base := rl.Vector3Subtract(pos, rl.Vector3Scale(fwd, spriteOutlineDepthBias))
-	col := rl.NewColor(0, 0, 0, alpha)
+	col := colorWithAlpha(shadowBase, alpha)
 	offsets := [4]rl.Vector3{
 		rl.Vector3Scale(right, pad), rl.Vector3Scale(right, -pad),
 		{X: 0, Y: pad, Z: 0}, {X: 0, Y: -pad, Z: 0},

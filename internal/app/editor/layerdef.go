@@ -46,7 +46,7 @@ func init() {
 			// Walls don't stamp a level; stampActiveLevel no-ops, so paintContentCell just
 			// sets the face + dirty (matches the old fall-through).
 			apply: func(s *State, x, z int, b Brush) {
-				paintContentCell(s, x, z, func() { applyFaceBrush(s, x, z, b.Char) })
+				paintContentCell(s, x, z, func() bool { applyFaceBrush(s, x, z, b.Char); return true })
 			},
 			erase:      eraseToSentinel,
 			charAt:     func(s *State, x, z int) (byte, bool) { return cellAt(s.area.Walls, x, z) },
@@ -70,7 +70,7 @@ func init() {
 			stampsLevel: true,
 			sentinel:    core.FloorAuto, hasSentinel: true,
 			apply: func(s *State, x, z int, b Brush) {
-				paintContentCell(s, x, z, func() { setLayerCell(&s.area.Floor, x, z, b.Char) })
+				paintContentCell(s, x, z, func() bool { setLayerCell(&s.area.Floor, x, z, b.Char); return true })
 			},
 			erase:        eraseToSentinel,
 			charAt:       func(s *State, x, z int) (byte, bool) { return cellAt(s.area.Floor, x, z) },
@@ -90,7 +90,7 @@ func init() {
 			sentinel:    core.DecorEmpty, hasSentinel: true,
 			footprint: core.DecorFootprint,
 			apply: func(s *State, x, z int, b Brush) {
-				paintContentCell(s, x, z, func() { applyDecorBrush(s, x, z, b.Char) })
+				paintContentCell(s, x, z, func() bool { return applyDecorBrush(s, x, z, b.Char) })
 			},
 			// Erase suppresses scatter (DecorEmpty), NOT auto-scatter (DecorAuto).
 			erase:      func(s *State, x, z int) bool { setDecorFloor(s, x, z, core.DecorEmpty); return true },
@@ -116,7 +116,7 @@ func init() {
 			sentinel:    core.TilePropEmpty, hasSentinel: true,
 			footprint: core.PropFootprint,
 			apply: func(s *State, x, z int, b Brush) {
-				paintContentCell(s, x, z, func() { applyPropBrush(s, x, z, b.Char) })
+				paintContentCell(s, x, z, func() bool { return applyPropBrush(s, x, z, b.Char) })
 			},
 			erase:      func(s *State, x, z int) bool { clearPropCell(s, x, z); return true },
 			charAt:     func(s *State, x, z int) (byte, bool) { return s.area.PropForDisplay(x, z, s.editLevel), true },
@@ -140,7 +140,7 @@ func init() {
 			stampsLevel: true,
 			sentinel:    core.TileCeilingOpen, hasSentinel: true,
 			apply: func(s *State, x, z int, b Brush) {
-				paintContentCell(s, x, z, func() { setLayerCell(&s.area.Ceiling, x, z, b.Char) })
+				paintContentCell(s, x, z, func() bool { setLayerCell(&s.area.Ceiling, x, z, b.Char); return true })
 			},
 			erase:        eraseToSentinel,
 			charAt:       func(s *State, x, z int) (byte, bool) { return cellAt(s.area.Ceiling, x, z) },
@@ -160,7 +160,7 @@ func init() {
 			apply: func(s *State, x, z int, b Brush) {
 				// Voxel paint: place ONE cube at (x, editLevel, z); a gap between stacked
 				// tiles makes a walk-under bridge. Elevation doesn't stamp (stampActiveLevel no-ops).
-				paintContentCell(s, x, z, func() { s.area.SetCube(x, s.editLevel, z, s.area.FaceSkinAt(x, z)) })
+				paintContentCell(s, x, z, func() bool { s.area.SetCube(x, s.editLevel, z, s.area.FaceSkinAt(x, z)); return true })
 			},
 			erase: func(s *State, x, z int) bool {
 				// Remove the tile at (x, editLevel, z) — voxel inverse of a paint. Clear any ramp too.
@@ -194,11 +194,16 @@ func init() {
 	}
 }
 
-// paintContentCell stamps a cell then lifts the tile to the active level (a no-op on
-// layers whose stampsLevel is false) and marks dirty — the shared tail every non-entity
-// paint uses. The dirty is optimistic; strokePaint repairs it if nothing changed.
-func paintContentCell(s *State, x, z int, set func()) {
-	set()
+// paintContentCell stamps a cell via set (which reports whether a paint actually
+// landed) then, ONLY on success, lifts the tile to the active level (a no-op on
+// layers whose stampsLevel is false) and marks dirty — the shared tail every
+// non-entity paint uses. A refused placement (set returns false: wall / player-start /
+// footprint won't fit) must NOT rewrite the column's elevation or dirty the map. The
+// dirty is optimistic; strokePaint repairs it if nothing changed.
+func paintContentCell(s *State, x, z int, set func() bool) {
+	if !set() {
+		return
+	}
 	stampActiveLevel(s, x, z)
 	s.dirty = true
 }

@@ -421,6 +421,21 @@ func init() {
 // the menu bar and toolbar, keeping their draw and hit-test in lockstep.
 const buttonStripStartX = float32(8)
 
+// stripButtonRect returns button i's on-strip rect, advancing by topbarBtnWidth +
+// tightBtnGap exactly as drawButtonStrip/buttonStripHit do — so a dropdown anchor
+// (menuAnchorRect) can't desync from where a width-overridden button actually draws.
+func stripButtonRect(btns []topbarBtn, i int, y, h float32) rl.Rectangle {
+	x := buttonStripStartX
+	for j := 0; j < i && j < len(btns); j++ {
+		x += topbarBtnWidth(btns[j]) + tightBtnGap
+	}
+	w := float32(0)
+	if i >= 0 && i < len(btns) {
+		w = topbarBtnWidth(btns[i])
+	}
+	return rl.NewRectangle(x, y, w, h)
+}
+
 func buttonStripHit(btns []topbarBtn, y, h float32, p rl.Vector2) int {
 	x := buttonStripStartX
 	for i, b := range btns {
@@ -1150,7 +1165,7 @@ func drawMinimap(s *State) {
 	vz1 := core.Clamp((s.rect.grid.Y+s.rect.grid.Height-s.rect.gridY)/s.rect.cellPx, 0, h)
 	rl.DrawRectangleLinesEx(
 		rl.NewRectangle(mr.X+vx0*scale, mr.Y+vz0*scale, (vx1-vx0)*scale, (vz1-vz0)*scale),
-		1, rl.NewColor(255, 240, 180, 230))
+		1, minimapViewportFrame)
 }
 
 // brushRecentsVisible reports whether the recent-brush swatch row should show.
@@ -1669,7 +1684,18 @@ const (
 	entityGhostInsetFrac  = float32(0.22) // chest/door drag-move ghost square inset
 	decorCellInsetFrac    = float32(0.28) // per-cell decor square inset from the tile edge
 	propCellRadiusFrac    = float32(0.36) // per-cell prop circle radius
+	doorFacingArrowFrac   = float32(0.28) // door facing arrow length (fraction of cell)
+	startFacingArrowFrac  = float32(0.42) // player-start facing arrow length (fraction of cell)
 )
+
+// drawFacingArrow strokes a facing arrow from tile center (cx,cy) toward `facing`,
+// its length a fraction of the cell. Shared by the door + player-start markers.
+func drawFacingArrow(cx, cy float32, facing int, cell, lenFrac, thick float32, col rl.Color) {
+	dx, dz := core.FacingVector(facing)
+	tipX := cx + float32(dx)*cell*lenFrac
+	tipY := cy + float32(dz)*cell*lenFrac
+	rl.DrawLineEx(rl.NewVector2(cx, cy), rl.NewVector2(tipX, tipY), thick, col)
+}
 
 // metaRect geometry depends only on the panel rect + scroll (material count is
 // fixed at init), so cache it: rebuilds only when the sidebar moves/resizes or
@@ -2148,7 +2174,7 @@ func drawGrid(s *State, font rl.Font) {
 	for x := xMin; x < lineXMax; x++ {
 		px := s.rect.gridX + float32(x)*cell
 		col := gridLineCol
-		if x%5 == 0 {
+		if x%gridTickStride == 0 {
 			col = gridLineMajor
 		}
 		rl.DrawLineEx(rl.NewVector2(px, s.rect.gridY), rl.NewVector2(px, s.rect.gridY+s.rect.gridH), 1, col)
@@ -2156,7 +2182,7 @@ func drawGrid(s *State, font rl.Font) {
 	for z := zMin; z < lineZMax; z++ {
 		py := s.rect.gridY + float32(z)*cell
 		col := gridLineCol
-		if z%5 == 0 {
+		if z%gridTickStride == 0 {
 			col = gridLineMajor
 		}
 		rl.DrawLineEx(rl.NewVector2(s.rect.gridX, py), rl.NewVector2(s.rect.gridX+s.rect.gridW, py), 1, col)
@@ -2169,7 +2195,7 @@ func drawGrid(s *State, font rl.Font) {
 	if cell >= axisTickMinCell {
 		tickCol := gridTickColor
 		// Top axis: column numbers.
-		for x := (xMin / 5) * 5; x < lineXMax; x += 5 {
+		for x := (xMin / gridTickStride) * gridTickStride; x < lineXMax; x += gridTickStride {
 			label := tickLabel(x)
 			m := render.MeasureRichText(font, label, editorFontTick, 1)
 			px := s.rect.gridX + float32(x)*cell - m.X/2
@@ -2180,7 +2206,7 @@ func drawGrid(s *State, font rl.Font) {
 			render.DrawRichText(font, label, rl.NewVector2(px, py), editorFontTick, 1, tickCol)
 		}
 		// Left axis: row numbers.
-		for z := (zMin / 5) * 5; z < lineZMax; z += 5 {
+		for z := (zMin / gridTickStride) * gridTickStride; z < lineZMax; z += gridTickStride {
 			label := tickLabel(z)
 			m := render.MeasureRichText(font, label, editorFontTick, 1)
 			px := s.rect.gridX - m.X - 4
@@ -2222,10 +2248,10 @@ func drawGrid(s *State, font rl.Font) {
 			rl.DrawRectangleRounded(
 				rl.NewRectangle(bx-2, by-1, bm.X+6, bm.Y+2),
 				0.4, 4,
-				fadeAlpha(rl.NewColor(20, 20, 24, 230), entityAlpha))
+				fadeAlpha(packBadgeBG, entityAlpha))
 			render.DrawRichText(font, badge,
 				rl.NewVector2(bx+1, by),
-				bsize, 1, fadeAlpha(rl.NewColor(240, 240, 240, 255), entityAlpha))
+				bsize, 1, fadeAlpha(packBadgeText, entityAlpha))
 		}
 	}
 
@@ -2259,12 +2285,7 @@ func drawGrid(s *State, font rl.Font) {
 			rl.NewRectangle(gx+insetX, gy+insetY, cell-2*insetX, cell-2*insetY),
 			1, fadeAlpha(entityMarkerOutline, entityAlpha))
 		// Facing arrow inside the door rectangle.
-		cx := gx + cell*0.5
-		cy := gy + cell*0.5
-		dx, dz := core.FacingVector(d.Facing)
-		tipX := cx + float32(dx)*cell*0.28
-		tipY := cy + float32(dz)*cell*0.28
-		rl.DrawLineEx(rl.NewVector2(cx, cy), rl.NewVector2(tipX, tipY), 2, fadeAlpha(rl.NewColor(40, 24, 12, 255), entityAlpha))
+		drawFacingArrow(gx+cell*0.5, gy+cell*0.5, d.Facing, cell, doorFacingArrowFrac, 2, fadeAlpha(doorFacingArrowColor, entityAlpha))
 	}
 
 	// Crystal markers: a small cyan diamond (distinct from the other markers).
@@ -2284,10 +2305,7 @@ func drawGrid(s *State, font rl.Font) {
 		startCol := fadeAlpha(render.MarkerStart, entityAlpha)
 		rl.DrawCircle(int32(sx), int32(sy), cell*startMarkerRadiusFrac, startCol)
 		rl.DrawCircleLines(int32(sx), int32(sy), cell*startMarkerRadiusFrac, fadeAlpha(entityMarkerOutline, entityAlpha))
-		dx, dz := core.FacingVector(s.area.StartFacing)
-		tx := sx + float32(dx)*cell*0.42
-		ty := sy + float32(dz)*cell*0.42
-		rl.DrawLineEx(rl.NewVector2(sx, sy), rl.NewVector2(tx, ty), 3, fadeAlpha(rl.NewColor(20, 14, 0, 255), entityAlpha))
+		drawFacingArrow(sx, sy, s.area.StartFacing, cell, startFacingArrowFrac, 3, fadeAlpha(startFacingArrowColor, entityAlpha))
 	}
 
 	// Door-link overlay (its own toggle, above markers).
@@ -2690,7 +2708,7 @@ func drawRampConnector(font rl.Font, r rl.Rectangle, cell float32, floorChar byt
 		return
 	}
 	rl.DrawRectangleLinesEx(r, 2, rampConnectorColor)
-	drawTileGlyph(font, r, cell, cell*0.62, core.RampCharForFacing(facing), rl.NewColor(150, 240, 165, 245), glyphShadow)
+	drawTileGlyph(font, r, cell, cell*0.62, core.RampCharForFacing(facing), rampGlyphColor, glyphShadow)
 }
 
 // rampTouchesActiveLevel reports whether the ramp at (x,z) connects the active
