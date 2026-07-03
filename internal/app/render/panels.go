@@ -342,6 +342,13 @@ func drawCardIdentity(font rl.Font, m core.PartyMember, x, w, y0 float32, nameCo
 // detail cards so the sub-line rhythm stays in lockstep.
 const cardSubLineStep = float32(30)
 
+// Items-tab detail-card vertical steps — the one-off rhythm around the effect/owned
+// lines, named so they don't read as loose literals mixed in with cardSubLineStep.
+const (
+	itemDetailEffectStep = float32(38) // engraved title (FontHeading) down to the effect line
+	itemDetailDescStep   = float32(36) // owned line down to the description stub
+)
+
 // Equipment-tab card-header steps: the name row is one FontHeading line tall; the MP step
 // is uiRowPitch (the card body below starts on the standard row grid).
 var memberCardHeaderMetrics = cardIdentityMetrics{
@@ -1130,12 +1137,12 @@ func drawPanelsItems(g *core.GameState, assets Resources, body rl.Rectangle) {
 		dy := detailRect.Y + detailCardInsetX
 		dx := detailRect.X + detailCardInsetX
 		drawEngravedText(font, info.Name, dx, dy, FontHeading, textPrimary)
-		dy += 38
+		dy += itemDetailEffectStep
 		drawTextWithShadow(font, panelsItemEffectLabel(info), dx, dy, FontBody, inkAccent)
 		dy += cardSubLineStep
 		owned := "Owned: " + strconv.Itoa(stack.Count)
 		drawTextWithShadow(font, owned, dx, dy, FontBody, textMuted)
-		dy += 36
+		dy += itemDetailDescStep
 		// Description placeholder — the item registry carries none today. Lead with
 		// the Use glyph so the affordance reads controller-first (gamepad contract),
 		// never a bare "Press Use".

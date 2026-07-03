@@ -276,10 +276,24 @@ var footstepCues = [...]Sound{
 	SoundFootstep4, SoundFootstep5, SoundFootstep6,
 }
 
+// init pins footstepCues to the contiguous SoundFootstep1..SoundFootstep6 enum block,
+// so adding a SoundFootstep7 (and forgetting the rotation) fails loud at startup
+// instead of silently dropping the variant from the walk cycle.
+func init() {
+	for i, want := 0, SoundFootstep1; want <= SoundFootstep6; i, want = i+1, want+1 {
+		if i >= len(footstepCues) || footstepCues[i] != want {
+			panic("audio: footstepCues must list every SoundFootstep1..SoundFootstep6 in order — sync it with the enum")
+		}
+	}
+	if len(footstepCues) != int(SoundFootstep6-SoundFootstep1)+1 {
+		panic("audio: footstepCues has extra entries beyond the SoundFootstep enum block")
+	}
+}
+
 // Footstep cluster shape: each step plays two footfalls (left-right) with the second
 // delayed a random gap. Wide pitch jitter + an independent variant pick per footfall
 // keep the walk from ever sounding like a loop. Gap stays under core.StepDuration
-// (0.18s) so the pair always lands before the next step's cluster.
+// so the pair always lands before the next step's cluster (footstepGapMax asserts it).
 const (
 	footstepPitchJitter = 0.15 // ±15% per footfall
 	footstepGapMin      = 0.07 // sec — shortest delay to the second footfall

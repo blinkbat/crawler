@@ -48,7 +48,7 @@ func drawHitGlyphsModal(s *State, font rl.Font, theme render.Theme) {
 	now := rl.GetTime()
 	gridW := float32(hitGlyphCols) * hitGlyphCellW
 	startX := r.X + (r.Width-gridW)/2
-	startY := r.Y + 44
+	startY := r.Y + hitGlyphHeaderH // content starts below the declared header band (was a bare 44)
 
 	for i, name := range names {
 		col := i % hitGlyphCols
@@ -70,6 +70,5 @@ func drawHitGlyphsModal(s *State, font rl.Font, theme render.Theme) {
 		render.DrawRichText(font, name, rl.NewVector2(cx-lw/2, cellY+hitGlyphCellH+4), editorFontLabel, 1, theme.TextPrimary)
 	}
 
-	render.DrawRichText(font, "Each plays on a loop   ·   Esc / Enter / click   close",
-		rl.NewVector2(r.X+modalContentInset, r.Y+r.Height-24), editorFontHint, 1, theme.TextHint)
+	drawModalFooterHint(font, r, "Each plays on a loop   ·   Esc / Enter / click   close", theme)
 }

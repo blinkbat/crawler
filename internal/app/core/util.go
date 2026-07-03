@@ -129,15 +129,19 @@ func ClampFrameTime(dt float32) float32 {
 	return dt
 }
 
+// QuarterTurn is a 90° rotation in radians — the cardinal turn step. One source for
+// the per-facing yaw shared by facingTable and the explore turn animation.
+const QuarterTurn = math.Pi / 2
+
 // facingTable: per-direction unit vector + camera yaw, indexed by
 // NormalizeFacing(facing) so FacingVector / FacingYaw stay in lockstep.
 var facingTable = [FacingCount]struct {
 	DX, DZ int
 	Yaw    float32
 }{
-	North: {DX: 0, DZ: -1, Yaw: -math.Pi / 2},
+	North: {DX: 0, DZ: -1, Yaw: -QuarterTurn},
 	East:  {DX: 1, DZ: 0, Yaw: 0},
-	South: {DX: 0, DZ: 1, Yaw: math.Pi / 2},
+	South: {DX: 0, DZ: 1, Yaw: QuarterTurn},
 	West:  {DX: -1, DZ: 0, Yaw: math.Pi},
 }
 

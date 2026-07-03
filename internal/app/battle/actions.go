@@ -146,6 +146,13 @@ func init() {
 			panic("battle: PlayerCastable skill " + core.SkillName(s) + " has no skillActionHandlers entry")
 		}
 	}
+	// Reverse walk (mirrors the enemy side): a handler for a skill that isn't
+	// PlayerCastable is dead dispatch — catch the stale entry rather than let it rot.
+	for s := range skillActionHandlers {
+		if s != core.SkillNone && !core.SkillPlayerCastable(s) {
+			panic("battle: skillActionHandlers has a handler for " + core.SkillName(s) + " but its registry entry isn't PlayerCastable — remove the handler or flip the flag")
+		}
+	}
 	// Enemy-castable consistency, both directions: every EnemyCastable skill needs
 	// an enemySpellHandlers entry, and the reverse walk below catches stale handlers.
 	for _, s := range core.EnemyCastableSkills() {
@@ -900,28 +907,28 @@ func maybeConfuseRetarget(g *core.GameState) {
 		// Reach-filtered (battleEnemyTargets): a confused melee fumble re-rolls only
 		// among foes the weapon can actually hit, so it can't bypass the front-row
 		// reach rule the picker enforces and strike a protected back-row enemy.
-		slots := battleEnemyTargets(g)
-		if len(slots) == 0 {
-			return
-		}
-		picked := slots[rng.Intn(len(slots))]
-		if picked != g.Battle.EnemyIndex {
-			g.Battle.EnemyIndex = picked
-			// Log it (not setBattleStatus): the bar arms the same frame and would
-			// overwrite the transient prompt, so the notice would never show.
-			setBattleMessage(g, fmt.Sprintf("%s is confused — wrong target!", g.Party[actor].Name))
-		}
+		// Log it (not setBattleStatus): the bar arms the same frame and would
+		// overwrite the transient prompt, so the notice would never show.
+		confuseFumbleRetarget(g, rng, battleEnemyTargets(g), &g.Battle.EnemyIndex,
+			fmt.Sprintf("%s is confused — wrong target!", g.Party[actor].Name))
 	case core.ActionPartyTarget, core.ActionItemTarget:
 		// Both ally-target pickers re-roll among the living party on a fumble.
-		slots := core.AvailablePartyTargets(g.Party)
-		if len(slots) == 0 {
-			return
-		}
-		picked := slots[rng.Intn(len(slots))]
-		if picked != g.Battle.PartyTarget {
-			g.Battle.PartyTarget = picked
-			setBattleMessage(g, fmt.Sprintf("%s is confused — wrong ally!", g.Party[actor].Name))
-		}
+		confuseFumbleRetarget(g, rng, core.AvailablePartyTargets(g.Party), &g.Battle.PartyTarget,
+			fmt.Sprintf("%s is confused — wrong ally!", g.Party[actor].Name))
+	}
+}
+
+// confuseFumbleRetarget re-rolls a confused actor's cursor among slots and, if it
+// actually moved, points it at the new pick and logs msg. Shared by the enemy- and
+// ally-target arms of maybeConfuseRetarget (they differ only in slots/cursor/msg).
+func confuseFumbleRetarget(g *core.GameState, rng *rand.Rand, slots []int, cursor *int, msg string) {
+	if len(slots) == 0 {
+		return
+	}
+	picked := slots[rng.Intn(len(slots))]
+	if picked != *cursor {
+		*cursor = picked
+		setBattleMessage(g, msg)
 	}
 }
 
@@ -1603,17 +1610,30 @@ func applyStaticField(g *core.GameState, quality int) bool {
 
 // --- Guard (Warrior, press ally cover) ---
 
-// applyGuard makes the caster cover the chosen ally: the ward's incoming hits
-// redirect to the guardian (core.redirectToGuardian) until the guardian's next
-// turn. No damage; always lands. Self-target is inert (SetGuard skips it).
-func applyGuard(g *core.GameState, quality int) bool {
-	return applyAllyTargetSkill(g, core.SkillGuard, core.LogInfo, func(actor, target *core.PartyMember) string {
+// applyGuardCover is the shared ally-cover mechanic behind Guard and Martyr's Bond:
+// the ward's incoming hits redirect to the caster (core.SetGuard →
+// redirectToGuardian) until the caster's next turn. No damage; always lands.
+// Self-target is inert (SetGuard skips it) and reports selfMsg; a real ally target
+// reports allyMsg. The two skills differ only in those log lines.
+func applyGuardCover(g *core.GameState, skill core.SkillID,
+	selfMsg func(actor *core.PartyMember) string,
+	allyMsg func(actor, target *core.PartyMember) string) bool {
+	return applyAllyTargetSkill(g, skill, core.LogInfo, func(actor, target *core.PartyMember) string {
 		core.SetGuard(g.Party, g.Battle.CurrentParty, g.Battle.PartyTarget)
 		if g.Battle.PartyTarget == g.Battle.CurrentParty {
-			return fmt.Sprintf("%s raises a guard — but stands alone.", actor.Name)
+			return selfMsg(actor)
 		}
-		return fmt.Sprintf("%s guards %s — incoming blows fall on them instead.", actor.Name, target.Name)
+		return allyMsg(actor, target)
 	})
+}
+
+// applyGuard has the Warrior cover the chosen ally via the shared cover mechanic.
+func applyGuard(g *core.GameState, quality int) bool {
+	return applyGuardCover(g, core.SkillGuard,
+		func(a *core.PartyMember) string { return fmt.Sprintf("%s raises a guard — but stands alone.", a.Name) },
+		func(a, t *core.PartyMember) string {
+			return fmt.Sprintf("%s guards %s — incoming blows fall on them instead.", a.Name, t.Name)
+		})
 }
 
 // --- Consecrate (Cleric, charge AoE radiant magic) ---
@@ -1751,13 +1771,13 @@ func applyVanish(g *core.GameState, quality int) bool {
 // applyMartyrsBond has the Cleric cover an ally via the shared Guard cover mechanic
 // (the ward's hits redirect to the Cleric until the Cleric's next turn).
 func applyMartyrsBond(g *core.GameState, quality int) bool {
-	return applyAllyTargetSkill(g, core.SkillMartyrsBond, core.LogInfo, func(actor, target *core.PartyMember) string {
-		core.SetGuard(g.Party, g.Battle.CurrentParty, g.Battle.PartyTarget)
-		if g.Battle.PartyTarget == g.Battle.CurrentParty {
-			return fmt.Sprintf("%s forms a martyr's bond — but with no ally to shield.", actor.Name)
-		}
-		return fmt.Sprintf("%s forms a martyr's bond with %s — their wounds become %s's own.", actor.Name, target.Name, actor.Name)
-	})
+	return applyGuardCover(g, core.SkillMartyrsBond,
+		func(a *core.PartyMember) string {
+			return fmt.Sprintf("%s forms a martyr's bond — but with no ally to shield.", a.Name)
+		},
+		func(a, t *core.PartyMember) string {
+			return fmt.Sprintf("%s forms a martyr's bond with %s — their wounds become %s's own.", a.Name, t.Name, a.Name)
+		})
 }
 
 // --- Resurrect (Cleric, press revive) ---

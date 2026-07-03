@@ -385,7 +385,7 @@ func nextLivingSwapTarget(g *core.GameState, from, dir int) (int, bool) {
 	actor := g.Battle.CurrentParty
 	for step := 1; step <= n; step++ {
 		i := core.WrapIndex(from+dir*step, n)
-		if i != actor && g.Party[i].HP > 0 {
+		if i != actor && core.MemberAvailable(g.Party[i]) {
 			return i, true
 		}
 	}
@@ -445,7 +445,7 @@ func swapTargetForDirection(g *core.GameState) (int, bool) {
 }
 
 // performSwap exchanges the actor's formation slot with the cursored partner's and
-// ends the turn. Any living partner is valid (a downed member or the actor isn't).
+// ends the turn. Any AVAILABLE partner is valid (a downed/ingested member or the actor isn't).
 func performSwap(g *core.GameState) {
 	actor, ok := currentMember(g)
 	if !ok {
@@ -458,8 +458,8 @@ func performSwap(g *core.GameState) {
 		setBattleStatus(g, msgInvalidTarget)
 		return
 	}
-	if g.Party[partner].HP <= 0 {
-		setBattleStatus(g, msgInvalidTarget) // can't swap with a downed member
+	if !core.PartyMemberAvailable(g.Party, partner) {
+		setBattleStatus(g, msgInvalidTarget) // can't swap with a downed or ingested member
 		return
 	}
 	actorName, partnerName := actor.Name, g.Party[partner].Name

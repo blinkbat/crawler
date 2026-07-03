@@ -584,10 +584,9 @@ func HealMember(m *PartyMember, amount int) bool {
 // CanBenefitFromHeal reports whether a plain heal would actually raise this member's
 // HP: a valid HealMember target (available, not starving) that isn't already full.
 // Lets callers predict "mends N allies" without re-deriving HealMember's guard.
-// Ignores revival — a dead member never benefits.
-func CanBenefitFromHeal(m PartyMember) bool {
-	return partyAvailable(m) && !MemberStarving(m) && m.HP < m.MaxHP
-}
+// Ignores revival — a dead member never benefits. Alias of MemberCanBeHealed so the
+// battle path and the out-of-battle picker share ONE heal-benefit rule.
+func CanBenefitFromHeal(m PartyMember) bool { return MemberCanBeHealed(m) }
 
 // HealWholeParty applies HealMember(amount) to every LIVING (HP > 0) member —
 // the shared party-wide heal loop behind both Mass Mend paths.

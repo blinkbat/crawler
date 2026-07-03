@@ -7,7 +7,6 @@ import (
 	"crawler/internal/app/input"
 	"crawler/internal/app/render"
 	"fmt"
-	"math"
 )
 
 // modalUpdaters dispatches the open explore-scene modal to its per-frame updater,
@@ -742,7 +741,7 @@ func startTurn(p *core.Player, delta int) {
 		Kind:     core.AnimTurn,
 		Duration: duration,
 		FromYaw:  p.Yaw,
-		ToYaw:    p.Yaw + float32(delta)*math.Pi/2,
+		ToYaw:    p.Yaw + float32(delta)*core.QuarterTurn,
 	}
 }
 

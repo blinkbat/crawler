@@ -576,9 +576,13 @@ func drawAreaWorld(camera rl.Camera3D, m *core.AreaDefinition, assets Resources,
 	}
 	cacheLightingProfile(profile)
 	assets.lighting.applyUniforms(camera, profile)
+	// One content fingerprint per frame, shared by the elevGrid + torch-site caches
+	// (each previously re-folded its own overlapping layer subset). Any editor edit
+	// changes it and busts both; in-game it's constant so neither rebuilds.
+	contentToken := areaContentToken(m)
 	// Torch point lights: collect nearest braziers, flicker, upload. Must run
 	// after applyUniforms (same shader) and before the tile loop draws.
-	torches := collectTorches(m, crystals, camera)
+	torches := collectTorches(m, crystals, camera, contentToken)
 	assets.lighting.uploadTorches(torches)
 
 	camPos := camera.Position
@@ -596,7 +600,7 @@ func drawAreaWorld(camera rl.Camera3D, m *core.AreaDefinition, assets Resources,
 	// Decode every tile's elevation/ramp/face-skin ONCE into a reused flat grid,
 	// so the hot loop reads ints/bytes instead of re-decoding ~5× per tile per pass.
 	gw, gh := m.Width, m.Height
-	grid := elevGrid(m, gw, gh)
+	grid := elevGrid(m, gw, gh, contentToken)
 	// Per-floor scatter: a legacy (nil-stack) column holds at most one prop + one
 	// decor, each on its cached placed level (te.decorLevel/propLevel) — drawn ONCE
 	// below, the pre-voxel cost. Only a materialized stack walks every floor, and
@@ -815,23 +819,36 @@ func foldFaceOverrides(h uint64, overrides []core.FaceOverride) uint64 {
 	return (h ^ 0xfd) * core.FNVPrime64 // layer separator
 }
 
+// areaContentToken folds every authorable layer any per-frame area cache derives
+// from into ONE FNV digest, computed once per frame and shared by elevGrid and
+// collectTorches — previously each re-folded its own overlapping subset (Floor/
+// Elevation/Solids twice per frame). It's a superset of both dependency sets, so
+// any editor edit busts both caches; in-game content never changes, so the token
+// is constant and neither rebuilds. Allocation-free byte fold.
+func areaContentToken(m *core.AreaDefinition) uint64 {
+	h := foldLayer(foldLayer(foldLayer(core.FNVOffset64, m.Floor), m.Elevation), m.Walls)
+	h = foldLayer(foldLayer(foldLayer(h, m.Decor), m.Props), m.Ceiling)
+	for _, plane := range m.Solids {
+		h = foldLayer(h, plane)
+	}
+	for _, plane := range m.PropStack {
+		h = foldLayer(h, plane)
+	}
+	for _, plane := range m.DecorStack {
+		h = foldLayer(h, plane)
+	}
+	h = foldLayer(foldLayer(h, m.PropLevels), m.DecorLevels)
+	return foldFaceOverrides(h, m.FaceOverrides)
+}
+
 // elevGrid decodes every tile's level/ramp/skin into the reused flat buffer,
 // rebuilding only when the content it caches (or dims/name) changes.
-func elevGrid(m *core.AreaDefinition, w, h int) []tileElev {
-	// Hash every layer a tileElev is decoded FROM: Floor/Elevation/Walls, the
-	// Solids planes (voxel edits), the per-face overrides, and the prop/decor
-	// level tags — the buffer stores faceSkins + decorLevel/propLevel, so an
-	// editor edit to any of these must invalidate. Folded in sequence so the
-	// check allocates nothing.
-	hash := foldLayer(foldLayer(foldLayer(core.FNVOffset64, m.Floor), m.Elevation), m.Walls)
-	for _, plane := range m.Solids {
-		hash = foldLayer(hash, plane)
-	}
-	hash = foldFaceOverrides(hash, m.FaceOverrides)
-	hash = foldLayer(foldLayer(hash, m.PropLevels), m.DecorLevels)
+func elevGrid(m *core.AreaDefinition, w, h int, token uint64) []tileElev {
+	// token (areaContentToken) fingerprints every layer a tileElev decodes FROM,
+	// so an editor edit to any of them invalidates the cached grid.
 	k := &elevGridKey
 	if k.primed && k.name == m.Name && k.width == w && k.height == h &&
-		k.hash == hash && cap(elevGridBuf) >= w*h {
+		k.hash == token && cap(elevGridBuf) >= w*h {
 		return elevGridBuf[:w*h]
 	}
 	n := w * h
@@ -861,7 +878,7 @@ func elevGrid(m *core.AreaDefinition, w, h int) []tileElev {
 			}
 		}
 	}
-	k.name, k.width, k.height, k.hash, k.primed = m.Name, w, h, hash, true
+	k.name, k.width, k.height, k.hash, k.primed = m.Name, w, h, token, true
 	return elevGridBuf
 }
 
@@ -1267,21 +1284,7 @@ var torchSiteCache struct {
 	sites       []torchSite
 }
 
-// torchContentHash folds every layer a torch site's position/height derives
-// from: prop placement (legacy grid + stack + level tags), elevation/solids
-// (light height), and floor (wall-facing probes read BlockedAt).
-func torchContentHash(m *core.AreaDefinition) uint64 {
-	h := foldLayer(foldLayer(foldLayer(core.FNVOffset64, m.Props), m.PropLevels), m.Elevation)
-	for _, plane := range m.PropStack {
-		h = foldLayer(h, plane)
-	}
-	for _, plane := range m.Solids {
-		h = foldLayer(h, plane)
-	}
-	return foldLayer(h, m.Floor)
-}
-
-func rebuildTorchSites(m *core.AreaDefinition) {
+func rebuildTorchSites(m *core.AreaDefinition, token uint64) {
 	torchSiteCache.sites = torchSiteCache.sites[:0]
 	// Per-floor scan via PropAt — the legacy Props grid is FROZEN once a
 	// PropStack is materialized (floors.go), so indexing it directly would both
@@ -1319,7 +1322,7 @@ func rebuildTorchSites(m *core.AreaDefinition) {
 		}
 	}
 	torchSiteCache.set(m)
-	torchSiteCache.contentHash = torchContentHash(m)
+	torchSiteCache.contentHash = token
 }
 
 // torchFlicker is the warm light-pool brightness in ~0.72..1.0 from two desynced
@@ -1344,9 +1347,9 @@ func torchFlicker(t, phase float32) float32 {
 // Torches flicker warm (per-torch desynced sines); crystals breathe cool cyan in
 // lockstep with the gem body. Both share one distance-ranked pool, so a near crystal
 // can out-prioritise a far torch (Grimrock-style: a live crystal is just a light).
-func collectTorches(m *core.AreaDefinition, crystals []core.Crystal, camera rl.Camera3D) []torchLight {
-	if !torchSiteCache.matches(m) || torchSiteCache.contentHash != torchContentHash(m) {
-		rebuildTorchSites(m)
+func collectTorches(m *core.AreaDefinition, crystals []core.Crystal, camera rl.Camera3D, token uint64) []torchLight {
+	if !torchSiteCache.matches(m) || torchSiteCache.contentHash != token {
+		rebuildTorchSites(m, token)
 	}
 	torchCandidateBuf = torchCandidateBuf[:0]
 	for _, s := range torchSiteCache.sites {

@@ -5,8 +5,8 @@
   "playerTileZ": 24,
   "playerFacing": 0,
   "playerLevel": 10,
-  "stepCount": 704,
-  "gold": 93,
+  "stepCount": 990,
+  "gold": 145,
   "party": [
     {
       "Class": 0,
@@ -17,13 +17,13 @@
         "INT": 1,
         "WIS": 1,
         "VIT": 5,
-        "SPD": 6
+        "SPD": 9
       },
       "HP": 10,
       "MaxHP": 10,
       "MP": 4,
       "MaxMP": 4,
-      "Hunger": 160,
+      "Hunger": 296,
       "Armor": 0,
       "Equipped": [
         0,
@@ -65,19 +65,21 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 2,
-      "XP": 171,
+      "Level": 3,
+      "XP": 103,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
+        "1": 0,
         "24": 0,
         "5": 0
       },
       "TreeRanks": {
+        "cleave": 1,
         "second-wind": 1,
         "shield-bash": 1
       },
-      "SkillCursor": 0
+      "SkillCursor": 2
     },
     {
       "Class": 1,
@@ -85,16 +87,16 @@
       "Stats": {
         "STR": 2,
         "DEX": 2,
-        "INT": 2,
+        "INT": 5,
         "WIS": 6,
         "VIT": 4,
         "SPD": 7
       },
       "HP": 8,
       "MaxHP": 8,
-      "MP": 9,
-      "MaxMP": 9,
-      "Hunger": 224,
+      "MP": 15,
+      "MaxMP": 15,
+      "Hunger": 390,
       "Armor": 0,
       "Equipped": [
         11,
@@ -136,17 +138,19 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 2,
-      "XP": 171,
+      "Level": 3,
+      "XP": 103,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
         "2": 0,
-        "20": 0
+        "20": 0,
+        "8": 0
       },
       "TreeRanks": {
         "blessing": 1,
-        "prayer": 1
+        "prayer": 1,
+        "smite": 1
       },
       "SkillCursor": 0
     },
@@ -159,13 +163,13 @@
         "INT": 2,
         "WIS": 1,
         "VIT": 4,
-        "SPD": 9
+        "SPD": 12
       },
       "HP": 8,
       "MaxHP": 8,
-      "MP": 5,
+      "MP": 2,
       "MaxMP": 5,
-      "Hunger": 293,
+      "Hunger": 450,
       "Armor": 0,
       "Equipped": [
         0,
@@ -207,19 +211,21 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 2,
-      "XP": 171,
+      "Level": 3,
+      "XP": 103,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
         "10": 0,
+        "22": 0,
         "3": 0
       },
       "TreeRanks": {
+        "poison-cloud": 1,
         "steal": 1,
         "venom-strike": 1
       },
-      "SkillCursor": 0
+      "SkillCursor": 2
     },
     {
       "Class": 3,
@@ -227,19 +233,19 @@
       "Stats": {
         "STR": 1,
         "DEX": 2,
-        "INT": 6,
+        "INT": 9,
         "WIS": 2,
         "VIT": 4,
         "SPD": 7
       },
       "HP": 8,
       "MaxHP": 8,
-      "MP": 10,
-      "MaxMP": 10,
-      "Hunger": 273,
+      "MP": 16,
+      "MaxMP": 16,
+      "Hunger": 409,
       "Armor": 0,
       "Equipped": [
-        0,
+        11,
         0,
         0,
         0,
@@ -278,25 +284,31 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 2,
-      "XP": 171,
+      "Level": 3,
+      "XP": 103,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
         "11": 0,
-        "12": 0
+        "12": 0,
+        "43": 0
       },
       "TreeRanks": {
         "arc-bolt": 1,
+        "chain-lightning": 1,
         "frost-lance": 1
       },
-      "SkillCursor": 1
+      "SkillCursor": 0
     }
   ],
   "inventory": [
     {
       "Kind": 11,
-      "Count": 3
+      "Count": 4
+    },
+    {
+      "Kind": 2,
+      "Count": 1
     }
   ],
   "quests": [
@@ -311,16 +323,16 @@
   ],
   "bestiary": {
     "0": {
-      "kills": 25
+      "kills": 39
     },
     "1": {
-      "kills": 7
+      "kills": 10
     },
     "2": {
-      "kills": 4
+      "kills": 6
     },
     "3": {
-      "kills": 3
+      "kills": 4
     }
   },
   "crystals": [

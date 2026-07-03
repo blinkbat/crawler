@@ -56,6 +56,14 @@ var goldReadout = struct {
 // goldReadoutMeasureCache memoizes the gold label's MeasureTextEx (avoids a per-frame CGO call).
 var goldReadoutMeasureCache measureCache
 
+// Gold-chip layout: inner padding + coin-icon column width. Named so the one always-on
+// exploration chip's dimensions aren't loose literals buried in the draw call.
+const (
+	goldChipPadX  = float32(12)
+	goldChipPadY  = float32(6)
+	goldChipIconW = float32(28)
+)
+
 // drawGoldReadout paints the gilt gold chip in the top-left during exploration.
 func drawGoldReadout(g *core.GameState, assets Resources) {
 	font := assets.hudFont
@@ -65,8 +73,8 @@ func drawGoldReadout(g *core.GameState, assets Resources) {
 	}
 	label := goldReadout.str
 	m := goldReadoutMeasureCache.measure(font, label, FontBody, FontSpacingBody)
-	padX, padY := float32(12), float32(6)
-	iconW := float32(28)
+	padX, padY := goldChipPadX, goldChipPadY
+	iconW := goldChipIconW
 	x := hudEdgePad + MinimapWidth() + hudColumnGap
 	y := hudEdgePad
 	w := int32(m.X + padX*2 + iconW)

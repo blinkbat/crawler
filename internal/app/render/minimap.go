@@ -611,6 +611,10 @@ func drawFacingArrow(center rl.Vector2, forward, sideways float32, facing int, c
 		tip = rl.NewVector2(center.X-forward, center.Y)
 		left = rl.NewVector2(center.X+forward, center.Y+sideways)
 		right = rl.NewVector2(center.X+forward, center.Y-sideways)
+	default:
+		// NormalizeFacing guarantees N/E/S/W; guard anyway so a stray value draws
+		// nothing rather than a degenerate triangle collapsed on the origin.
+		return
 	}
 	drawTriangleCCW(tip, left, right, col)
 }

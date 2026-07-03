@@ -42,13 +42,11 @@ func dialogNodeInRange(s *State) bool   { return currentDialogNode(s) != nil }
 func dialogChoiceInRange(s *State) bool { return currentDialogChoice(s) != nil }
 
 // clearDialogFocus drops dialog text-field focus so it can't pump into a freed field.
+// The dialog foci are one contiguous enum block (focusDialogNodeText…focusDialogTrigFoeKills
+// in editor.go) — a range test instead of a hand-listed switch, so a new dialog focus
+// added inside that block is covered automatically. Keep new dialog foci within the block.
 func clearDialogFocus(s *State) {
-	switch s.focus {
-	case focusDialogNodeText, focusDialogNodeNext, focusDialogNodeContinue,
-		focusDialogChoiceLabel, focusDialogChoiceNext, focusDialogActionID,
-		focusDialogCondQuestID, focusDialogCondMessage, focusDialogCondGold,
-		focusDialogCondFoeKills, focusDialogCondTileX, focusDialogCondTileZ,
-		focusDialogTrigTileX, focusDialogTrigTileZ, focusDialogTrigFoeKills:
+	if s.focus >= focusDialogNodeText && s.focus <= focusDialogTrigFoeKills {
 		s.focus = focusNone
 	}
 }
@@ -339,10 +337,18 @@ func init() {
 		if condKindLabel(k) == string(k) {
 			panic("editor: condKindLabel missing a case for dialog condition kind " + string(k))
 		}
+		// condSummary is a parallel switch; guard it too, else a new kind silently
+		// falls through to the raw kind string in the choice's condition list.
+		if condSummary(core.DialogChoiceCondition{Kind: k}) == string(k) {
+			panic("editor: condSummary missing a case for dialog condition kind " + string(k))
+		}
 	}
 	for _, k := range core.DialogTriggerKinds() {
 		if triggerKindLabel(k) == string(k) {
 			panic("editor: triggerKindLabel missing a case for dialog trigger kind " + string(k))
+		}
+		if triggerSummary(core.DialogTrigger{Kind: k}) == string(k) {
+			panic("editor: triggerSummary missing a case for dialog trigger kind " + string(k))
 		}
 	}
 	// Every authorable end-action kind must be reachable from the action picker's

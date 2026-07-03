@@ -64,7 +64,7 @@ func drawWallFacesModal(s *State, font rl.Font, theme render.Theme) {
 	cmds, rects := wallFacesLayout(s)
 	drawModalButtons(font, rects, cmdLabels(cmds))
 	render.DrawTextWithShadow(font, "Pick a face to set its cliff-face skin · Esc closes",
-		card.X+modalContentInset, card.Y+44, editorFontHint, theme.TextHint)
+		card.X+modalContentInset, card.Y+modalSubheadingDY, editorFontHint, theme.TextHint)
 }
 
 func updateWallFacesModal(s *State) Action {

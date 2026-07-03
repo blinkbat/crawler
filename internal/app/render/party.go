@@ -367,6 +367,10 @@ func drawPartyCard(font rl.Font, member *core.PartyMember, x, y, cardH float32, 
 	}
 
 	// LEFT column: class sigil + name on top, status icon (+ turns) below.
+	// NOTE: deliberately hand-rolled rather than drawCardIdentity (panels.go) — the
+	// ribbon card layers a class medallion, halo/jut, and a single compact status icon
+	// the panels member/formation cards don't, so its identity/vitals skeleton stays
+	// separate on purpose. Keep the two in sync when the shared look changes.
 	leftX := x + partyCardInsetX
 	glyphR := float32(9)
 	glyphCX := leftX + glyphR

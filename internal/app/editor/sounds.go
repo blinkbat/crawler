@@ -798,8 +798,9 @@ func drawSoundsModal(s *State, font rl.Font, theme render.Theme) {
 	drawSoundsAssignCol(s, font, theme, &l)
 
 	hint := "Drag sliders · scroll params · Edit a saved sound to reload its knobs · Save overwrites · Tab cycles column · Esc closes"
+	// Shared footer baseline/inset (soundFontHint keeps this modal's larger hint font).
 	render.DrawRichText(font, hint,
-		rl.NewVector2(l.card.X+18, l.card.Y+l.card.Height-26),
+		rl.NewVector2(l.card.X+modalContentInset, l.card.Y+l.card.Height-modalFooterHintDY),
 		soundFontHint, 1, theme.TextHint)
 }
 

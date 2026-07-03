@@ -919,12 +919,17 @@ func resize(s *State, w, h int) {
 		return
 	}
 	pushUndo(s)
-	s.area.Walls = resizeLayer(s.area.Walls, s.area.Width, s.area.Height, w, h, core.TileOpen)
-	s.area.Floor = resizeLayer(s.area.Floor, s.area.Width, s.area.Height, w, h, core.FloorAuto)
-	s.area.Decor = resizeLayer(s.area.Decor, s.area.Width, s.area.Height, w, h, core.DecorAuto)
-	s.area.Props = resizeLayer(s.area.Props, s.area.Width, s.area.Height, w, h, core.TilePropEmpty)
-	s.area.Ceiling = resizeLayer(s.area.Ceiling, s.area.Width, s.area.Height, w, h, core.TileCeilingOpen)
-	s.area.Elevation = resizeLayer(s.area.Elevation, s.area.Width, s.area.Height, w, h, core.ElevationChar(core.ElevationBaseline))
+	// Resize every grid-backed layer from its layerDefs descriptor (slice + sentinel),
+	// so a new grid layer needs no edit here — layerDefs' init-assert governs coverage.
+	// Uses the OLD dims (s.area.Width/Height); those are updated below after all resizes.
+	for l := 0; l < layerCount; l++ {
+		grid := layerDefs[l].grid
+		if grid == nil { // Entities: gridless
+			continue
+		}
+		gp := grid(s)
+		*gp = resizeLayer(*gp, s.area.Width, s.area.Height, w, h, layerDefs[l].sentinel)
+	}
 	// Resize every voxel plane in lockstep (new cells = air) or the stack desyncs.
 	for L := range s.area.Solids {
 		s.area.Solids[L] = resizeLayer(s.area.Solids[L], s.area.Width, s.area.Height, w, h, core.SolidAir)

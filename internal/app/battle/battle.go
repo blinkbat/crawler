@@ -473,6 +473,10 @@ func startActorTurn(g *core.GameState) {
 			if winIfEnemiesWiped(g, core.ActivePack(g), core.BattleMembers(g), "The meteor finishes them.") {
 				return
 			}
+			// The burning actor is skipped, not acting — zero the per-turn tallies so its
+			// burn/Meteor kills don't leak into the next actor's Bloodthirst / Killing Spree.
+			g.Battle.PhysDamageThisTurn = 0
+			g.Battle.EnemyKillsThisTurn = 0
 			g.Battle.QueueCursor++
 			continue
 		}
@@ -528,9 +532,11 @@ func advanceSkippedTurn(g *core.GameState, actor core.ActorRef) bool {
 	// ticks above: a fuse that only advanced on un-skipped turns would freeze through a
 	// Sleep/Stun lockout and land late. Its kills are caught by the wipeout check below.
 	resolveMeteorIfDue(g)
-	// Zero the phys tally (symmetry with finishActorTurn) so no stale figure leaks
-	// into the next actor's Bloodthirst.
+	// Zero the per-turn tallies (symmetry with finishActorTurn) so no stale figure
+	// leaks into the next actor's Bloodthirst / Killing Spree — a DoT/Meteor kill on
+	// this skipped turn must not credit the next actor with a kill it never made.
 	g.Battle.PhysDamageThisTurn = 0
+	g.Battle.EnemyKillsThisTurn = 0
 	if checkEnemyWipeout(g) || checkPartyWipeout(g) {
 		return true
 	}
@@ -557,6 +563,12 @@ func consumeDefendAndGuardOnSkip(g *core.GameState, actor core.ActorRef) {
 // Confused) for the actor whose turn just ended. Called from both finishActorTurn
 // and the Sleep/Stun skip path, else those statuses outlast their duration on a
 // skipped turn. No-ops on enemies and zeroed counters.
+//
+// NOTE: this is a hand-maintained tick list, NOT table-driven — a NEW timed `*Turns`
+// counter must be added here (or to the enemy mirror) by hand to drain each turn. The
+// death-clear classifier (partyDeathStatuses in actions.go, reflect-asserted complete)
+// forces every `*Turns` counter to be acknowledged there; use that same edit as the
+// reminder to wire a per-turn drain here.
 func drainNonDamagingPartyStatuses(g *core.GameState, actor core.ActorRef) {
 	tickWebbedAfterPartyTurn(g, actor)
 	tickConfusedAfterPartyTurn(g, actor)

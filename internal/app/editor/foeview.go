@@ -104,6 +104,8 @@ const (
 	foeTabRowGap            = float32(10) // gap from the name row down to the tab row
 	foeContentGap           = float32(14) // gap from the tab row down to the content
 	foeAssetBtnGap          = float32(16) // gap below the asset column before its action buttons
+	foeFooterHintDY         = float32(8)  // footer hint baseline below the preview pane
+	foeFooterNoteDY         = float32(26) // persistence note baseline below the preview pane
 	// foePreviewZoomStep is the per-wheel-notch zoom dolly (clamped render-side).
 	foePreviewZoomStep = float32(0.2)
 	// sliderHitPadY fattens a thin track's click band vertically (draw unchanged).
@@ -750,9 +752,9 @@ func drawVisualizerModal(s *State, font rl.Font, theme render.Theme, cb visualiz
 
 	// Footer hint + persistence note, under the preview pane.
 	render.DrawTextWithShadow(font, cb.footerHint,
-		l.card.X+foePad, l.preview.Y+l.preview.Height+8, editorFontHint, theme.TextHint)
+		l.card.X+foePad, l.preview.Y+l.preview.Height+foeFooterHintDY, editorFontHint, theme.TextHint)
 	render.DrawTextWithShadow(font, cb.footerNote,
-		l.card.X+foePad, l.preview.Y+l.preview.Height+26, editorFontHint, theme.TextMuted)
+		l.card.X+foePad, l.preview.Y+l.preview.Height+foeFooterNoteDY, editorFontHint, theme.TextMuted)
 }
 
 // drawFoeViewTabs paints the tab buttons, active one highlighted. Shared.
