@@ -47,6 +47,11 @@ func (g *GameState) CarryProgressionFrom(prev *GameState) {
 	g.StepCount = prev.StepCount
 	g.Weather = prev.Weather
 	g.RNG = prev.RNG
+	// ActionLog is one continuous in/out-of-combat buffer (party-run state, like
+	// Quests) — carry it so a door step doesn't wipe the rolling log. StatusMessage
+	// is transient and left to the new area's QuietMessage. NOT in copyRunProgression:
+	// a Restart wants a fresh log, an area transition does not.
+	g.ActionLog = prev.ActionLog
 	copyRunPreferences(g, prev)
 }
 
@@ -102,7 +107,7 @@ func NewGameState(area AreaDefinition) GameState {
 	// runtime-snapped) tile — two blockers on one cell would trap the pack and render
 	// it embedded in the crystal.
 	crystals := placeCrystals(area)
-	crystals = dropCrystalsOnPacks(crystals, packs)
+	crystals = dropCrystalsOnPacks(crystals, packs, area.IsVoxel())
 	g := GameState{
 		Area:       area,
 		Player:     NewPlayer(startX, startZ, area.StartFacing),
@@ -306,11 +311,14 @@ func placeCrystals(a AreaDefinition) []Crystal {
 }
 
 // dropCrystalsOnPacks removes crystals sharing a tile with a pack (crystals block,
-// so an overlap is two blockers on one cell). Filters in place; order preserved.
-func dropCrystalsOnPacks(crystals []Crystal, packs []Pack) []Crystal {
+// so an overlap is two blockers on one cell). Level-aware on a voxel map: a crystal
+// on a deck above (or ground below) a pack on a different floor of the same column
+// doesn't actually collide, so only a same-floor pack drops it — mirroring the
+// level-aware PackIndexAtLanding runtime blocker. Filters in place; order preserved.
+func dropCrystalsOnPacks(crystals []Crystal, packs []Pack, isVoxel bool) []Crystal {
 	kept := crystals[:0]
 	for _, c := range crystals {
-		if PackIndexAtTile(packs, c.TileX, c.TileZ) < 0 {
+		if PackIndexAtLanding(packs, c.TileX, c.TileZ, c.Level, isVoxel) < 0 {
 			kept = append(kept, c)
 		}
 	}

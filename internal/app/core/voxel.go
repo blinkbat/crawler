@@ -190,7 +190,7 @@ func (a *AreaDefinition) MapSurfaceAt(x, z, L int) MapSurface {
 		return MapSurface{Kind: MapSurfaceVoid}
 	}
 	if _, ok := a.RampAt(x, z); ok {
-		low := a.ElevationLevelAt(x, z) // ramps store their LOW level
+		low := a.rampLevel(x, z) // ramp's ground level (not the column top on a gapped stack)
 		if low == L || low == L-1 {
 			return MapSurface{Kind: MapSurfaceRamp}
 		}
@@ -270,7 +270,10 @@ func ElevationRowsFromSolids(a *AreaDefinition) []string {
 // everywhere; a ramp uses EdgeLevelOf (L = its stored low level). ResolveStep
 // uses this on both leave and enter sides.
 func (a *AreaDefinition) surfaceEdgeLevel(x, L, z, dir int) (int, bool) {
-	if f, ok := a.RampAt(x, z); ok {
+	// Ramp rule applies only at the ramp's ground level: a deck stacked above a ramp
+	// tile presents flat edges, so deck traversal isn't false-blocked as a sheer ramp
+	// side (RampAt is 2D and can't tell the surfaces apart on its own).
+	if f, ok := a.RampAt(x, z); ok && L == a.rampLevel(x, z) {
 		return EdgeLevelOf(L, f, dir)
 	}
 	return L, true

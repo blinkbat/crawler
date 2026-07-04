@@ -33,9 +33,23 @@ func TestDropCrystalsOnPacks(t *testing.T) {
 		{TileX: 1, TileZ: 1, Charged: true}, // clear
 		{TileX: 3, TileZ: 4, Charged: true}, // on the pack → dropped
 	}
-	got := dropCrystalsOnPacks(crystals, packs)
+	got := dropCrystalsOnPacks(crystals, packs, false)
 	if len(got) != 1 || got[0].TileX != 1 || got[0].TileZ != 1 {
 		t.Fatalf("expected only the (1,1) crystal to survive, got %+v", got)
+	}
+}
+
+// TestDropCrystalsOnPacks_VoxelLevelAware: on a voxel map a crystal only drops when
+// a pack shares its FLOOR — a crystal on a deck above a ground-level pack survives.
+func TestDropCrystalsOnPacks_VoxelLevelAware(t *testing.T) {
+	packs := []Pack{{TileX: 3, TileZ: 4, Level: 0, Members: []Enemy{{Kind: EnemyRat, Alive: true}}}}
+	crystals := []Crystal{
+		{TileX: 3, TileZ: 4, Level: 2, Charged: true}, // deck above the pack → kept
+		{TileX: 3, TileZ: 4, Level: 0, Charged: true}, // same floor as the pack → dropped
+	}
+	got := dropCrystalsOnPacks(crystals, packs, true)
+	if len(got) != 1 || got[0].Level != 2 {
+		t.Fatalf("expected only the deck (level 2) crystal to survive, got %+v", got)
 	}
 }
 

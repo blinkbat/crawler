@@ -28,13 +28,12 @@ var menuFade struct {
 // routes through gate-less drawPanelsBody so it keeps drawing through a close-
 // fade after g.PanelsOpen flips false (closePanels preserves tab/cursor state).
 func menuFadeDrawer(g *core.GameState) func(*core.GameState, Resources) {
+	// Order MUST match core.ActiveModal's priority ladder (children above parents,
+	// Panels/Shop high) so the overlay DRAWN is the overlay RECEIVING input — a stray
+	// double-open otherwise fades in a different menu than the one taking the buttons.
 	switch {
-	case g.MenuOpen:
-		return drawMenuOverlay
-	case g.SoundMenuOpen:
-		return drawSoundMenuOverlay
-	case g.OptionsMenuOpen:
-		return drawOptionsMenuOverlay
+	case g.PanelsOpen:
+		return drawPanelsBody
 	case g.ShopOpen:
 		return drawShopOverlay
 	case g.RetroMenuOpen:
@@ -45,8 +44,12 @@ func menuFadeDrawer(g *core.GameState) func(*core.GameState, Resources) {
 		return drawWipeMenuOverlay
 	case g.DebugMenuOpen:
 		return drawDebugMenuOverlay
-	case g.PanelsOpen:
-		return drawPanelsBody
+	case g.SoundMenuOpen:
+		return drawSoundMenuOverlay
+	case g.OptionsMenuOpen:
+		return drawOptionsMenuOverlay
+	case g.MenuOpen:
+		return drawMenuOverlay
 	}
 	return nil
 }

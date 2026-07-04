@@ -71,8 +71,13 @@ type CrystalSave struct {
 	// TileX/TileZ pin the charge to a crystal so load matches by position, not
 	// index — an edited map can relocate a crystal at the same count, and a
 	// positional match avoids re-arming a spent charge onto the wrong tile.
-	TileX   int  `json:"tileX,omitempty"`
-	TileZ   int  `json:"tileZ,omitempty"`
+	TileX int `json:"tileX,omitempty"`
+	TileZ int `json:"tileZ,omitempty"`
+	// Level pins the charge to the crystal's voxel floor: two crystals can share a
+	// tile on different floors ([x,z,level] is the dedup key), so a tile-only match
+	// could restore a spent charge onto the wrong floor's crystal. Enforced only for
+	// Saved records so legacy tile-keyed saves still match.
+	Level   int  `json:"level,omitempty"`
 	Charge  int  `json:"charge"`
 	Charged bool `json:"charged"`
 	// Saved is always true on current records. Distinguishes a real crystal at
@@ -88,7 +93,7 @@ func crystalSaves(crystals []Crystal) []CrystalSave {
 	}
 	out := make([]CrystalSave, len(crystals))
 	for i, c := range crystals {
-		out[i] = CrystalSave{TileX: c.TileX, TileZ: c.TileZ, Charge: c.Charge, Charged: c.Charged, Saved: true}
+		out[i] = CrystalSave{TileX: c.TileX, TileZ: c.TileZ, Level: c.Level, Charge: c.Charge, Charged: c.Charged, Saved: true}
 	}
 	return out
 }
@@ -245,7 +250,12 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 			if !cs.Saved && cs.TileX == 0 && cs.TileZ == 0 {
 				return false
 			}
-			return cs.TileX == g.Crystals[i].TileX && cs.TileZ == g.Crystals[i].TileZ
+			if cs.TileX != g.Crystals[i].TileX || cs.TileZ != g.Crystals[i].TileZ {
+				return false
+			}
+			// Match the voxel floor too, but only for Saved records — a legacy record
+			// (no Level field, decodes 0) still tile-matches a single-floor crystal.
+			return !cs.Saved || cs.Level == g.Crystals[i].Level
 		},
 		func(i, j int) {
 			// Clamp the saved charge to [0, ceiling] (trust boundary). Honor the
@@ -259,7 +269,15 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	// out-of-bounds or now blocked (map may have shrunk). Check the RAW coords:
 	// clamping to an edge first could silently drop the party at a walkable corner.
 	x, z := data.PlayerTileX, data.PlayerTileZ
+	// Resolve the level the party will ACTUALLY stand on BEFORE the blocker check, so
+	// the crystal/chest lookup tests that floor. A saved level no longer standable
+	// (map edited) resolves down to the tile's ground surface — exactly where a
+	// blocking crystal/chest could sit; checking the raw saved level would miss it and
+	// load the party embedded in one.
 	level := data.PlayerLevel
+	if !area.Standable(x, level, z) {
+		level = spawnLevel(&area, x, z)
+	}
 	// Runtime blockers count too: a map edit can drop a chest or crystal onto the
 	// saved tile, and loading inside one is a state normal movement can't reach
 	// (the embedded chest can't even be opened — adjacency requires distance 1).
@@ -281,14 +299,9 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	} else {
 		g.Player = NewPlayer(x, z, data.PlayerFacing)
 	}
-	// Honor the standing level only if still standable at this tile (map may have
-	// been edited), else snap to the tile's lowest standable surface. NewPlayer left
-	// Level zero, so this is where the loaded level is established.
-	if area.Standable(x, level, z) {
-		g.Player.Level = level
-	} else {
-		g.Player.Level = spawnLevel(&area, x, z)
-	}
+	// level is already resolved to a standable surface (saved level if standable, else
+	// the tile's ground); NewPlayer left Level zero, so establish it here.
+	g.Player.Level = level
 	// Re-seed region presence at the LOADED tile — NewGameState seeded it at the
 	// area start, but we just repositioned. Without this, the saved tile's region
 	// reads as "outside", and the first step inside spuriously re-fires its
@@ -334,6 +347,17 @@ func matchUniqueOnce(dstLen, srcLen int, eligible func(i, j int) bool, apply fun
 func sanitizeLoadedParty(party []PartyMember) {
 	for i := range party {
 		m := &party[i]
+		// Floor the base numeric fields FIRST — everything below derives from them, so
+		// a hand-edited save's negative Stats/Armor (or out-of-band Hunger) would flow
+		// unchecked into MaxHP/damage/level-up math and the stat sheet. Downstream sites
+		// only floor individually; clamp at the trust boundary instead.
+		for s := Stat(0); s < StatCount; s++ {
+			if statTable[s].Get(m.Stats) < 0 {
+				statTable[s].Set(&m.Stats, 0)
+			}
+		}
+		m.Armor = MaxZero(m.Armor)
+		m.Hunger = Clamp(m.Hunger, 0, SatietyMax)
 		// MaxHP is fully VIT-derived (MaxHPFor); re-derive rather than trust the
 		// persisted number, which may have drifted out of sync. Floor at 1.
 		m.MaxHP = MaxHPFor(m.Stats)

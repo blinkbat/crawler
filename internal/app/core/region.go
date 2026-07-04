@@ -192,6 +192,14 @@ func (a *AreaDefinition) PasteRegion(r TileRegion, atX, atZ int) {
 // stack within the rectangle are cleared to air), then trims trailing all-air planes.
 func (a *AreaDefinition) pasteRegionSolids(r TileRegion, atX, atZ int) {
 	if len(r.Solids) == 0 {
+		// Heightfield source (no cube stack) into a MATERIALIZED destination: the copied
+		// heights landed only in the dead Elevation layer (ElevationLevelAt ignores it
+		// under a Solids stack, and the next save overwrites it via ElevationRowsFromSolids),
+		// so no cubes would be stamped. Synthesize the columns from the region's copied
+		// Elevation + Walls rows, mirroring BuildSolidsFromElevation's heightfield rule.
+		if a.IsVoxel() {
+			a.stampHeightfieldRegionCubes(r, atX, atZ)
+		}
 		return
 	}
 	// Same full-column stamp as the prop/decor stacks (cells above the copied planes
@@ -201,22 +209,136 @@ func (a *AreaDefinition) pasteRegionSolids(r TileRegion, atX, atZ int) {
 	a.trimTopAir()
 }
 
+// stampHeightfieldRegionCubes builds cubes for a heightfield region pasted into a
+// materialized voxel destination: each column solid 0..decoded-elevation (skinned
+// by the region's wall char, else rock), cells above cleared to air within the
+// rectangle so a shorter copied column reveals the void beneath. Full-column stamp
+// mirrors pasteScatterStack. Reads the region's own rows (the destination's dead
+// Elevation layer may be absent, so it can't be relied on).
+func (a *AreaDefinition) stampHeightfieldRegionCubes(r TileRegion, atX, atZ int) {
+	elevRows := r.layerRows(a, &a.Elevation)
+	if elevRows == nil {
+		return
+	}
+	wallRows := r.layerRows(a, &a.Walls)
+	depth := len(a.Solids)
+	for i := 0; i < r.H; i++ {
+		z := atZ + i
+		var erow string
+		if i < len(elevRows) {
+			erow = elevRows[i]
+		}
+		for j := 0; j < r.W; j++ {
+			x := atX + j
+			if !a.InBounds(x, z) {
+				continue
+			}
+			top := 0
+			if j < len(erow) {
+				top = ElevationLevelFromChar(erow[j])
+			}
+			skin := byte(TileRock)
+			if wallRows != nil && i < len(wallRows) && j < len(wallRows[i]) {
+				if c := wallRows[i][j]; c != TileOpen {
+					skin = c
+				}
+			}
+			hi := top
+			if depth-1 > hi {
+				hi = depth - 1
+			}
+			for L := 0; L <= hi; L++ {
+				if L <= top {
+					a.setSolidCell(x, L, z, skin)
+				} else {
+					a.setSolidCell(x, L, z, SolidAir)
+				}
+			}
+		}
+	}
+	a.trimTopAir()
+}
+
+// gridLayerIndex returns the position of layer pointer lp within gridLayers(), or
+// -1. Lets a copied region read its Walls/Elevation/Props/Decor rows by canonical
+// role without hardcoding the enumeration order.
+func (a *AreaDefinition) gridLayerIndex(lp *[]string) int {
+	for i, p := range a.gridLayers() {
+		if p == lp {
+			return i
+		}
+	}
+	return -1
+}
+
+// layerRows returns the region's captured rows for the grid layer at pointer lp
+// (nil if the region didn't capture it), keyed by gridLayers() role.
+func (r TileRegion) layerRows(a *AreaDefinition, lp *[]string) []string {
+	i := a.gridLayerIndex(lp)
+	if i < 0 || i >= len(r.Layers) {
+		return nil
+	}
+	return r.Layers[i]
+}
+
 // pasteRegionScatter stamps a region's per-floor prop/decor stacks and legacy level
 // tags at (atX,atZ). Stacks overwrite the full column in the rectangle (dest cubes
 // above the copied planes clear to blank), mirroring pasteRegionSolids; the level
 // grids are stamped as an overlay so a legacy source's props land on the right floor.
 func (a *AreaDefinition) pasteRegionScatter(r TileRegion, atX, atZ int) {
+	// Level tags first: stampLegacyScatterRegion resolves a legacy region's props onto
+	// the destination stack using them, and an auto tag must resolve against the pasted
+	// grid (order among the three level grids is irrelevant).
+	a.pasteLevelGrid(&a.PropLevels, r.PropLevels, atX, atZ)
+	a.pasteLevelGrid(&a.DecorLevels, r.DecorLevels, atX, atZ)
+	a.pasteLevelGrid(&a.PropYaw, r.PropYaw, atX, atZ)
+
 	if len(r.PropStack) > 0 {
 		a.EnsurePropStack()
 		a.pasteScatterStack(r.PropStack, len(a.PropStack), TilePropEmpty, r.W, r.H, atX, atZ, a.SetProp)
+	} else if len(a.PropStack) > 0 {
+		// Legacy scatter source into a MATERIALIZED destination: the region's prop grid
+		// landed in the frozen a.Props (unread once a stack exists), so it would never
+		// render. Re-stamp it onto the stack at each column's resolved floor.
+		a.stampLegacyScatterRegion(r, atX, atZ, len(a.PropStack), &a.Props, a.PropLevels, TilePropEmpty, a.SetProp)
 	}
 	if len(r.DecorStack) > 0 {
 		a.EnsureDecorStack()
 		a.pasteScatterStack(r.DecorStack, len(a.DecorStack), DecorEmpty, r.W, r.H, atX, atZ, a.SetDecor)
+	} else if len(a.DecorStack) > 0 {
+		a.stampLegacyScatterRegion(r, atX, atZ, len(a.DecorStack), &a.Decor, a.DecorLevels, DecorEmpty, a.SetDecor)
 	}
-	a.pasteLevelGrid(&a.PropLevels, r.PropLevels, atX, atZ)
-	a.pasteLevelGrid(&a.DecorLevels, r.DecorLevels, atX, atZ)
-	a.pasteLevelGrid(&a.PropYaw, r.PropYaw, atX, atZ)
+}
+
+// stampLegacyScatterRegion re-stamps a legacy (single-grid) scatter region onto a
+// MATERIALIZED destination's per-floor stack. Full-column overwrite mirrors the
+// materialized-region paste: each rectangle column is cleared across the stack's
+// existing floors, then the region's single content char (read from its captured
+// rows) is placed on its resolved floor (explicit level tag, else the destination
+// column's ground). Without this the region's props vanish into the frozen grid.
+func (a *AreaDefinition) stampLegacyScatterRegion(r TileRegion, atX, atZ, depth int, gridPtr *[]string, levelGrid []string, blank byte, set func(x, level, z int, c byte)) {
+	rows := r.layerRows(a, gridPtr)
+	for i := 0; i < r.H; i++ {
+		z := atZ + i
+		var row string
+		if rows != nil && i < len(rows) {
+			row = rows[i]
+		}
+		for j := 0; j < r.W; j++ {
+			x := atX + j
+			if !a.InBounds(x, z) {
+				continue
+			}
+			for L := 0; L < depth; L++ {
+				set(x, L, z, blank)
+			}
+			if j < len(row) {
+				if c := row[j]; c != blank {
+					set(x, MaxZero(a.levelGridAt(levelGrid, x, z)), z, c)
+				}
+			}
+		}
+	}
 }
 
 // pasteScatterStack writes a scatter region across levels 0..max(dest,region)-1 so
@@ -294,13 +416,22 @@ func (a *AreaDefinition) ClearRegion(x0, z0, x1, z1 int) {
 	}
 	for _, lp := range a.gridLayers() {
 		blank := a.layerBlank(lp)
+		if lp == &a.Elevation {
+			// Clear to the editor's default ground (baseline), NOT level 0 — else a Cut
+			// on a baseline heightfield map leaves a MaxElevationLevel-deep sheer pit at
+			// the vacated rectangle. layerBlank stays ElevationGround for the loader's
+			// absent-layer convention; only the cleared cells use baseline. On a
+			// materialized voxel map the Elevation layer is dead (cubes cleared to void
+			// below, then re-derived on save), so this only affects heightfield maps.
+			blank = ElevationChar(ElevationBaseline)
+		}
 		for z := z0; z <= z1; z++ {
 			if z >= len(*lp) {
 				continue
 			}
 			dest := []byte((*lp)[z])
 			for len(dest) < a.Width {
-				dest = append(dest, blank)
+				dest = append(dest, a.layerBlank(lp))
 			}
 			for x := x0; x <= x1 && x < len(dest); x++ {
 				dest[x] = blank

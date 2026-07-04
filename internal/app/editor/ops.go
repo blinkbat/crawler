@@ -1232,6 +1232,12 @@ func resize(s *State, w, h int) {
 	if len(s.area.DecorLevels) > 0 {
 		s.area.DecorLevels = resizeLayer(s.area.DecorLevels, s.area.Width, s.area.Height, w, h, core.PropLevelAuto)
 	}
+	// PropYaw is a per-tile grid too — resize it in lockstep, else it keeps the old
+	// dims and validatePropYawGrid rejects the map as unsaveable (and the only recovery,
+	// cycling a facing, blanks every authored facing via normalizeOptionalLayer).
+	if len(s.area.PropYaw) > 0 {
+		s.area.PropYaw = resizeLayer(s.area.PropYaw, s.area.Width, s.area.Height, w, h, core.PropYawAuto)
+	}
 	// Face skins are per-tile too: drop any now past the new bounds so a later
 	// re-grow can't re-expose stale cliff skins (spawns/locations are pruned below).
 	s.area.PruneFaceOverridesOutside(w, h)

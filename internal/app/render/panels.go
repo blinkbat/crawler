@@ -797,12 +797,14 @@ func pickerRowRect(card rl.Rectangle, listY float32, i int, rowH float32) rl.Rec
 // drawPickerList lays out a picker's body shared by the three picker sub-modals: the row
 // loop (rect + focus highlight) below the header band, then the left-aligned footer hint
 // bar. drawRow renders row i's content into its rect (and may capture the rect for clicks).
-func drawPickerList(font rl.Font, card rl.Rectangle, headerH, rowH float32, count, focused int, hints []HintSeg, drawRow func(i int, rect rl.Rectangle)) {
+func drawPickerList(font rl.Font, card rl.Rectangle, headerH, rowH, footerH float32, count, focused int, hints []HintSeg, drawRow func(i int, rect rl.Rectangle)) {
 	listY := card.Y + headerH
 	// Window rows to the card (scrolled around the focused row): the card height
 	// clamps at a screen fraction, so an over-tall list must not paint rows —
 	// or register click rects — past the card bottom / under the footer hints.
-	visible := int((card.Y + card.Height - equipPickerFooterH - listY) / rowH)
+	// footerH MUST match the constant the caller sized its card with, else the window
+	// is off by their difference and clips the last row.
+	visible := int((card.Y + card.Height - footerH - listY) / rowH)
 	if visible < 1 {
 		visible = 1
 	}
@@ -868,7 +870,7 @@ func drawEquipPicker(g *core.GameState, assets Resources) {
 	if len(rows) == 0 {
 		drawTextWithShadow(font, "No eligible items in inventory.", card.X+pickerCardLeftInset, card.Y+headerH+8, FontBody, textDim)
 	}
-	drawPickerList(font, card, headerH, rowH, len(rows), g.EquipPickerCursor, equipPickerHints, func(i int, rect rl.Rectangle) {
+	drawPickerList(font, card, headerH, rowH, equipPickerFooterH, len(rows), g.EquipPickerCursor, equipPickerHints, func(i int, rect rl.Rectangle) {
 		lastEquipLayout.PickerRects[i] = rect
 		row := rows[i]
 		if row.Unequip {
@@ -923,7 +925,7 @@ func drawUseTargetPicker(g *core.GameState, assets Resources) {
 	if len(living) == 0 {
 		drawTextWithShadow(font, "No one can be healed.", card.X+pickerCardLeftInset, card.Y+headerH, FontBody, textDim)
 	}
-	drawPickerList(font, card, headerH, rowH, len(living), g.UseTargetCursor, useTargetPickerHints, func(i int, rect rl.Rectangle) {
+	drawPickerList(font, card, headerH, rowH, pickerFooterH, len(living), g.UseTargetCursor, useTargetPickerHints, func(i int, rect rl.Rectangle) {
 		m := &g.Party[living[i]]
 		classCol := classAccent(m.Class)
 		inset := rect.X + 20
@@ -933,7 +935,7 @@ func drawUseTargetPicker(g *core.GameState, assets Resources) {
 		nameX := inset + 34
 		drawTextWithShadow(font, m.Name, nameX, rect.Y+13, FontBody, textPrimary)
 		chipMaxW := rect.Width*memberCardBarSplit - (nameX - rect.X) - 12
-		drawMemberReadoutChips(font, m, nameX, rect.Y+48, chipMaxW)
+		drawMemberReadoutChips(font, m, nameX, rect.Y+48, chipMaxW, rect.Y+rect.Height-6)
 
 		// Right column: roomy HP over MP bars, then the item's live effect preview.
 		barX := rect.X + rect.Width*memberCardBarSplit
@@ -960,7 +962,10 @@ func drawHealPicker(g *core.GameState, assets Resources) {
 	if caster < 0 || caster >= len(g.Party) {
 		return
 	}
-	skills := core.OutOfBattleSupportSkillsInto(healPickerHealsDrawBuf, &g.Party[caster])
+	// Draw the SAME affordable-filtered list the input layer walks (explore's
+	// updateHealPicker uses AffordableOutOfBattleSupportSkillsInto too), else the gilt
+	// highlight lands on a row the cursor can't reach when an unaffordable skill precedes.
+	skills := core.AffordableOutOfBattleSupportSkillsInto(healPickerHealsDrawBuf, &g.Party[caster])
 	healPickerHealsDrawBuf = skills
 	if len(skills) == 0 {
 		return
@@ -972,7 +977,7 @@ func drawHealPicker(g *core.GameState, assets Resources) {
 	cardH := headerH + float32(len(skills))*rowH + pickerFooterH
 	card := drawPickerCard(font, cardW, cardH, "Use Skill — "+g.Party[caster].Name)
 
-	drawPickerList(font, card, headerH, rowH, len(skills), g.HealPickCursor, healPickerHints, func(i int, rect rl.Rectangle) {
+	drawPickerList(font, card, headerH, rowH, pickerFooterH, len(skills), g.HealPickCursor, healPickerHints, func(i int, rect rl.Rectangle) {
 		s := skills[i]
 		drawTextWithShadow(font, core.SkillName(s), rect.X+14, rect.Y+rect.Height/2-10, FontBody, textPrimary)
 		costText := skillCostMPLabel(core.SkillCost(s))
@@ -1256,9 +1261,16 @@ func formatRatioSpaced(cur, total int) string {
 		return s
 	}
 	s := strconv.Itoa(cur) + " / " + strconv.Itoa(total)
-	ratioSpacedCache[k] = s
+	// Bound it: the live XP readout feeds a churning `cur`, so entries would accrete
+	// for every XP value ever rendered. The few hot skill-rank ratios land early and
+	// stay; once full, the (cheap) XP format just runs uncached.
+	if len(ratioSpacedCache) < ratioSpacedCacheCap {
+		ratioSpacedCache[k] = s
+	}
 	return s
 }
+
+const ratioSpacedCacheCap = 512
 
 // panelsItemEffectLabel is the Items-tab detail line for a consumable: "+N HP", "+N MP", a humanized hunger clause for food, or a no-effect note.
 func panelsItemEffectLabel(info core.ItemDefinition) string {

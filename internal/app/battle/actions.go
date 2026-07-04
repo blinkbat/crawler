@@ -2845,6 +2845,13 @@ func clearPartyStatusesOnDeath(member *core.PartyMember) {
 	member.Guarding = false
 	member.Guarded = false
 	member.GuardedBy = 0
+	// Release the ingest link on death: poison ticks CAN kill an ingested member
+	// (tickPoisonForIngestedParty bypasses the ingest lockout), and a corpse left
+	// Ingested still satisfies MantrapHasPrey (the mantrap can never eat again) and,
+	// worse, a mid-battle Resurrect would revive an alive-but-Ingested member —
+	// queue-skipped, untargetable, unhealable. Mirrors ReleaseIngestedBy's sentinel.
+	member.Ingested = false
+	member.IngestedBy = -1
 }
 
 // --- Result text ---

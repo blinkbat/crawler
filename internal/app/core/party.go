@@ -564,9 +564,27 @@ func OutOfBattleSupportSkillsInto(buf []SkillID, m *PartyMember) []SkillID {
 	})
 }
 
+// AffordableOutOfBattleSupportSkillsInto is OutOfBattleSupportSkillsInto further
+// filtered to skills the member can currently afford (enough MP). The ONE producer
+// the out-of-battle heal chooser shares between its rendered rows and its input
+// cursor, so a highlight can't land on a row the cursor can't reach. Filters in
+// place; result aliases buf until next reuse.
+func AffordableOutOfBattleSupportSkillsInto(buf []SkillID, m *PartyMember) []SkillID {
+	buf = OutOfBattleSupportSkillsInto(buf, m)
+	kept := buf[:0]
+	for _, s := range buf {
+		if CanAffordSkill(m, s) {
+			kept = append(kept, s)
+		}
+	}
+	return kept
+}
+
 // HealMember restores up to `amount` HP to a LIVING, non-ingested member,
 // clamped at MaxHP. Never revives, ignores non-positive amounts, skips
-// ingested. Returns true when the member was a valid heal target.
+// ingested. Returns true only when HP actually ROSE — a heal on an already-full
+// member reports false, so callers hang "landed" side effects (flash, cues,
+// "recovers N HP" logs) on a real gain, not on merely being a valid target.
 func HealMember(m *PartyMember, amount int) bool {
 	if m == nil || amount <= 0 || !partyAvailable(*m) {
 		return false
@@ -577,8 +595,9 @@ func HealMember(m *PartyMember, amount int) bool {
 	if MemberStarving(*m) {
 		return false
 	}
+	before := m.HP
 	GainUpTo(&m.HP, m.MaxHP, amount)
-	return true
+	return m.HP > before
 }
 
 // CanBenefitFromHeal reports whether a plain heal would actually raise this member's
@@ -674,12 +693,14 @@ func TickCrystalSpins(g *GameState, dt float32) {
 }
 
 // clearMemberAnimTimers zeros a member's transient animation timers (lunge /
-// damage-flash / knockback), not gameplay state (statuses go through
-// ClearPartyTransientStatuses).
+// damage-flash / knockback / floating damage popup), not gameplay state (statuses
+// go through ClearPartyTransientStatuses). Clears the whole HitAnim quintet — like
+// its enemy twin clearEnemyAnimTimers — so a battle exited mid-popup doesn't replay
+// a stale damage number, and saveSanitizedParty's "animation fields zeroed" contract
+// holds (the popup fields JSON-flatten into the save).
 func clearMemberAnimTimers(m *PartyMember) {
 	m.AttackBump = 0
-	m.DamageFlash = 0
-	m.HitKnockback = 0
+	m.HitAnim = HitAnim{}
 }
 
 // RestoreMP tops up MP by amount (clamped at MaxMP), returning the actual amount

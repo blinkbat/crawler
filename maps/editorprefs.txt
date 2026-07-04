@@ -1,1 +1,2 @@
 lastMap=maps\forest_path.map
+recent=maps\forest_path.map

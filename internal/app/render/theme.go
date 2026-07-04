@@ -1584,9 +1584,19 @@ func (c *measureCache) measure(font rl.Font, text string, size, spacing float32)
 	// measureRichText so a string with a procedural symbol (richtext.go) measures
 	// to its real width; symbol-free strings fall through to rl.MeasureTextEx.
 	v := measureRichText(font, text, size, spacing)
+	// Bound the cache: some callers measure churning readouts (the live XP line
+	// "1234 / 5000" is a fresh string every gain), so entries would accrete for the
+	// whole session. Clear wholesale past the cap — hot stable strings re-populate in
+	// one frame, and a re-measure is cheap next to unbounded growth.
+	if len(c.entries) >= measureCacheCap {
+		c.entries = make(map[measureKey]rl.Vector2, 32)
+	}
 	c.entries[key] = v
 	return v
 }
+
+// measureCacheCap bounds every measureCache instance; see measure() for why.
+const measureCacheCap = 2048
 
 // qualityPopupMeasureCache / damagePopupMeasureCache back the throbbing combat
 // popups: they measure at the FIXED base size and scale the result, so the

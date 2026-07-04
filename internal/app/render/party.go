@@ -266,36 +266,58 @@ func drawChip(font rl.Font, x, y float32, glyph func(cx, cy, r float32, col rl.C
 var statusChipScratch []core.PartyStatusView
 
 // drawMemberReadoutChips flows a member's full status readout from (x,y), wrapping
-// within maxW (statusChipRowPitch per row): the satiety-stage chip first (dropped
-// when Starving — the Starving effect chip below already carries it), then EVERY
-// active status effect as an icon+label chip. Returns the height consumed. Shared by
-// the item-target surfaces so "all their status effects" reads the same in and out
-// of battle.
-func drawMemberReadoutChips(font rl.Font, m *core.PartyMember, x, y, maxW float32) float32 {
+// within maxW (statusChipRowPitch per row) and NEVER past maxY (the card/row bottom):
+// the satiety-stage chip first (dropped when Starving — the Starving effect chip below
+// already carries it), then EVERY active status effect as an icon+label chip. Once the
+// next row would cross maxY the remainder collapses into a "+N" chip so a member with
+// many concurrent statuses can't paint past the card. Returns the height consumed.
+// Shared by the item-target surfaces so "all their status effects" reads the same in
+// and out of battle.
+func drawMemberReadoutChips(font rl.Font, m *core.PartyMember, x, y, maxW, maxY float32) float32 {
 	cx, cy := x, y
 	used := statusChipH
-	// place advances the cursor for a chip of width w, wrapping to a new row when it
-	// would overflow maxW, and returns the chip's top-left.
-	place := func(w float32) (float32, float32) {
-		if cx > x && cx+w > x+maxW {
-			cx = x
-			cy += statusChipRowPitch
-			used += statusChipRowPitch
-		}
-		px, py := cx, cy
-		cx += w + statusChipGap
-		return px, py
-	}
-
-	stage := core.MemberStage(*m)
-	if stage != core.SatietyStarving { // Starving shows as its own effect chip below
-		satLabel := core.SatietyStageLabel(stage)
-		satCol := satietyStageColors[stage]
-		px, py := place(chipWidth(font, false, satLabel))
-		drawChip(font, px, py, nil, satLabel, satCol)
-	}
 
 	statusChipScratch = core.ActivePartyStatuses(statusChipScratch, m)
+	stage := core.MemberStage(*m)
+	showSat := stage != core.SatietyStarving
+	total := len(statusChipScratch)
+	if showSat {
+		total++
+	}
+	drawn := 0
+
+	// place positions a chip of width w, wrapping to a new row when it would overflow
+	// maxW; ok=false when that row would cross maxY (out of vertical room).
+	place := func(w float32) (float32, float32, bool) {
+		nx, ny, nused := cx, cy, used
+		if nx > x && nx+w > x+maxW {
+			nx, ny, nused = x, cy+statusChipRowPitch, used+statusChipRowPitch
+		}
+		if ny+statusChipH > maxY {
+			return 0, 0, false
+		}
+		cx, cy, used = nx+w+statusChipGap, ny, nused
+		return nx, ny, true
+	}
+	// emitOverflow marks the hidden remainder with a "+N" chip on the current row (no
+	// wrap — vertical room is already exhausted); skipped if even that won't fit.
+	emitOverflow := func() {
+		label := "+" + strconv.Itoa(total-drawn)
+		if w := chipWidth(font, false, label); cx+w <= x+maxW && cy+statusChipH <= maxY {
+			drawChip(font, cx, cy, nil, label, textDim)
+		}
+	}
+
+	if showSat {
+		satLabel := core.SatietyStageLabel(stage)
+		px, py, ok := place(chipWidth(font, false, satLabel))
+		if !ok {
+			emitOverflow()
+			return used
+		}
+		drawChip(font, px, py, nil, satLabel, satietyStageColors[stage])
+		drawn++
+	}
 	for _, s := range statusChipScratch {
 		col, flicker := partyStatusVisual(s.Kind)
 		if flicker {
@@ -303,8 +325,13 @@ func drawMemberReadoutChips(font rl.Font, m *core.PartyMember, x, y, maxW float3
 		}
 		glyph := statusGlyphFor(s.Kind)
 		label := partyStatusTurnLabel(s.Kind, s.Turns)
-		px, py := place(chipWidth(font, glyph != nil, label))
+		px, py, ok := place(chipWidth(font, glyph != nil, label))
+		if !ok {
+			emitOverflow()
+			return used
+		}
 		drawChip(font, px, py, glyph, label, col)
+		drawn++
 	}
 	return used
 }
@@ -314,7 +341,7 @@ func drawMemberReadoutChips(font rl.Font, m *core.PartyMember, x, y, maxW float3
 // partyCardItemH (item/ally-skill targeting) the card's lower band shows the full
 // char-status chip readout (satiety + every active status effect) so the player can
 // compare targets from the ribbon without opening a panel.
-func drawPartyCard(font rl.Font, member *core.PartyMember, x, y, cardH float32, active, selected, down, dim bool) {
+func drawPartyCard(font rl.Font, member *core.PartyMember, col int, x, y, cardH float32, active, selected, down, dim bool) {
 	classCol := classAccent(member.Class)
 	accent := classCol
 	bg := surfacePrimary
@@ -339,7 +366,10 @@ func drawPartyCard(font rl.Font, member *core.PartyMember, x, y, cardH float32, 
 	// Jut the active card outward by column so it stands out without colliding
 	// with the row above or the neighbouring card.
 	if active && !down {
-		if member.HomeCol == core.ColRight {
+		// Jut off the PLACEMENT column, not HomeCol: in battle cards tile by the LIVE
+		// slot (member.Col), so after an ambush/SwapLiveSlots a jut off HomeCol would
+		// push the card the wrong way and overlap its row neighbour.
+		if col == int(core.ColRight) {
 			x += activeCardJut
 		} else {
 			x -= activeCardJut
@@ -414,7 +444,7 @@ func drawPartyCard(font rl.Font, member *core.PartyMember, x, y, cardH float32, 
 		// wrapping chip row — so the player compares WHO to target from the ribbon. The
 		// item's own effect ("Heals N HP", "heals hunger") lives on the action menu
 		// panel, not here (see drawAllyTargetPrompt's item sub-line).
-		drawMemberReadoutChips(font, member, leftX, y+62, partyCardW-2*partyCardInsetX)
+		drawMemberReadoutChips(font, member, leftX, y+62, partyCardW-2*partyCardInsetX, y+cardH-6)
 	} else {
 		// Compact card: single status glyph (+ turns) below the name. Resolves through
 		// core.PartyStatus so the card agrees with the Tome badge; only color/flicker
@@ -620,7 +650,12 @@ func DrawPartyRibbon(g *core.GameState, assets Resources) {
 	// effect) so the player compares targets from the ribbon. The item's own effect
 	// ("Heals N HP", "heals hunger") shows on the action menu panel, not here. Any other
 	// mode keeps the compact card.
-	expandReadout := g.Battle.Active() &&
+	// Only while the player is actively CHOOSING a target (Phase==BattlePlayer). An
+	// ally-cast skill (e.g. Prayer) keeps ActionMode==ActionPartyTarget through its
+	// timing minigame (Phase→BattleAttackTiming), so without the phase gate the ribbon
+	// would stay expanded and its top rise ABOVE the compact PartyRibbonTopY the timing
+	// bar positions against — painting the charge bar inside the ribbon over the cards.
+	expandReadout := g.Battle.Active() && g.Battle.Phase == core.BattlePlayer &&
 		(g.Battle.ActionMode == core.ActionItemTarget || g.Battle.ActionMode == core.ActionPartyTarget)
 	cardH := partyCardH
 	if expandReadout {
@@ -666,6 +701,7 @@ func DrawPartyRibbon(g *core.GameState, assets Resources) {
 		drawPartyCard(
 			assets.hudFont,
 			member,
+			col,
 			x, y, cardH,
 			active,
 			selected,

@@ -285,9 +285,14 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		// map (a deck crystal is fine above a blocked ground floor), flat 2D
 		// BlockedAt on a heightfield.
 		if len(area.Solids) > 0 {
+			// Validate at the SAME floor the runtime rests the crystal on: placeCrystals
+			// resolves a non-standable authored level down to the ground surface, so a
+			// legacy Level:0 crystal validated at floor 0 (inside solid rock) would
+			// vacuously pass yet embed in a blocking prop at its resolved ground floor.
+			level := area.resolveEntityLevel(c.TileX, c.TileZ, c.Level)
 			floor, ok := area.layerByteAt(area.Floor, c.TileX, c.TileZ)
 			blocked := (ok && IsBlockingFloor(floor)) ||
-				area.PropBlocksStanding(c.TileX, c.Level, c.TileZ)
+				area.PropBlocksStanding(c.TileX, level, c.TileZ)
 			if blocked {
 				return AreaDefinition{}, fmt.Errorf("crystal at (%d,%d) floor %d sits on a blocked spot (prop/deep water)", c.TileX, c.TileZ, c.Level)
 			}

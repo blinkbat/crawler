@@ -431,6 +431,10 @@ const (
 	slotPropStack
 	slotDecorStack
 	slotPropYaw
+	// slotCount is the sentinel one past the last real slot, so the init coverage
+	// assertion covers every appended slot automatically (a new slot before it is
+	// checked without editing the loop bound).
+	slotCount
 )
 
 // Section header names — on-disk labels (header line is name+colon); sectionFor
@@ -518,7 +522,7 @@ var layerSections = []layerSection{
 // lockstep (a 7th layer on either side panics at startup).
 var GridLayerCount int
 
-// init asserts layerSections covers every slot (slotWalls..slotFaces) exactly once
+// init asserts layerSections covers every slot (slotWalls..slotPropYaw) exactly once
 // (a missing slot panics) and tallies GridLayerCount.
 func init() {
 	seen := make(map[layerSlot]bool, len(layerSections))
@@ -531,7 +535,7 @@ func init() {
 			GridLayerCount++
 		}
 	}
-	for slot := slotWalls; slot <= slotDecorStack; slot++ {
+	for slot := slotWalls; slot < slotCount; slot++ {
 		if !seen[slot] {
 			panic(fmt.Sprintf("mapfile: layerSections missing slot %d — add a row", slot))
 		}
@@ -986,12 +990,20 @@ func (mf *MapFile) validateOptionalGrid(name string, rows []string) error {
 	return nil
 }
 
+// PropYawStepCount mirrors core.PropYawSteps (the authored-facing resolution); a
+// core init assert keeps the two in lockstep. mapfile is the lower package and
+// can't import core, so the count lives here and the validator derives its alphabet
+// from it — no more accepting chars the core decoder silently drops to auto.
+const PropYawStepCount = 12
+
 // validatePropYawGrid dimension-checks the optional prop-facing grid and rejects
 // stray chars. Its alphabet differs from the level grids: '.' auto plus the
-// base-36-ish step digits '0'..'9' and lowercase 'a'..'z' that core.PropYawStepChar
-// emits (steps 10..11 → 'a'/'b'). Uppercase 'A'..'K' are LEVEL chars, not facings,
-// so this must not reuse validateOptionalGrid's isLevelChar check — doing so
-// rejected any prop authored to a 300°/330° facing.
+// base-36-ish step digits '0'..'9' and lowercase 'a'.. that core.PropYawStepChar
+// emits — but ONLY up to PropYawStepCount steps (10..11 → 'a'/'b' at 12 steps).
+// Chars past that ('c'..'z') decode to "auto" in core, so reject them here instead
+// of accepting a facing that silently does nothing and round-trips forever.
+// Uppercase 'A'..'K' are LEVEL chars, not facings, so this must not reuse
+// validateOptionalGrid's isLevelChar check.
 func (mf *MapFile) validatePropYawGrid(rows []string) error {
 	if len(rows) == 0 {
 		return nil
@@ -999,11 +1011,17 @@ func (mf *MapFile) validatePropYawGrid(rows []string) error {
 	if err := mf.validateGridDims(SectionPropYaw, rows); err != nil {
 		return err
 	}
+	maxLetter := byte('a' + PropYawStepCount - 1 - 10) // last decodable step letter
 	for i, row := range rows {
 		for c := 0; c < len(row); c++ {
-			if b := row[c]; b != '.' && !(b >= '0' && b <= '9') && !(b >= 'a' && b <= 'z') {
-				return fmt.Errorf("%s row %d col %d has bad facing char %q (expected '.', '0'..'9', or 'a'..'z')", SectionPropYaw, i, c, string(row[c]))
+			b := row[c]
+			if b == '.' || (b >= '0' && b <= '9') {
+				continue
 			}
+			if PropYawStepCount > 10 && b >= 'a' && b <= maxLetter {
+				continue
+			}
+			return fmt.Errorf("%s row %d col %d has bad facing char %q (expected '.', '0'..'9', or 'a'..%q)", SectionPropYaw, i, c, string(row[c]), string(maxLetter))
 		}
 	}
 	return nil
@@ -1183,12 +1201,21 @@ func (mf *MapFile) validate() error {
 		if err := mf.validateFloor("pack", p.Level, p.X, p.Z); err != nil {
 			return err
 		}
+		// A zero-member pack encodes as " X Z" (no kind column), which the parser rejects
+		// on field count — reject here so Save can't write a .map Load refuses.
+		if len(p.Members) == 0 {
+			return fmt.Errorf("pack at (%d,%d) has no members", p.X, p.Z)
+		}
 		// Members encode comma/semicolon-joined (',' within a row, ';' splits the
 		// front/back rows) and re-split on those, so a member name containing either —
 		// or whitespace, which the row decoder also splits on — would re-parse as
-		// phantom members. Reject at the data-model boundary (mirrors the chest-item
-		// and door-name guards) so it fails loudly at save.
+		// phantom members. An empty member encodes "a,,b", which the parser rejects.
+		// Reject at the data-model boundary (mirrors the chest-item and door-name
+		// guards) so it fails loudly at save.
 		for _, m := range p.Members {
+			if m == "" {
+				return fmt.Errorf("pack at (%d,%d) has an empty member", p.X, p.Z)
+			}
 			if strings.ContainsAny(m, ",; \t") {
 				return fmt.Errorf("pack at (%d,%d) member %q must not contain a comma, semicolon, or whitespace", p.X, p.Z, m)
 			}
@@ -1199,9 +1226,13 @@ func (mf *MapFile) validate() error {
 			return err
 		}
 		// Items encode comma-joined and re-split on ',', so an item name containing a
-		// comma would silently re-parse as two items. Reject at the data-model boundary
-		// (mirrors the door-name whitespace guard) so it fails loudly at save.
+		// comma would silently re-parse as two items, and an empty item is rejected by
+		// the parser. Reject at the data-model boundary (mirrors the door-name whitespace
+		// guard) so it fails loudly at save.
 		for _, item := range c.Items {
+			if item == "" {
+				return fmt.Errorf("chest at (%d,%d) has an empty item entry", c.X, c.Z)
+			}
 			if strings.ContainsRune(item, ',') {
 				return fmt.Errorf("chest at (%d,%d) item %q must not contain a comma", c.X, c.Z, item)
 			}
@@ -1255,12 +1286,38 @@ func (mf *MapFile) validate() error {
 	// skill token — shifts every later column on reload. Reject at the data-model
 	// boundary (mirrors the pack-member and door-name guards) so a direct
 	// mapfile.Save caller fails loudly instead of writing an unloadable map.
+	seenCE := make(map[string]struct{}, len(mf.CustomEnemies))
 	for _, ce := range mf.CustomEnemies {
 		if ce.Name == "" || strings.ContainsAny(ce.Name, " \t") {
 			return fmt.Errorf("custom enemy name %q must be non-empty with no whitespace", ce.Name)
 		}
 		if ce.BaseKind == "" || strings.ContainsAny(ce.BaseKind, " \t") {
 			return fmt.Errorf("custom enemy %q base kind %q must be non-empty with no whitespace", ce.Name, ce.BaseKind)
+		}
+		// Runtime binds a pack member to the FIRST custom enemy of that name, so a
+		// duplicate is silently dead weight — reject it (mirrors the door-name dedup).
+		if _, dup := seenCE[ce.Name]; dup {
+			return fmt.Errorf("duplicate custom enemy name %q in map", ce.Name)
+		}
+		seenCE[ce.Name] = struct{}{}
+		// Every numeric field is non-negative and skill-cast chance is a probability —
+		// the parser rejects out-of-range values, so mirror both here or Save could
+		// write a .map Load refuses (validate()'s whole reason for being).
+		for _, v := range []struct {
+			name string
+			val  int
+		}{
+			{"hp", ce.HP}, {"mp", ce.MP}, {"str", ce.STR}, {"dex", ce.DEX},
+			{"int", ce.INT}, {"wis", ce.WIS}, {"vit", ce.VIT}, {"spd", ce.SPD},
+			{"armor", ce.Armor}, {"mdef", ce.MDef}, {"xp", ce.XPValue},
+			{"tier", ce.Tier}, {"dmg", ce.AttackDamage}, {"spwr", ce.SpellPower},
+		} {
+			if v.val < 0 {
+				return fmt.Errorf("custom enemy %q field %s cannot be negative (%d)", ce.Name, v.name, v.val)
+			}
+		}
+		if ce.SkillCastChance < 0 || ce.SkillCastChance > 1 {
+			return fmt.Errorf("custom enemy %q skill-cast chance must be within [0,1] (%g)", ce.Name, ce.SkillCastChance)
 		}
 		for _, s := range ce.Skills {
 			if s == "" || strings.ContainsAny(s, ", \t") {

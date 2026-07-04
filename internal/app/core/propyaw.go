@@ -1,5 +1,7 @@
 package core
 
+import "crawler/internal/app/core/mapfile"
+
 // propyaw.go — the optional per-tile PROP-orientation override. PropYaw is a
 // Height×Width char grid: '.' (PropYawAuto) = use the renderer's procedural
 // hash-yaw, else a base-36-ish step digit ('0'..'9','a'..) in [0,PropYawSteps).
@@ -13,6 +15,15 @@ const (
 	// the renderer's steppedYaw30 so authored and procedural facings share the grid.
 	PropYawSteps = 12
 )
+
+// mapfile.validatePropYawGrid derives its accepted char alphabet from its own
+// PropYawStepCount (mapfile can't import core), so keep the two in lockstep — else
+// the disk validator and the runtime decoder would accept/reject different chars.
+func init() {
+	if mapfile.PropYawStepCount != PropYawSteps {
+		panic("core: mapfile.PropYawStepCount must equal PropYawSteps — the prop_yaw validator and decoder would drift")
+	}
+}
 
 // PropYawStepChar encodes a yaw step (0..PropYawSteps-1) as one grid char; an
 // out-of-range step encodes as PropYawAuto ('.').

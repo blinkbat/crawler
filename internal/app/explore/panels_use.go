@@ -76,19 +76,12 @@ func tryUseSkill(g *core.GameState) {
 // skills. The chooser and its driver share it so their lists can't diverge.
 // Reusable per-frame buffers; returned slices valid until the next call.
 var (
-	outOfBattleSkillsBuf []core.SkillID
-	affordableSkillsBuf  []core.SkillID
-	useTargetLivingBuf   []int
+	affordableSkillsBuf []core.SkillID
+	useTargetLivingBuf  []int
 )
 
 func affordableOutOfBattleSkills(m *core.PartyMember) []core.SkillID {
-	outOfBattleSkillsBuf = core.OutOfBattleSupportSkillsInto(outOfBattleSkillsBuf, m)
-	affordableSkillsBuf = affordableSkillsBuf[:0]
-	for _, s := range outOfBattleSkillsBuf {
-		if core.CanAffordSkill(m, s) {
-			affordableSkillsBuf = append(affordableSkillsBuf, s)
-		}
-	}
+	affordableSkillsBuf = core.AffordableOutOfBattleSupportSkillsInto(affordableSkillsBuf, m)
 	return affordableSkillsBuf
 }
 

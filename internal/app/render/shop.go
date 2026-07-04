@@ -31,11 +31,22 @@ type shopRow struct {
 func drawShopOverlay(g *core.GameState, assets Resources) {
 	font := assets.hudFont
 	rows := shopRows(g)
+	stride := shopRowH + shopRowGap
+	// Window the rows so a long tab (the Buy catalog runs 20+ items) can't grow the
+	// card past the screen — the sibling lists (journal/items/pickers) all window; the
+	// shop was the lone unwindowed one, drawing bottom rows + footer off a 768p screen.
+	_, sh := screenSizeF()
+	maxVisible := int((int32(sh*0.82) - shopHeaderH - shopFootH) / stride)
+	if maxVisible < 1 {
+		maxVisible = 1
+	}
 	visibleRows := len(rows)
 	if visibleRows < 1 {
 		visibleRows = 1 // reserve a line for the placeholder
 	}
-	stride := shopRowH + shopRowGap
+	if visibleRows > maxVisible {
+		visibleRows = maxVisible
+	}
 	panelH := shopHeaderH + stride*int32(visibleRows) + shopFootH
 	panelX, panelY, belowTitleY := drawTitledCardHeader(assets, "SHOP", shopPanelW, panelH)
 
@@ -51,7 +62,10 @@ func drawShopOverlay(g *core.GameState, assets Resources) {
 	if len(rows) == 0 {
 		drawTextWithShadow(font, shopEmptyLabel(g.ShopTab), float32(rowX), float32(rowY+shopRowTextDY), FontBody, textMuted)
 	}
-	for i, r := range rows {
+	// Scroll the window around the cursor (same helper the pickers use).
+	first := journalScrollFirst(g.ShopCursor, len(rows), visibleRows)
+	for i := first; i < len(rows) && i < first+visibleRows; i++ {
+		r := rows[i]
 		if i == g.ShopCursor {
 			DrawSelectedRowI(rowX-focusPlateInsetX, rowY-focusPlateInsetY, innerW, shopRowH)
 		}

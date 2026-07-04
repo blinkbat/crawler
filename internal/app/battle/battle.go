@@ -537,7 +537,11 @@ func advanceSkippedTurn(g *core.GameState, actor core.ActorRef) bool {
 	// this skipped turn must not credit the next actor with a kill it never made.
 	g.Battle.PhysDamageThisTurn = 0
 	g.Battle.EnemyKillsThisTurn = 0
-	if checkEnemyWipeout(g) || checkPartyWipeout(g) {
+	// Party wipe FIRST (matches finishActorTurn/Update): if a skipped turn downs the
+	// last member AND a DoT/Meteor kills the last enemy in the same tick, it's a loss,
+	// never a zero-survivor victory — winBattle would set Phase=BattleWon and Update's
+	// party-wipe gate could no longer correct it.
+	if checkPartyWipeout(g) || checkEnemyWipeout(g) {
 		return true
 	}
 	// A DoT tick above can kill the targeted enemy; move the cursor off the corpse.
@@ -820,8 +824,11 @@ func tickFlashHold(g *core.GameState, dt float32, onResolve func()) bool {
 // returns 0 for Miss/Nice and a graded peak for Good/Great/Excellent; a crit/AoE
 // punch armed in onResolve STACKS on top of it via AddCombatShake.
 func fireImpact(g *core.GameState, onResolve func()) {
-	onResolve()
+	// Capture the grade BEFORE onResolve — every resolve path calls ClearTiming(),
+	// which zeroes Timing.Quality to Miss, so reading it after would always give a
+	// zero-peak (no-op) shake and the graded Good/Great/Excellent shake would never fire.
 	basePeak, baseDur := core.CombatShakeFor(g.Battle.Timing.Quality)
+	onResolve()
 	core.AddCombatShake(&g.Battle, basePeak, baseDur)
 }
 

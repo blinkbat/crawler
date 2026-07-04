@@ -684,3 +684,7 @@ doors:
 door_1 cave door_1 18 26 south building
 crystals:
 34 23
+triggers:
+{"id":"trig_1","kind":"enterTile","dialog":"","once":true,"foeKind":0}
+locations:
+{"id":"location_1","name":"`","x":34,"z":25,"w":3,"h":3,"level":10}

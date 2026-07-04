@@ -261,7 +261,7 @@ func SnappedSpawnPositions(a *AreaDefinition) []SpawnSnap {
 			out = append(out, SpawnSnap{Reason: SpawnSnapEmptyMembers})
 			continue
 		}
-		x, z := nearestOpenTile(a, spawn.TileX, spawn.TileZ, occupied)
+		x, z := nearestOpenTile(a, spawn.TileX, spawn.TileZ, spawn.Level, occupied)
 		if x < 0 {
 			out = append(out, SpawnSnap{Reason: SpawnSnapNoOpenTile})
 			continue
@@ -272,15 +272,35 @@ func SnappedSpawnPositions(a *AreaDefinition) []SpawnSnap {
 	return out
 }
 
-func nearestOpenTile(a *AreaDefinition, wantX, wantZ int, occupied map[[2]int]bool) (int, int) {
-	if a.FloorAt(wantX, wantZ) && !occupied[[2]int{wantX, wantZ}] {
+// spawnTileOpen reports whether a pack authored at `level` can occupy tile
+// (x,z). Level-aware on a voxel map (a deck spawn is fine above a blocking
+// ground prop, matching the runtime CanEnterTileAtLevel/PropBlocksStanding
+// path), flat 2D FloorAt on a heightfield — mirroring the crystal-validation
+// split in AreaFromMapFile. Snapping to the flat FloorAt would false-block a
+// deck spawn because the projected Props grid reads the whole column as solid.
+func (a *AreaDefinition) spawnTileOpen(x, z, level int) bool {
+	if !a.IsVoxel() {
+		return a.FloorAt(x, z)
+	}
+	L := a.resolveEntityLevel(x, z, level)
+	if !a.Standable(x, L, z) {
+		return false
+	}
+	if floor, ok := a.layerByteAt(a.Floor, x, z); ok && IsBlockingFloor(floor) {
+		return false
+	}
+	return !a.PropBlocksStanding(x, L, z)
+}
+
+func nearestOpenTile(a *AreaDefinition, wantX, wantZ, level int, occupied map[[2]int]bool) (int, int) {
+	if a.spawnTileOpen(wantX, wantZ, level) && !occupied[[2]int{wantX, wantZ}] {
 		return wantX, wantZ
 	}
 	bestX, bestZ := -1, -1
 	bestDist := math.MaxInt
 	for z := 0; z < a.Height; z++ {
 		for x := 0; x < a.Width; x++ {
-			if !a.FloorAt(x, z) || occupied[[2]int{x, z}] {
+			if !a.spawnTileOpen(x, z, level) || occupied[[2]int{x, z}] {
 				continue
 			}
 			dist := ManhattanDistance(x, z, wantX, wantZ)
@@ -568,12 +588,28 @@ func (a *AreaDefinition) StandGroundY(x, z int) float32 {
 	return a.StandGroundYAt(x, a.ElevationLevelAt(x, z), z)
 }
 
+// rampLevel returns the LOW (ground) standing level of the ramp at column (x,z).
+// A ramp is a 2D floor property, so the slope rule applies only at this level —
+// a bridge deck stacked ABOVE a ramp tile is flat, not sloped. Heightfield: the
+// stored elevation (ramps store their low level). Voxel: the lowest standable
+// surface, else the column top for a wholly-void column.
+func (a *AreaDefinition) rampLevel(x, z int) int {
+	if len(a.Solids) == 0 {
+		return a.ElevationLevelAt(x, z)
+	}
+	if lo := a.LowestStandableLevel(x, z); lo >= 0 {
+		return lo
+	}
+	return a.ElevationLevelAt(x, z)
+}
+
 // StandGroundYAt is StandGroundY for an EXPLICIT standing level, so a unit on a
 // bridge deck and one on the ground beneath it sit at their own heights. A ramp
-// still reads +0.5 level. StandGroundY is the level==column-top special case.
+// reads +0.5 level ONLY at its ground level; a deck above it is flat. StandGroundY
+// is the level==column-top special case.
 func (a *AreaDefinition) StandGroundYAt(x, level, z int) float32 {
 	y := ElevationWorldY(level)
-	if _, ok := a.RampAt(x, z); ok {
+	if _, ok := a.RampAt(x, z); ok && level == a.rampLevel(x, z) {
 		y += 0.5 * LevelStep
 	}
 	return y

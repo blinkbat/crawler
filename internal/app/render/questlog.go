@@ -85,6 +85,10 @@ type bestiaryRowKey struct {
 // bestiaryRowCache memoizes a row's strings per (kind, kills, scanned, known) so the per-row Sprintfs don't run every frame.
 var bestiaryRowCache = map[bestiaryRowKey]bestiaryRowText{}
 
+// bestiaryRowCacheCap bounds bestiaryRowCache — its key includes the climbing kills
+// count, so it would grow one dead entry per past count without a cap.
+const bestiaryRowCacheCap = 256
+
 // drawBestiaryRowDetail paints HP (hpCol) then each muted seg preceded by a drawn diamond pip (font-independent, unlike "•").
 func drawBestiaryRowDetail(font rl.Font, t bestiaryRowText, x, y float32, hpCol rl.Color) {
 	drawTextWithShadow(font, t.hp, x, y, FontSmall, hpCol)
@@ -119,6 +123,12 @@ func bestiaryRowStrings(kind core.EnemyKind, maxHP, kills int, scanned, known bo
 	} else {
 		t.hp = "HP ???"
 		t.segs = []string{fmt.Sprintf("defeated %d / %d to identify", kills, core.BestiaryIDKills)}
+	}
+	// Bound it: the key includes the monotonically climbing kills count, so a row's
+	// entry churns as the player farms — clear wholesale past the cap (few visible rows
+	// re-populate in one frame) rather than accrete a dead entry per past kill count.
+	if len(bestiaryRowCache) >= bestiaryRowCacheCap {
+		bestiaryRowCache = make(map[bestiaryRowKey]bestiaryRowText, 32)
 	}
 	bestiaryRowCache[k] = t
 	return t

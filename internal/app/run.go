@@ -235,6 +235,10 @@ func applyAreaTransition(g *core.GameState) error {
 		// Seat the standing level on the exit tile so a door onto a voxel map
 		// lands on the ground, not level 0 (no-op on a heightfield).
 		g.Player.Level = g.Area.GroundSpawnLevel(x, z)
+		// Reveal fog at the arrival tile — the player teleported here, so the
+		// step-land reveal (movement.go) won't fire until the first step; without this
+		// they stand in unrevealed fog. Mirrors the save-load reposition (save.go).
+		core.RevealRadius(g, x, z, core.SightRadius)
 		// Re-seed region presence at the door exit (NewGameState seeded the area's
 		// start tile, not where this portal landed) so a door INTO a region fires its
 		// enter trigger only on the next crossing, not on arrival.
@@ -264,6 +268,10 @@ func applyAreaTransition(g *core.GameState) error {
 	next.Player = core.NewPlayer(x, z, dest.Facing)
 	next.Player.Level = next.Area.GroundSpawnLevel(x, z)
 	*g = next
+	// Reveal fog at the arrival tile — NewGameState revealed the map's authored START
+	// tile, not this door exit, so without this the party lands in fog until its first
+	// step. Mirrors the save-load reposition (save.go).
+	core.RevealRadius(g, x, z, core.SightRadius)
 	// Re-seed at the door exit (NewGameState seeded next's start tile).
 	core.SeedLocationPresence(g)
 	// Drop lingering particles — VFX from a fight ending just before the door
