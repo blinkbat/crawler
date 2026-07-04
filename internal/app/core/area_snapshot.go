@@ -30,7 +30,7 @@ func (a *AreaDefinition) layerBlank(lp *[]string) byte {
 // Path is ignored: saving under a new file name must not mark data dirty.
 func AreaContentEqual(a, b AreaDefinition) bool {
 	if a.Name != b.Name || a.Width != b.Width || a.Height != b.Height ||
-		a.Materials != b.Materials ||
+		a.Materials != b.Materials || a.WeatherMode != b.WeatherMode ||
 		a.StartTileX != b.StartTileX || a.StartTileZ != b.StartTileZ ||
 		a.StartFacing != b.StartFacing ||
 		a.CrystalsAuthored != b.CrystalsAuthored ||
@@ -56,9 +56,10 @@ func AreaContentEqual(a, b AreaDefinition) bool {
 	if !solidsEqual(a, b) {
 		return false
 	}
-	// PropLevels/DecorLevels compared explicitly (absent == all-auto).
+	// PropLevels/DecorLevels/PropYaw compared explicitly (absent == all-auto).
 	if !optionalLayerEqual(a.PropLevels, b.PropLevels, a.Width, a.Height, PropLevelAuto) ||
-		!optionalLayerEqual(a.DecorLevels, b.DecorLevels, a.Width, a.Height, PropLevelAuto) {
+		!optionalLayerEqual(a.DecorLevels, b.DecorLevels, a.Width, a.Height, PropLevelAuto) ||
+		!optionalLayerEqual(a.PropYaw, b.PropYaw, a.Width, a.Height, PropYawAuto) {
 		return false
 	}
 	// PropStack/DecorStack (per-floor scatter) compared with absent==derived, so a
@@ -211,6 +212,9 @@ func CloneArea(a AreaDefinition) AreaDefinition {
 	}
 	if len(a.DecorLevels) > 0 {
 		out.DecorLevels = cloneRows(a.DecorLevels)
+	}
+	if len(a.PropYaw) > 0 {
+		out.PropYaw = cloneRows(a.PropYaw)
 	}
 	// Per-floor scatter stacks: nil-safe deep copy (nil for a legacy area).
 	out.PropStack = CloneSolids(a.PropStack)

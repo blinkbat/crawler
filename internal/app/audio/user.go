@@ -48,7 +48,7 @@ func NearestNoteIndex(hz float64) int { return wavsynth.NearestNoteIndex(hz) }
 // SoundCanonicalName returns the assignments-file key for a cue (e.g.
 // SoundInputHit → "input_hit"); out-of-range returns "".
 func SoundCanonicalName(s Sound) string {
-	if s < 0 || s >= soundCount {
+	if !s.valid() {
 		return ""
 	}
 	return soundCues[s].Canonical
@@ -83,7 +83,7 @@ func AssignUserSound(cue Sound, userName string) (failed []string, err error) {
 // cue slug in failed if its explicit assignment couldn't load. Nil when the
 // device isn't ready or cue is out of range.
 func reloadOneCue(cue Sound) (failed []string) {
-	if !ready || cue < 0 || cue >= soundCount {
+	if !ready || !cue.valid() {
 		return nil
 	}
 	assigns := userconfig.LoadAssignments()

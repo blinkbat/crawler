@@ -61,6 +61,10 @@ type MapFile struct {
 	Name      string
 	Materials string
 	Quiet     string
+	// Weather is the optional per-area ambient-weather override: "" / "auto" (roof-
+	// gated default), "clear" (never rains), "rain" (always storming). Absent on
+	// pre-weather maps → auto; written only when non-auto so old maps stay byte-stable.
+	Weather string
 	Width     int
 	Height    int
 	StartX    int
@@ -87,6 +91,9 @@ type MapFile struct {
 	PropLevels []string
 	// DecorLevels is the decor analogue of PropLevels.
 	DecorLevels []string
+	// PropYaw is the optional per-tile prop-facing grid: '.' = auto (procedural yaw),
+	// else a step digit. Written only when a prop carries an authored facing.
+	PropYaw []string
 	// PropStack / DecorStack are the optional per-FLOOR scatter stacks (the cube
 	// analogue of Solids for placed content): Stack[level] is a Height×Width grid
 	// of prop/decor chars, planes lowest-first. Written ONLY when a column carries
@@ -423,6 +430,7 @@ const (
 	slotFaces
 	slotPropStack
 	slotDecorStack
+	slotPropYaw
 )
 
 // Section header names — on-disk labels (header line is name+colon); sectionFor
@@ -448,6 +456,7 @@ const (
 	SectionFaces         = "faces"
 	SectionPropStack     = "propstack"
 	SectionDecorStack    = "decorstack"
+	SectionPropYaw       = "prop_yaw"
 )
 
 // Header-line keys — the preamble's "key: value" lines. parseHeaderLine reads,
@@ -456,6 +465,7 @@ const (
 	headerName      = "name"
 	headerMaterials = "materials"
 	headerQuiet     = "quiet"
+	headerWeather   = "weather"
 	headerSize      = "size"
 	headerStart     = "start"
 )
@@ -498,6 +508,9 @@ var layerSections = []layerSection{
 	// nil field + bespoke code like solids:; excluded from GridLayerCount.
 	{SectionPropStack, slotPropStack, nil},
 	{SectionDecorStack, slotDecorStack, nil},
+	// prop_yaw: OPTIONAL single grid of per-tile prop facings; nil field + bespoke
+	// encode keeps it off byte-stable maps (like prop_levels:).
+	{SectionPropYaw, slotPropYaw, nil},
 }
 
 // GridLayerCount is the number of grid layers (layerSections rows with a field
@@ -779,6 +792,14 @@ func Parse(r io.Reader) (MapFile, error) {
 			continue
 		}
 
+		if state == slotPropYaw {
+			// Single Height-row grid of per-tile prop facings ('.' = auto, else a step digit).
+			if err := appendGridRow(&mf.PropYaw, raw, mf.Height, lineNo, "prop_yaw: "); err != nil {
+				return mf, err
+			}
+			continue
+		}
+
 		if state == slotFaces {
 			// One overridden tile per line: "x z NESW" ('.' = use base skin). A
 			// malformed line is a loud error, not a silent drop.
@@ -923,6 +944,8 @@ func parseHeaderLine(mf *MapFile, line string, lineNo int) error {
 		mf.Materials = val
 	case headerQuiet:
 		mf.Quiet = val
+	case headerWeather:
+		mf.Weather = val
 	case headerSize:
 		w, h, err := parseSize(val)
 		if err != nil {
@@ -957,6 +980,29 @@ func (mf *MapFile) validateOptionalGrid(name string, rows []string) error {
 		for c := 0; c < len(row); c++ {
 			if b := row[c]; b != '.' && !isLevelChar(b) {
 				return fmt.Errorf("%s row %d col %d has bad level char %q (expected '.', %s)", name, i, c, string(row[c]), levelCharRangeHint())
+			}
+		}
+	}
+	return nil
+}
+
+// validatePropYawGrid dimension-checks the optional prop-facing grid and rejects
+// stray chars. Its alphabet differs from the level grids: '.' auto plus the
+// base-36-ish step digits '0'..'9' and lowercase 'a'..'z' that core.PropYawStepChar
+// emits (steps 10..11 → 'a'/'b'). Uppercase 'A'..'K' are LEVEL chars, not facings,
+// so this must not reuse validateOptionalGrid's isLevelChar check — doing so
+// rejected any prop authored to a 300°/330° facing.
+func (mf *MapFile) validatePropYawGrid(rows []string) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	if err := mf.validateGridDims(SectionPropYaw, rows); err != nil {
+		return err
+	}
+	for i, row := range rows {
+		for c := 0; c < len(row); c++ {
+			if b := row[c]; b != '.' && !(b >= '0' && b <= '9') && !(b >= 'a' && b <= 'z') {
+				return fmt.Errorf("%s row %d col %d has bad facing char %q (expected '.', '0'..'9', or 'a'..'z')", SectionPropYaw, i, c, string(row[c]))
 			}
 		}
 	}
@@ -1105,6 +1151,9 @@ func (mf *MapFile) validate() error {
 	}
 	// prop_levels / decor_levels: optional per-tile level grids; dimension-check only.
 	if err := mf.validateOptionalGrid(SectionPropLevels, mf.PropLevels); err != nil {
+		return err
+	}
+	if err := mf.validatePropYawGrid(mf.PropYaw); err != nil {
 		return err
 	}
 	if err := mf.validateOptionalGrid(SectionDecorLevels, mf.DecorLevels); err != nil {
@@ -1599,6 +1648,10 @@ func (mf MapFile) Encode(w io.Writer) error {
 	fmt.Fprintf(bw, headerName+": %s\n", strings.TrimSpace(mf.Name))
 	fmt.Fprintf(bw, headerMaterials+": %s\n", strings.TrimSpace(mf.Materials))
 	fmt.Fprintf(bw, headerQuiet+": %s\n", strings.TrimSpace(mf.Quiet))
+	// Weather is optional: written only when non-auto so pre-weather maps stay byte-stable.
+	if wthr := strings.TrimSpace(mf.Weather); wthr != "" {
+		fmt.Fprintf(bw, headerWeather+": %s\n", wthr)
+	}
 	fmt.Fprintf(bw, headerSize+": %dx%d\n", mf.Width, mf.Height)
 	fmt.Fprintf(bw, headerStart+": %d %d %s\n", mf.StartX, mf.StartZ, mf.StartFace)
 	ceiling := OptionalLayerOrBlank(mf.Ceiling, mf.Width, mf.Height, CeilingOpenChar)
@@ -1620,6 +1673,7 @@ func (mf MapFile) Encode(w io.Writer) error {
 	// prop_levels / decor_levels: appended only when some entity sits above its
 	// auto surface (handled in writeVerbatimSection).
 	writeVerbatimSection(bw, SectionPropLevels, mf.PropLevels)
+	writeVerbatimSection(bw, SectionPropYaw, mf.PropYaw)
 	writeVerbatimSection(bw, SectionDecorLevels, mf.DecorLevels)
 	// faces: one line per overridden tile; omitted when none (byte-identical).
 	if len(mf.Faces) > 0 {

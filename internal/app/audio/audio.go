@@ -142,9 +142,13 @@ func init() {
 	}
 }
 
+// valid reports whether s indexes a real cue slot — the shared bounds guard for
+// every Sound accessor (bank plays, name lookups, per-cue reloads).
+func (s Sound) valid() bool { return s >= 0 && s < soundCount }
+
 // SoundName returns the display label; out-of-range falls back to "Unknown".
 func SoundName(s Sound) string {
-	if s < 0 || s >= soundCount {
+	if !s.valid() {
 		return "Unknown"
 	}
 	return soundCues[s].Display
@@ -230,6 +234,11 @@ func unloadBank() {
 // "did it load" convention every load/play/unload path guards on.
 func soundLoaded(s rl.Sound) bool { return s.Stream.Buffer != nil }
 
+// musicLoaded is the rl.Music twin of soundLoaded: the "did the stream decode"
+// buffer-nil check the music load/fade paths guard on, kept beside its sibling
+// so the convention lives in one spot per type.
+func musicLoaded(m rl.Music) bool { return m.Stream.Buffer != nil }
+
 // unloadSounds releases every non-zero rl.Sound in the slice, zeroing each slot
 // in place so the buffer pointers can't be read again.
 func unloadSounds(slots []rl.Sound) {
@@ -264,7 +273,7 @@ func resolveAssignedFile(assigns map[string]string, canonical string) (name stri
 
 // Play fires the named sound; no-op if not ready or out of range (fire-and-forget).
 func Play(id Sound) {
-	if !ready || id < 0 || id >= soundCount {
+	if !ready || !id.valid() {
 		return
 	}
 	rl.PlaySound(bank[id])

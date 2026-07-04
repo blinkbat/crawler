@@ -146,6 +146,12 @@ func updateHotkeys(s *State) {
 		copySelection(s)
 	case ctrl && rl.IsKeyPressed(rl.KeyV):
 		pasteSelection(s, s.hoverX, s.hoverZ)
+	case ctrl && rl.IsKeyPressed(rl.KeyX):
+		cutSelection(s)
+	case ctrl && rl.IsKeyPressed(rl.KeyA):
+		selectWholeMap(s)
+	case ctrl && rl.IsKeyPressed(rl.KeyD):
+		duplicateSelection(s)
 	case rl.IsKeyPressed(rl.KeyEscape) && s.selActive:
 		s.selActive = false
 		s.cancelHandled = true
@@ -220,15 +226,45 @@ func updateHotkeys(s *State) {
 		resetView(s)
 	}
 
-	// R cycles start facing, gated to the player-start brush. Route through
-	// setStartFacing so it banks undo (+bumps contentEpoch) like the context menu.
-	if !ctrl && rl.IsKeyPressed(rl.KeyR) && s.layer == LayerEntities && s.activeBrush().Entity == entityPlayerStart {
-		setStartFacing(s, core.NormalizeFacing(s.area.StartFacing+1))
+	// +/- zoom the active view (keyboard/trackpad twin of the wheel); Ctrl+0 fits
+	// the whole map to the canvas. '=' shares the '+' key on most layouts.
+	if !ctrl && !alt {
+		if rl.IsKeyPressed(rl.KeyEqual) || rl.IsKeyPressed(rl.KeyKpAdd) {
+			keyboardZoom(s, +1)
+		}
+		if rl.IsKeyPressed(rl.KeyMinus) || rl.IsKeyPressed(rl.KeyKpSubtract) {
+			keyboardZoom(s, -1)
+		}
+	}
+	if ctrl && (rl.IsKeyPressed(rl.KeyZero) || rl.IsKeyPressed(rl.KeyKp0)) {
+		zoomToFit(s)
+	}
+
+	// R rotates. On the Props layer it cycles the hovered prop's facing (or the pending
+	// brush facing); on Entities with the player-start brush it cycles the start facing.
+	// setStartFacing banks undo (+bumps contentEpoch) like the context menu.
+	if !ctrl && !alt && rl.IsKeyPressed(rl.KeyR) {
+		switch {
+		case s.layer == LayerProps:
+			rotatePropFacing(s)
+		case s.layer == LayerEntities && s.activeBrush().Entity == entityPlayerStart:
+			setStartFacing(s, core.NormalizeFacing(s.area.StartFacing+1))
+		}
 	}
 
 	// T cycles the day/night preview phase (seeds StepCount on F5).
 	if !ctrl && rl.IsKeyPressed(rl.KeyT) {
 		cyclePreviewPhase(s)
+	}
+
+	// L toggles the recent-messages recall panel (so an expired toast can be re-read).
+	if !ctrl && !alt && rl.IsKeyPressed(rl.KeyL) {
+		s.showStatusLog = !s.showStatusLog
+	}
+
+	// ? (Shift+/) opens the full keyboard-shortcut reference.
+	if rl.IsKeyPressed(rl.KeySlash) && shift {
+		openHelpModal(s)
 	}
 
 	updateArrowPan(s)
@@ -611,14 +647,24 @@ func handleChromeInput(s *State, mp rl.Vector2) bool {
 		}
 	}
 
-	// Minimap click-to-jump recenters the view. Checked before grid-paint since
-	// the minimap overlaps the grid pane.
-	if mr, ok := minimapRect(s); ok && rl.IsMouseButtonPressed(rl.MouseLeftButton) && pointIn(mp, mr) {
-		scale := mr.Width / float32(s.area.Width)
-		tx := core.Clamp(int((mp.X-mr.X)/scale), 0, s.area.Width-1)
-		tz := core.Clamp(int((mp.Y-mr.Y)/scale), 0, s.area.Height-1)
-		centerViewOnTile(s, tx, tz)
-		return true
+	// Minimap click-and-drag recenters the view. A press that starts on the minimap
+	// begins a drag that keeps recentering while held (even off the minimap rect), so
+	// the viewport frame can be dragged around. Checked before grid-paint since the
+	// minimap overlaps the grid pane.
+	if rl.IsMouseButtonReleased(rl.MouseLeftButton) {
+		s.minimapDragging = false
+	}
+	if mr, ok := minimapRect(s); ok {
+		if rl.IsMouseButtonPressed(rl.MouseLeftButton) && pointIn(mp, mr) {
+			s.minimapDragging = true
+		}
+		if s.minimapDragging && rl.IsMouseButtonDown(rl.MouseLeftButton) {
+			scale := mr.Width / float32(s.area.Width)
+			tx := core.Clamp(int((mp.X-mr.X)/scale), 0, s.area.Width-1)
+			tz := core.Clamp(int((mp.Y-mr.Y)/scale), 0, s.area.Height-1)
+			centerViewOnTile(s, tx, tz)
+			return true
+		}
 	}
 
 	// Recent-brush quick-pick: a swatch click jumps to that layer + brush.
@@ -723,7 +769,13 @@ func startDrag(s *State, x, z int, ctrl, shift bool) {
 		s.drag = dragLine
 		s.rectAnchorX, s.rectAnchorZ = x, z
 	case toolSelect:
-		s.drag = dragSelect
+		// Press inside a committed marquee grabs it to MOVE its contents; elsewhere
+		// starts a fresh marquee.
+		if s.selActive && inRect(x, z, s.selX0, s.selZ0, s.selX1, s.selZ1) {
+			s.drag = dragSelectMove
+		} else {
+			s.drag = dragSelect
+		}
 		s.rectAnchorX, s.rectAnchorZ = x, z
 	default: // toolBrush
 		beginPaintStroke(s)
@@ -918,6 +970,11 @@ func finishDrag(s *State) {
 			s.selZ0, s.selZ1 = min(s.rectAnchorZ, s.hoverZ), max(s.rectAnchorZ, s.hoverZ)
 			s.selActive = true
 		}
+	case dragSelectMove:
+		// Shift the selection's contents by the drag delta (grid + entities, one undo).
+		if s.hoverX >= 0 {
+			moveSelectionBy(s, s.hoverX-s.rectAnchorX, s.hoverZ-s.rectAnchorZ)
+		}
 	}
 	s.drag = dragNone
 	s.rectHollow = false
@@ -1063,6 +1120,44 @@ func zoomBy(s *State, anchor rl.Vector2, factor float32) {
 		s.panY += dy * (1 - next/prev)
 	}
 	s.zoom = next
+}
+
+// keyboardZoomStep is the per-keypress zoom notch for the +/- keys — a touch
+// coarser than a wheel notch (canvasZoomWheelRate) so a keyboard zoom moves faster.
+const keyboardZoomStep = float32(3)
+
+// keyboardZoom zooms the active view one step (dir +1 in / -1 out), anchored at the
+// canvas center in top-down and via isoZoom in 3D, so +/- read like the wheel in
+// whichever view is active.
+func keyboardZoom(s *State, dir float32) {
+	if s.isoView {
+		s.isoZoom = wheelZoom(s.isoZoom, dir*keyboardZoomStep, canvasZoomWheelRate, isoMinZoom, isoMaxZoom)
+		return
+	}
+	center := rl.NewVector2(s.rect.gridX+s.rect.gridW/2, s.rect.gridY+s.rect.gridH/2)
+	zoomBy(s, center, 1+canvasZoomWheelRate*dir*keyboardZoomStep)
+}
+
+// zoomToFit sizes the top-down canvas so the whole map fits, re-centered. In 3D it
+// re-homes the orbit (fit has no single meaning there) via resetView.
+func zoomToFit(s *State) {
+	if s.isoView {
+		resetView(s)
+		return
+	}
+	base := float32(0)
+	if s.zoom > 0 {
+		base = s.rect.cellPx / s.zoom // px-per-cell at 1× zoom
+	}
+	if base <= 0 || s.area.Width <= 0 || s.area.Height <= 0 {
+		return
+	}
+	fitCell := s.rect.gridW / float32(s.area.Width)
+	if h := s.rect.gridH / float32(s.area.Height); h < fitCell {
+		fitCell = h
+	}
+	s.zoom = core.Clamp(fitCell/base, minZoom, maxZoom)
+	s.panX, s.panY = 0, 0
 }
 
 // openSaveAsModal pops the Save As dialog. Single seam for every Save As entry point.
@@ -2081,18 +2176,24 @@ func openModalActionCmds(s *State) []modalCmd {
 
 // openSelectedMap loads the cursored map. Shared by the Open button and Enter.
 func openSelectedMap(s *State) Action {
-	path := s.modalPaths[s.modalCursor]
+	loadAreaFromPath(s, s.modalPaths[s.modalCursor])
+	closeModal(s)
+	return ActionNone
+}
+
+// loadAreaFromPath loads path into the editor, replacing the current area (undo/
+// redo/dirty reset, caches invalidated, recent-list updated). Flashes on failure
+// and leaves the current area intact. Shared by the Open modal + recent-file menu.
+func loadAreaFromPath(s *State, path string) {
 	mf, err := mapfile.Load(path)
 	if err != nil {
 		s.flash("Open failed: " + err.Error())
-		closeModal(s)
-		return ActionNone
+		return
 	}
 	area, err := core.AreaFromMapFile(mf, path)
 	if err != nil {
 		s.flash("Open failed: " + err.Error())
-		closeModal(s)
-		return ActionNone
+		return
 	}
 	area = materializeEntranceCrystal(area)
 	s.area = area
@@ -2105,10 +2206,18 @@ func openSelectedMap(s *State) Action {
 	// Area replaced wholesale — invalidate content-derived caches (like
 	// performNewMap / undo / redo) or stale reachability/tooltip data lingers.
 	invalidateContentCaches(s)
-	rememberLastMap(path) // reopen here next session (NewDefault)
-	closeModal(s)
+	rememberLastMap(path) // reopen here next session (NewDefault) + File ▸ recent
 	s.flash("Opened " + core.MapIDFromPath(path))
-	return ActionNone
+}
+
+// openRecentPath opens a File-menu recent entry. Non-destructive: refuses while the
+// current map has unsaved changes (save/discard first) so a stray click can't lose work.
+func openRecentPath(s *State, path string) {
+	if s.dirty {
+		s.flash("Unsaved changes — save or discard before opening a recent map")
+		return
+	}
+	loadAreaFromPath(s, path)
 }
 
 // openDuplicateSelected copies the cursored map on disk and selects the copy.

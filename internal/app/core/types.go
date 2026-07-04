@@ -298,6 +298,9 @@ type AreaDefinition struct {
 	// PropLevelAuto='.' = lowest standable surface), so a prop on a deck renders +
 	// blocks at the deck. nil = all auto (pre-voxel). See PropLevelAt.
 	PropLevels []string
+	// PropYaw is the optional per-tile prop-FACING override ('.' = procedural yaw,
+	// else a step digit; see propyaw.go). nil = all auto. Per-(x,z), not per-floor.
+	PropYaw []string
 	// DecorLevels: decor analogue of PropLevels, '.' = auto. nil = all auto. See
 	// DecorLevelAt.
 	DecorLevels []string
@@ -321,7 +324,10 @@ type AreaDefinition struct {
 	// from encoding + equality — only FaceOverrides is authoritative.
 	faceOverrideIdx map[[2]int]int
 	Materials       MaterialSet
-	StartTileX      int
+	// WeatherMode is the authored ambient-weather override (Auto/Clear/Rain);
+	// zero value Auto = the roof-gated default. Serialized as the map `weather:` key.
+	WeatherMode WeatherMode
+	StartTileX  int
 	StartTileZ      int
 	StartFacing     int
 	PackSpawns      []PackSpawn

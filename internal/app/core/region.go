@@ -22,7 +22,10 @@ type TileRegion struct {
 	DecorStack  [][]string
 	PropLevels  []string
 	DecorLevels []string
-	Faces       []FaceOverride
+	// PropYaw: per-tile prop-facing overrides in the rectangle ('.' = auto), captured
+	// like the level grids so a copied prop keeps its authored orientation.
+	PropYaw []string
+	Faces   []FaceOverride
 }
 
 // Empty reports whether the region has nothing to paste.
@@ -80,6 +83,7 @@ func CopyRegion(a *AreaDefinition, x0, z0, x1, z1 int) TileRegion {
 	out.DecorStack = copyStackRect(a.DecorStack, x0, z0, x1, z1)
 	out.PropLevels = copyLevelRect(a.PropLevels, x0, z0, x1, z1)
 	out.DecorLevels = copyLevelRect(a.DecorLevels, x0, z0, x1, z1)
+	out.PropYaw = copyLevelRect(a.PropYaw, x0, z0, x1, z1)
 	out.Faces = copyFaceRect(a.FaceOverrides, x0, z0, x1, z1)
 	return out
 }
@@ -212,6 +216,7 @@ func (a *AreaDefinition) pasteRegionScatter(r TileRegion, atX, atZ int) {
 	}
 	a.pasteLevelGrid(&a.PropLevels, r.PropLevels, atX, atZ)
 	a.pasteLevelGrid(&a.DecorLevels, r.DecorLevels, atX, atZ)
+	a.pasteLevelGrid(&a.PropYaw, r.PropYaw, atX, atZ)
 }
 
 // pasteScatterStack writes a scatter region across levels 0..max(dest,region)-1 so
@@ -265,6 +270,96 @@ func (a *AreaDefinition) pasteLevelGrid(dest *[]string, src []string, atX, atZ i
 			buf[x] = row[j]
 		}
 		(*dest)[z] = string(buf)
+	}
+}
+
+// ClearRegion resets the inclusive rectangle (any corner order) to blank across
+// every grid layer, clears voxel cubes / per-floor scatter / legacy level tags /
+// face overrides inside it, and leaves spawns to the caller. Inverse of PasteRegion;
+// the editor's Cut / region-move snapshot first, then call this on the old bounds.
+func (a *AreaDefinition) ClearRegion(x0, z0, x1, z1 int) {
+	if a == nil || a.Width <= 0 || a.Height <= 0 {
+		return
+	}
+	if x0 > x1 {
+		x0, x1 = x1, x0
+	}
+	if z0 > z1 {
+		z0, z1 = z1, z0
+	}
+	x0, x1 = Clamp(x0, 0, a.Width-1), Clamp(x1, 0, a.Width-1)
+	z0, z1 = Clamp(z0, 0, a.Height-1), Clamp(z1, 0, a.Height-1)
+	if x1 < x0 || z1 < z0 {
+		return
+	}
+	for _, lp := range a.gridLayers() {
+		blank := a.layerBlank(lp)
+		for z := z0; z <= z1; z++ {
+			if z >= len(*lp) {
+				continue
+			}
+			dest := []byte((*lp)[z])
+			for len(dest) < a.Width {
+				dest = append(dest, blank)
+			}
+			for x := x0; x <= x1 && x < len(dest); x++ {
+				dest[x] = blank
+			}
+			(*lp)[z] = string(dest)
+		}
+	}
+	if len(a.Solids) > 0 {
+		for L := range a.Solids {
+			for z := z0; z <= z1; z++ {
+				for x := x0; x <= x1; x++ {
+					a.setSolidCell(x, L, z, SolidAir)
+				}
+			}
+		}
+		a.trimTopAir()
+	}
+	a.clearScatterStackRect(a.PropStack, TilePropEmpty, x0, z0, x1, z1, a.SetProp)
+	a.clearScatterStackRect(a.DecorStack, DecorEmpty, x0, z0, x1, z1, a.SetDecor)
+	a.clearLevelGridRect(a.PropLevels, x0, z0, x1, z1)
+	a.clearLevelGridRect(a.DecorLevels, x0, z0, x1, z1)
+	a.clearLevelGridRect(a.PropYaw, x0, z0, x1, z1)
+	if len(a.FaceOverrides) > 0 {
+		kept := a.FaceOverrides[:0:0]
+		for _, o := range a.FaceOverrides {
+			if o.X >= x0 && o.X <= x1 && o.Z >= z0 && o.Z <= z1 {
+				continue
+			}
+			kept = append(kept, o)
+		}
+		a.FaceOverrides = kept
+		a.faceOverrideIdx = nil
+	}
+}
+
+// clearScatterStackRect blanks every level of a per-floor scatter stack inside the
+// rectangle (no-op for an absent stack); set (SetProp/SetDecor) materializes + trims.
+func (a *AreaDefinition) clearScatterStackRect(stack [][]string, blank byte, x0, z0, x1, z1 int, set func(x, level, z int, c byte)) {
+	if len(stack) == 0 {
+		return
+	}
+	for L := range stack {
+		for z := z0; z <= z1; z++ {
+			for x := x0; x <= x1; x++ {
+				set(x, L, z, blank)
+			}
+		}
+	}
+}
+
+// clearLevelGridRect resets a legacy per-tile level-tag grid's rectangle to auto
+// (no-op for an absent grid — an all-auto grid stays nil).
+func (a *AreaDefinition) clearLevelGridRect(grid []string, x0, z0, x1, z1 int) {
+	for z := z0; z <= z1 && z < len(grid); z++ {
+		buf := []byte(grid[z])
+		for x := x0; x <= x1 && x < len(buf); x++ {
+			buf[x] = PropLevelAuto
+		}
+		grid[z] = string(buf)
 	}
 }
 

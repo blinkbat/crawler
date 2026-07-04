@@ -194,6 +194,18 @@ func init() {
 	}
 }
 
+// layerDescriptions is the one-line caption the layer picker shows for each layer
+// (the "per-row description" the menus already carry). Indexed by Layer.
+var layerDescriptions = [layerCount]string{
+	LayerWalls:     "Cliff-face skin (set via right-click, not painted).",
+	LayerFloor:     "Walkable surface variant — grass, stone, water, ramps.",
+	LayerDecor:     "Cosmetic scatter that never blocks — plants, debris, rugs.",
+	LayerProps:     "Placed objects — trees, crates, pillars (most block).",
+	LayerCeiling:   "Overhead slab: solid roof vs open sky.",
+	LayerElevation: "Per-tile ground height — paint cubes to raise/lower terrain.",
+	LayerEntities:  "Player start, enemy packs, chests, doors, crystals.",
+}
+
 // paintContentCell stamps a cell via set (which reports whether a paint actually
 // landed) then, ONLY on success, lifts the tile to the active level (a no-op on
 // layers whose stampsLevel is false) and marks dirty — the shared tail every

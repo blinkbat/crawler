@@ -185,6 +185,7 @@ func Draw(s *State, assets render.Resources) {
 	drawGrid(s, font)
 	// Overview minimap: grid bottom-right, below scrollbars/status/modals.
 	drawMinimap(s)
+	drawMinimapLegend(s, font, theme)
 	// Recent-brush quick-pick row, bottom-left of the grid.
 	drawBrushRecents(s, font)
 	// Scrollbars: over panels + grid, below status toasts and modals.
@@ -192,8 +193,12 @@ func Draw(s *State, assets render.Resources) {
 	if len(s.statusLog) > 0 {
 		drawStatus(s, font, theme)
 	}
+	if s.showStatusLog {
+		drawStatusHistory(s, font, theme)
+	}
 	// Toolbar hover tooltip: late (over the canvas), not inside drawToolbar.
 	drawToolbarTooltip(s, font, theme)
+	drawPaletteTooltip(s, font, theme)
 	if h, ok := modalHandlers[s.modal]; ok && h.draw != nil {
 		h.draw(s, font, theme)
 	}
@@ -234,6 +239,7 @@ var modalHandlers = map[modalKind]modalHandler{
 	modalDialogTriggerList: {draw: drawDialogTriggerListModal, update: updateDialogTriggerListModal},
 	modalDialogTriggerEdit: {draw: drawDialogTriggerEditModal, update: updateDialogTriggerEditModal},
 	modalLocationEdit:      {draw: drawLocationEditModal, update: updateLocationEditModal},
+	modalHelp:              {draw: drawHelpModal, update: updateHelpModal},
 }
 
 // init asserts every dispatchable modalKind (excluding modalNone/modalCount) has
@@ -383,6 +389,11 @@ type topbarBtn struct {
 func onGridLayer(s *State) bool      { return s.layer != LayerEntities }
 func onElevationLayer(s *State) bool { return s.layer == LayerElevation }
 
+// canFillLayer gates the Edit ▸ Fill Layer command: a grid layer that isn't a
+// per-floor prop/decor stack (which floodFill/fillEntireLayer refuse — see
+// layerBlocksBulkFill). Keeps the menu row from showing enabled then no-op-flashing.
+func canFillLayer(s *State) bool { return onGridLayer(s) && !layerBlocksBulkFill(s) }
+
 // toolbarActionBtns are the constant-reach controls kept out of the menus:
 // undo/redo, brush-size steppers, and the elevation cluster. Undo/Redo gray out
 // on an empty stack; the rest gate on the active layer.
@@ -475,20 +486,26 @@ func drawToolbar(s *State, font rl.Font, theme render.Theme) {
 		rl.NewVector2(0, s.rect.toolbar.Y+toolbarH),
 		rl.NewVector2(s.rect.toolbar.Width, s.rect.toolbar.Y+toolbarH),
 		1, outlineHard)
-	drawButtonStrip(font, s, toolbarBtns, s.rect.toolbar.Y+6, toolbarH-12)
 	// Active-level readout (right-aligned): the floor paints build onto. [RAMP]
-	// flags ramp tool-mode (only meaningful on Elevation).
-	{
-		label := fmt.Sprintf("Active level: %d", s.editLevel)
-		if s.layer == LayerElevation && s.rampMode {
-			label += "  [RAMP]"
-		}
-		sz := editorFontLabel
-		m := render.MeasureRichText(font, label, sz, 1)
-		render.DrawRichText(font, label,
-			rl.NewVector2(s.rect.toolbar.Width-m.X-12, s.rect.toolbar.Y+(toolbarH-sz)/2),
-			sz, 1, editorActiveLevelText)
+	// flags ramp tool-mode (only meaningful on Elevation). Measured first so the
+	// button strip can be clipped to its left — never overpainting it on a narrow window.
+	label := fmt.Sprintf("Active level: %d", s.editLevel)
+	if s.layer == LayerElevation && s.rampMode {
+		label += "  [RAMP]"
 	}
+	sz := editorFontLabel
+	m := render.MeasureRichText(font, label, sz, 1)
+	readoutLeft := s.rect.toolbar.Width - m.X - 12
+	stripW := int32(readoutLeft - 6)
+	if stripW < 0 {
+		stripW = 0
+	}
+	rl.BeginScissorMode(0, int32(s.rect.toolbar.Y), stripW, int32(toolbarH))
+	drawButtonStrip(font, s, toolbarBtns, s.rect.toolbar.Y+6, toolbarH-12)
+	rl.EndScissorMode()
+	render.DrawRichText(font, label,
+		rl.NewVector2(readoutLeft, s.rect.toolbar.Y+(toolbarH-sz)/2),
+		sz, 1, editorActiveLevelText)
 	// NB: hover tooltip is drawn LATE (drawToolbarTooltip); here it'd be overdrawn by the canvas.
 }
 
@@ -539,6 +556,67 @@ func drawTooltipCard(font rl.Font, lines []string, fontSize, lineH float32, mp r
 		}
 		render.DrawRichText(font, l, rl.NewVector2(r.X+pad, r.Y+pad+float32(i)*lineH), fontSize, 1, col)
 	}
+}
+
+// drawPaletteTooltip paints a hover bubble for the palette brush under the cursor —
+// the per-brush parity with the toolbar's hover help. Derived facts only (blocking,
+// footprint, ramp), so it stays quiet on the plain floor/ceiling brushes.
+func drawPaletteTooltip(s *State, font rl.Font, theme render.Theme) {
+	if s.modal != modalNone || s.dropdownOpen() {
+		return
+	}
+	mp := frameMouse
+	if !pointIn(mp, s.rect.palette) {
+		return
+	}
+	palette := layerBrushes[s.layer]
+	visStart, visEnd := visiblePaletteRange(s, len(palette))
+	for i := visStart; i < visEnd; i++ {
+		if !pointIn(mp, paletteEntryRect(s, i)) {
+			continue
+		}
+		if lines := brushTooltipLines(s.layer, palette[i]); len(lines) > 0 {
+			sw, sh := render.ScreenSizeF()
+			drawTooltipCard(font, lines, editorFontHint, tooltipLineH, mp, rl.NewRectangle(0, 0, sw, sh))
+		}
+		return
+	}
+}
+
+// brushTooltipLines derives the palette hover help for a brush: blocking / footprint /
+// ramp notes pulled from core so they can't drift from the tile's real behavior. Empty
+// = no bubble (plain floors, ceiling).
+func brushTooltipLines(layer Layer, b Brush) []string {
+	if b.Erase {
+		return []string{"Erase — reset this cell to empty"}
+	}
+	switch layer {
+	case LayerElevation:
+		return []string{"Set Height", "Paints one cube at the active level (gaps make bridges)."}
+	case LayerProps:
+		note := "Walk-through"
+		if core.PropBlockHeight(b.Char) > 0 {
+			note = "Blocks movement"
+		}
+		if fp := core.PropFootprint(b.Char); len(fp) > 1 {
+			note += fmt.Sprintf(" · %d-tile footprint", len(fp))
+		}
+		return []string{b.Name, note}
+	case LayerDecor:
+		note := "Never blocks"
+		if fp := core.DecorFootprint(b.Char); len(fp) > 1 {
+			note += fmt.Sprintf(" · %d-tile", len(fp))
+		}
+		return []string{b.Name, note}
+	case LayerFloor:
+		switch {
+		case core.IsRampChar(b.Char):
+			return []string{b.Name, "Walkable slope — bridges up one level"}
+		case b.Char == core.FloorDeepWater:
+			return []string{b.Name, "Blocks movement (renders flat)"}
+		}
+	}
+	return nil
 }
 
 // drawButtonTooltip paints a one-line help bubble near the cursor for a toolbar button.
@@ -629,8 +707,13 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 	render.DrawTextWithShadow(font, topbarNameLabel,
 		labelX, (topbarH-topbarNameMeasure.Y)/2,
 		editorFontTopbar, theme.TextMuted)
+	// Info line sits left of the map name; skip it when it would collide with the
+	// menu-bar labels (narrow window) rather than overpainting them. The name always shows.
 	infoX := labelX - topbarInfoMeasure.X - 24
-	render.DrawTextWithShadow(font, topbarInfoLabel, infoX, (topbarH-topbarInfoMeasure.Y)/2, editorFontLabel, theme.TextHint)
+	menuEndX := stripButtonRect(menuBarBtns, len(menuBarBtns), menuBarBtnY, menuBarBtnH).X
+	if infoX >= menuEndX+12 {
+		render.DrawTextWithShadow(font, topbarInfoLabel, infoX, (topbarH-topbarInfoMeasure.Y)/2, editorFontLabel, theme.TextHint)
+	}
 }
 
 // layerMenuBtnRect is the active-layer dropdown button — the left column's top
@@ -1082,6 +1165,20 @@ const overlayMinGridDim = float32(260)
 // recent-brush swatch row), companion to overlayMinGridDim's width gate.
 const overlayMinGridHeight = float32(200)
 
+// overlayBackingInset expands a floating-overlay's content rect into its backing
+// card; shared so the minimap, its legend, and the brush-recents row can't drift.
+const overlayBackingInset = float32(4)
+
+// drawOverlayBacking paints the translucent card + dim border behind a floating
+// grid overlay (minimap / legend / brush-recents), wrapping the content rect by
+// overlayBackingInset so tone and inset stay identical across all three.
+func drawOverlayBacking(inner rl.Rectangle) {
+	r := rl.NewRectangle(inner.X-overlayBackingInset, inner.Y-overlayBackingInset,
+		inner.Width+2*overlayBackingInset, inner.Height+2*overlayBackingInset)
+	rl.DrawRectangleRec(r, withAlpha(panelBackingColor, 214))
+	rl.DrawRectangleLinesEx(r, 1, editorBorderDim)
+}
+
 // minimapRect computes the overview minimap's on-screen rect (bottom-right of
 // the grid) and whether it shows (hidden when no map / grid too small). Shared
 // by draw and click-to-jump.
@@ -1114,8 +1211,7 @@ func drawMinimap(s *State) {
 		return
 	}
 	scale := mr.Width / float32(s.area.Width)
-	rl.DrawRectangleRec(rl.NewRectangle(mr.X-4, mr.Y-4, mr.Width+8, mr.Height+8), withAlpha(panelBackingColor, 214))
-	rl.DrawRectangleLinesEx(rl.NewRectangle(mr.X-4, mr.Y-4, mr.Width+8, mr.Height+8), 1, editorBorderDim)
+	drawOverlayBacking(mr)
 	rl.DrawRectangleRec(mr, minimapFloorCol)
 
 	wallCol := minimapWallCol
@@ -1141,21 +1237,9 @@ func drawMinimap(s *State) {
 	dot := func(tx, tz int, col rl.Color) {
 		rl.DrawRectangle(int32(mr.X+float32(tx)*scale), int32(mr.Y+float32(tz)*scale), 2, 2, col)
 	}
-	for _, p := range s.area.PackSpawns {
-		if len(p.Members) > 0 {
-			dot(p.TileX, p.TileZ, markerPackDot)
-		}
+	for _, m := range minimapMarkers {
+		m.each(s, func(tx, tz int) { dot(tx, tz, m.col) })
 	}
-	for _, c := range s.area.ChestSpawns {
-		dot(c.TileX, c.TileZ, render.MarkerChest)
-	}
-	for _, d := range s.area.DoorSpawns {
-		dot(d.TileX, d.TileZ, render.MarkerDoor)
-	}
-	for _, c := range s.area.CrystalSpawns {
-		dot(c.TileX, c.TileZ, render.MarkerCrystal)
-	}
-	dot(s.area.StartTileX, s.area.StartTileZ, render.MarkerStart)
 
 	// Viewport frame — the slice currently visible in the grid pane.
 	w, h := float32(s.area.Width), float32(s.area.Height)
@@ -1166,6 +1250,70 @@ func drawMinimap(s *State) {
 	rl.DrawRectangleLinesEx(
 		rl.NewRectangle(mr.X+vx0*scale, mr.Y+vz0*scale, (vx1-vx0)*scale, (vz1-vz0)*scale),
 		1, minimapViewportFrame)
+}
+
+// minimapMarker is one overview marker kind: its legend label, dot color, and a
+// visitor that plots each tile of that kind. drawMinimap and drawMinimapLegend
+// BOTH walk this one table, so a marker can't be added to the dots and forgotten
+// in the legend (or vice-versa). Order is shared draw + legend order.
+type minimapMarker struct {
+	label string
+	col   rl.Color
+	each  func(s *State, plot func(tx, tz int))
+}
+
+var minimapMarkers = []minimapMarker{
+	{"Start", render.MarkerStart, func(s *State, plot func(tx, tz int)) {
+		plot(s.area.StartTileX, s.area.StartTileZ)
+	}},
+	{"Pack", markerPackDot, func(s *State, plot func(tx, tz int)) {
+		for _, p := range s.area.PackSpawns {
+			if len(p.Members) > 0 {
+				plot(p.TileX, p.TileZ)
+			}
+		}
+	}},
+	{"Chest", render.MarkerChest, func(s *State, plot func(tx, tz int)) {
+		for _, c := range s.area.ChestSpawns {
+			plot(c.TileX, c.TileZ)
+		}
+	}},
+	{"Door", render.MarkerDoor, func(s *State, plot func(tx, tz int)) {
+		for _, d := range s.area.DoorSpawns {
+			plot(d.TileX, d.TileZ)
+		}
+	}},
+	{"Crystal", render.MarkerCrystal, func(s *State, plot func(tx, tz int)) {
+		for _, c := range s.area.CrystalSpawns {
+			plot(c.TileX, c.TileZ)
+		}
+	}},
+}
+
+// drawMinimapLegend paints the marker-color key to the left of the minimap (a small
+// card), so the overview dots aren't unlabeled. Hidden whenever the minimap is.
+func drawMinimapLegend(s *State, font rl.Font, theme render.Theme) {
+	mr, ok := minimapRect(s)
+	if !ok {
+		return
+	}
+	const rowH = float32(15)
+	const padX = float32(8)
+	const swatch = float32(9)
+	w := float32(78)
+	h := float32(len(minimapMarkers))*rowH + 10
+	x := mr.X - w - 8
+	y := mr.Y + mr.Height - h // bottom-aligned with the minimap
+	if x < s.rect.grid.X+4 {
+		return // no room to the left on a narrow canvas — drop the legend, keep the map
+	}
+	drawOverlayBacking(rl.NewRectangle(x, y, w, h))
+	for i, e := range minimapMarkers {
+		ry := y + 5 + float32(i)*rowH
+		rl.DrawRectangle(int32(x+padX), int32(ry+2), int32(swatch), int32(swatch), e.col)
+		rl.DrawRectangleLines(int32(x+padX), int32(ry+2), int32(swatch), int32(swatch), entityMarkerOutline)
+		render.DrawRichText(font, e.label, rl.NewVector2(x+padX+swatch+6, ry), editorFontHint, 1, theme.TextHint)
+	}
 }
 
 // brushRecentsVisible reports whether the recent-brush swatch row should show.
@@ -1200,9 +1348,7 @@ func drawBrushRecents(s *State, font rl.Font) {
 	n := len(s.recentBrushes)
 	first := brushRecentRect(s, 0)
 	last := brushRecentRect(s, n-1)
-	bg := rl.NewRectangle(first.X-4, first.Y-4, (last.X+last.Width)-first.X+8, first.Height+8)
-	rl.DrawRectangleRec(bg, withAlpha(panelBackingColor, 205))
-	rl.DrawRectangleLinesEx(bg, 1, editorBorderDim)
+	drawOverlayBacking(rl.NewRectangle(first.X, first.Y, (last.X+last.Width)-first.X, first.Height))
 	mp := frameMouse
 	for i, ref := range s.recentBrushes {
 		r := brushRecentRect(s, i)
@@ -1441,29 +1587,22 @@ const (
 // paletteHints is the keyboard-shortcut cheat sheet below the brush list.
 // paletteContentHeight reads len(paletteHints), so the layout can't drift.
 var paletteHints = []string{
+	"?: all shortcuts",
 	"L-drag: paint",
-	"R-click: erase",
-	"R-click entity: edit/move/face",
+	"Alt+click: eyedropper",
+	"R-click: tile menu",
+	"R-click entity: edit/move",
 	"Shift+drag: rect",
 	"Ctrl+click: fill region",
-	"Ctrl+Shift+F: fill all",
-	"Tab: next layer",
-	"Alt+1..6: jump layer",
-	"1..9 / Shift+1..9: brush",
+	"1..9 / Sh+1..9: brush",
 	"[ ] brush size",
-	"arrows: pan",
-	"G: center on start",
-	"wheel: zoom",
-	"R-drag: pan",
-	"home: reset view",
-	"Ctrl+S save",
-	"Ctrl+O open",
+	"Tab: next layer",
+	"Ctrl+C/V/X: copy/paste/cut",
 	"Ctrl+Z undo / Y redo",
-	"Ctrl+N new",
+	"wheel or +/-: zoom",
+	"arrows / R-drag: pan",
+	"I: 3D view · Q/E: turn",
 	"F5 playtest",
-	"Ctrl+F5: test here",
-	"T cycle phase",
-	"R rotate start",
 	"Esc back",
 }
 
@@ -1639,6 +1778,8 @@ type metaRect struct {
 	nameLabel, nameField                 rl.Rectangle
 	matLabel                             rl.Rectangle
 	matButtons                           []rl.Rectangle
+	weatherLabel                         rl.Rectangle
+	weatherButtons                       []rl.Rectangle
 	quietLabel, quietField               rl.Rectangle
 	dimsLabel                            rl.Rectangle
 	widthValue, widthMinus, widthPlus    rl.Rectangle
@@ -1727,6 +1868,11 @@ func metadataRects(s *State) metaRect {
 	r.matButtons = equalButtonRow(x, y, w, modalBtnH, len(core.MaterialOptions))
 	y += metaRowGap
 
+	r.weatherLabel = rl.NewRectangle(x, y, w, metaLabelH)
+	y += metaLabelGap
+	r.weatherButtons = equalButtonRow(x, y, w, modalBtnH, len(core.WeatherModeOptions))
+	y += metaRowGap
+
 	r.quietLabel = rl.NewRectangle(x, y, w, metaLabelH)
 	y += metaLabelGap
 	r.quietField = rl.NewRectangle(x, y, w, metaFieldH)
@@ -1763,7 +1909,7 @@ func metadataContentHeight(s *State) float32 {
 	// Unscrolled span from the panel top: header + the four label/field blocks
 	// + the path-block-to-badge gap + the badge + bottom slack.
 	return headerReserve +
-		4*metaLabelGap + 4*metaRowGap + metaStepperGap +
+		5*metaLabelGap + 5*metaRowGap + metaStepperGap +
 		metaPathBlockH + metaReachAreaH + metaContentBottomPad
 }
 
@@ -1802,6 +1948,12 @@ func handleMetadataClick(s *State, p rl.Vector2) bool {
 	for i, br := range mr.matButtons {
 		if pointIn(p, br) {
 			setIfChanged(s, &s.area.Materials, core.MaterialOptions[i])
+			return true
+		}
+	}
+	for i, br := range mr.weatherButtons {
+		if pointIn(p, br) {
+			setIfChanged(s, &s.area.WeatherMode, core.WeatherModeOptions[i])
 			return true
 		}
 	}
@@ -1895,6 +2047,12 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 		// fall back to "" rather than panic in the per-frame draw loop.
 		name, _ := core.MaterialName(core.MaterialOptions[i])
 		drawButton(font, br, name, active)
+	}
+
+	drawLabel(font, "Weather", mr.weatherLabel)
+	for i, br := range mr.weatherButtons {
+		mode := core.WeatherModeOptions[i]
+		drawButton(font, br, core.WeatherModeLabel(mode), s.area.WeatherMode == mode)
 	}
 
 	drawLabel(font, "Quiet message", mr.quietLabel)
@@ -2388,6 +2546,26 @@ func drawGrid(s *State, font rl.Font) {
 		rl.DrawRectangleLinesEx(r, 2, marqueeOutline)
 	}
 
+	// Paste ghost: with the Select tool and a full clipboard, outline where Ctrl+V
+	// would land (clipboard footprint at the cursor) so a paste can be aligned first.
+	if s.tool == toolSelect && s.hoverX >= 0 && !s.clipboard.Empty() &&
+		s.drag != dragSelect && s.drag != dragSelectMove {
+		r := rl.NewRectangle(0, 0, float32(s.clipboard.W)*cell, float32(s.clipboard.H)*cell)
+		r.X, r.Y = s.rect.tileCorner(s.hoverX, s.hoverZ)
+		rl.DrawRectangleRec(r, pasteGhostFill)
+		rl.DrawRectangleLinesEx(r, 2, pasteGhostOutline)
+	}
+	// Move preview: while dragging a committed marquee, outline the clamped destination.
+	if s.drag == dragSelectMove && s.hoverX >= 0 {
+		w, h := s.selX1-s.selX0+1, s.selZ1-s.selZ0+1
+		nx := core.Clamp(s.selX0+(s.hoverX-s.rectAnchorX), 0, s.area.Width-w)
+		nz := core.Clamp(s.selZ0+(s.hoverZ-s.rectAnchorZ), 0, s.area.Height-h)
+		cx, cy := s.rect.tileCorner(nx, nz)
+		r := rl.NewRectangle(cx, cy, float32(w)*cell, float32(h)*cell)
+		rl.DrawRectangleRec(r, pasteGhostFill)
+		rl.DrawRectangleLinesEx(r, 2, pasteGhostOutline)
+	}
+
 	// Line drag preview: anchor tile to hovered tile.
 	if s.drag == dragLine && s.hoverX >= 0 {
 		ax, ay := s.rect.tileCenter(s.rectAnchorX, s.rectAnchorZ)
@@ -2841,6 +3019,41 @@ func drawStatus(s *State, font rl.Font, theme render.Theme) {
 		}
 		col.A = uint8(float32(col.A) * (0.4 + 0.6*alpha))
 		render.DrawTextWithShadow(font, e.msg, r.X+12, y, editorFontLabel, col)
+	}
+}
+
+// drawStatusHistory paints the recall panel (L toggle): the last messages, newest at
+// the bottom, above the transient toast so an expired message can still be read.
+func drawStatusHistory(s *State, font rl.Font, theme render.Theme) {
+	const lineH = 20
+	const pad = 10
+	const maxRows = 14
+	hist := s.statusHistory
+	if len(hist) > maxRows {
+		hist = hist[len(hist)-maxRows:]
+	}
+	title := "Recent messages (L to close)"
+	maxW := render.MeasureRichText(font, title, editorFontHint, 1).X
+	for _, m := range hist {
+		if w := render.MeasureRichText(font, m, editorFontLabel, 1).X; w > maxW {
+			maxW = w
+		}
+	}
+	rH := float32(len(hist)+1)*lineH + 2*pad
+	r := rl.NewRectangle(s.rect.grid.X+12, s.rect.grid.Y+s.rect.grid.Height-rH-8, maxW+24, rH)
+	render.DrawCard(int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height),
+		theme.SurfacePrimary, theme.BorderSoft, theme.BorderStrong)
+	render.DrawRichText(font, title, rl.NewVector2(r.X+12, r.Y+pad), editorFontHint, 1, theme.TextHint)
+	for i, m := range hist {
+		y := r.Y + pad + float32(i+1)*lineH
+		col := theme.TextPrimary
+		if len(m) > 0 && m[0] == '!' {
+			col = theme.BorderDanger
+		}
+		render.DrawTextWithShadow(font, m, r.X+12, y, editorFontLabel, col)
+	}
+	if len(hist) == 0 {
+		render.DrawRichText(font, "(no messages yet)", rl.NewVector2(r.X+12, r.Y+pad+lineH), editorFontLabel, 1, theme.TextMuted)
 	}
 }
 

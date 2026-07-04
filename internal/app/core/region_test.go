@@ -1,6 +1,11 @@
 package core
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+
+	"crawler/internal/app/core/mapfile"
+)
 
 func testRegionArea() AreaDefinition {
 	return AreaDefinition{
@@ -38,6 +43,91 @@ func TestCopyPasteRegion(t *testing.T) {
 	// Snapshot is independent of the source after the copy.
 	if r.Layers[1][0] != "ab" {
 		t.Fatalf("copied floor row = %q, want ab", r.Layers[1][0])
+	}
+}
+
+// TestPropYawRoundTrip: an authored prop facing survives Area → MapFile → encode →
+// parse → Area, an all-auto grid is NOT serialized (byte-stable), and Set/clear work.
+func TestPropYawRoundTrip(t *testing.T) {
+	a := testRegionArea()
+	a.Props = []string{"....", ".T..", "....", "...."}
+	a.SetPropYawStep(1, 1, 3) // 3 * 30° = 90°
+	if got := a.PropYawStepAt(1, 1); got != 3 {
+		t.Fatalf("PropYawStepAt = %d, want 3", got)
+	}
+	if deg, ok := a.PropYawOverride(1, 1); !ok || deg != 90 {
+		t.Fatalf("PropYawOverride = (%v,%v), want (90,true)", deg, ok)
+	}
+
+	mf, err := MapFileFromArea(a)
+	if err != nil {
+		t.Fatalf("MapFileFromArea: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := mf.Encode(&buf); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	parsed, err := mapfile.Parse(&buf)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	got, err := AreaFromMapFile(parsed, "x")
+	if err != nil {
+		t.Fatalf("AreaFromMapFile: %v", err)
+	}
+	if step := got.PropYawStepAt(1, 1); step != 3 {
+		t.Errorf("round-trip facing step = %d, want 3", step)
+	}
+
+	// An all-auto grid must not be written (pre-feature maps stay byte-identical).
+	a.SetPropYawStep(1, 1, -1)
+	mf2, _ := MapFileFromArea(a)
+	if len(mf2.PropYaw) != 0 {
+		t.Errorf("all-auto PropYaw serialized as %d rows, want 0", len(mf2.PropYaw))
+	}
+}
+
+// TestPropYawHighSteps guards a validation bug: steps 10 and 11 (300°/330°) encode
+// as lowercase 'a'/'b', which the level-grid validator (uppercase 'A'..'K' only) once
+// rejected — so those two facings failed to save/reload. Full Encode→Parse→Area path.
+func TestPropYawHighSteps(t *testing.T) {
+	for _, step := range []int{10, 11} {
+		a := testRegionArea()
+		a.Props = []string{"....", ".T..", "....", "...."}
+		a.SetPropYawStep(1, 1, step)
+
+		mf, err := MapFileFromArea(a)
+		if err != nil {
+			t.Fatalf("step %d: MapFileFromArea: %v", step, err)
+		}
+		var buf bytes.Buffer
+		if err := mf.Encode(&buf); err != nil {
+			t.Fatalf("step %d: encode: %v", step, err)
+		}
+		parsed, err := mapfile.Parse(&buf) // Parse validates — the reproducer for the bug
+		if err != nil {
+			t.Fatalf("step %d: parse: %v", step, err)
+		}
+		got, err := AreaFromMapFile(parsed, "x")
+		if err != nil {
+			t.Fatalf("step %d: AreaFromMapFile: %v", step, err)
+		}
+		if s := got.PropYawStepAt(1, 1); s != step {
+			t.Errorf("round-trip facing step = %d, want %d", s, step)
+		}
+	}
+}
+
+// TestClearRegion blanks the rectangle across grid layers (floor → auto '.') and
+// leaves cells outside it untouched — the grid half of the editor's Cut/move.
+func TestClearRegion(t *testing.T) {
+	a := testRegionArea()
+	a.ClearRegion(1, 1, 2, 2) // inner 2x2
+	want := []string{"abcd", "e..h", "i..l", "mnop"}
+	for z, w := range want {
+		if a.Floor[z] != w {
+			t.Errorf("ClearRegion floor row %d = %q, want %q", z, a.Floor[z], w)
+		}
 	}
 }
 

@@ -13,6 +13,78 @@ const (
 	WeatherClearing                     // rain stopped, tint ramping back out
 )
 
+// WeatherMode is an authored per-area override of the ambient-rain system.
+// Serialized in the map header (weather:); zero value Auto keeps the legacy
+// roof-gated behavior, so pre-weather maps read unchanged.
+type WeatherMode int
+
+const (
+	WeatherModeAuto  WeatherMode = iota // roof-gated: outdoors may storm, indoors never (default)
+	WeatherModeClear                    // never rains, even outdoors
+	WeatherModeRain                     // always storming, even under a roof
+	weatherModeCount                    // coverage sentinel (init-asserts weatherModeDefs)
+)
+
+// weatherModeDef is one weather-mode registry row: enum value, on-disk token
+// ("" for Auto, omitted from maps), and editor-facing label. One row per mode,
+// mirroring the material/facing registries — name/label/options all derive here.
+type weatherModeDef struct {
+	value WeatherMode
+	name  string // on-disk token; MUST be lowercase (decodeByName case-folds)
+	label string
+}
+
+var weatherModeDefs = []weatherModeDef{
+	{WeatherModeAuto, "", "Auto"},
+	{WeatherModeClear, "clear", "Clear"},
+	{WeatherModeRain, "rain", "Rain"},
+}
+
+func init() {
+	if len(weatherModeDefs) != int(weatherModeCount) {
+		panic("core: weatherModeDefs must have one row per WeatherMode — add a row when adding a mode")
+	}
+}
+
+func findWeatherModeDef(m WeatherMode) (weatherModeDef, bool) {
+	return findByValue(weatherModeDefs, m, func(d weatherModeDef) WeatherMode { return d.value })
+}
+
+// WeatherModeName is the on-disk token for a mode ("" for Auto / out of range).
+func WeatherModeName(m WeatherMode) string {
+	d, _ := findWeatherModeDef(m)
+	return d.name
+}
+
+// WeatherModeLabel is the editor-facing label (Auto shown explicitly; unknown → "Auto").
+func WeatherModeLabel(m WeatherMode) string {
+	if d, ok := findWeatherModeDef(m); ok {
+		return d.label
+	}
+	return "Auto"
+}
+
+// WeatherModeFromName parses an on-disk token ("" → Auto; unknown → Auto).
+func WeatherModeFromName(s string) WeatherMode {
+	if m, ok := decodeByName(weatherModeDefs, s,
+		func(d weatherModeDef) string { return d.name },
+		func(i int) WeatherMode { return weatherModeDefs[i].value }); ok {
+		return m
+	}
+	return WeatherModeAuto
+}
+
+// WeatherModeOptions is the ordered picker list (editor buttons), derived from the table.
+var WeatherModeOptions = buildWeatherModeOptions()
+
+func buildWeatherModeOptions() []WeatherMode {
+	opts := make([]WeatherMode, len(weatherModeDefs))
+	for i, d := range weatherModeDefs {
+		opts[i] = d.value
+	}
+	return opts
+}
+
 // RainKind is a storm's flavor, rolled once when it begins; only the heavy kind throws lightning.
 type RainKind int
 
@@ -130,6 +202,26 @@ func areaIsOutdoorCached(m *AreaDefinition) bool {
 
 func TickWeatherStep(g *GameState) {
 	w := &g.Weather
+	// Authored per-area override takes precedence over the roof gate.
+	switch g.Area.WeatherMode {
+	case WeatherModeClear:
+		if w.Phase == WeatherBuilding || w.Phase == WeatherRaining {
+			w.Phase = WeatherClearing
+			w.RainStepsLeft = 0
+		}
+		return
+	case WeatherModeRain:
+		// Force a persistent storm: start one from a dry/clearing state, and keep the
+		// step counter topped up so an active storm never lapses to Clearing.
+		switch w.Phase {
+		case WeatherClear, WeatherClearing:
+			w.Phase = WeatherBuilding
+			w.Kind = rollRainKind(g.Rand())
+		case WeatherRaining:
+			w.RainStepsLeft = RainMaxSteps
+		}
+		return
+	}
 	if !areaIsOutdoorCached(&g.Area) {
 		// Roofed/underground: no rain. A storm in progress drops to Clearing.
 		if w.Phase == WeatherBuilding || w.Phase == WeatherRaining {

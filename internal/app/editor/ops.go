@@ -162,9 +162,11 @@ func clearPropCell(s *State, x, z int) {
 				setPropFloor(s, fx, fz, core.TilePropEmpty)
 			}
 		}
+		s.area.SetPropYawStep(x, z, -1) // drop the anchor's facing override
 		return
 	}
 	setPropFloor(s, x, z, core.TilePropEmpty)
+	s.area.SetPropYawStep(x, z, -1) // no prop → no facing override
 }
 
 // applyPropBrush paints a prop at (x,z) and reports whether the map changed — false
@@ -195,6 +197,7 @@ func applyPropBrush(s *State, x, z int, c byte) bool {
 			setDecorFloor(s, fx, fz, core.DecorAuto)
 			removeAllEntitiesAt(&s.area, fx, fz)
 		}
+		s.area.SetPropYawStep(x, z, s.brushYaw) // facing on the anchor (tails render nothing)
 		return true
 	}
 	if s.area.WallAt(x, z) {
@@ -209,7 +212,45 @@ func applyPropBrush(s *State, x, z int, c byte) bool {
 	// A prop occupies the floor square (on its floor); reset decor + clear entities.
 	setDecorFloor(s, x, z, core.DecorAuto)
 	removeAllEntitiesAt(&s.area, x, z)
+	s.area.SetPropYawStep(x, z, s.brushYaw) // apply the brush's pending facing
 	return true
+}
+
+// propYawLabel renders a facing step for the status line: "Auto" or "150°".
+func propYawLabel(step int) string {
+	if step < 0 {
+		return "Auto"
+	}
+	return strconv.Itoa(int(core.PropYawDegForStep(step))) + "°"
+}
+
+// cyclePropYaw advances a facing cursor: -1 (auto) → 0 → 1 → … → last → -1.
+func cyclePropYaw(step int) int {
+	step++
+	if step >= core.PropYawSteps {
+		return -1
+	}
+	return step
+}
+
+// rotatePropFacing handles R on the Props layer: over an existing prop it rotates
+// that tile's facing (one undo step) and adopts it as the brush facing; otherwise it
+// just cycles the pending brush facing new props will inherit.
+func rotatePropFacing(s *State) {
+	if s.hoverX >= 0 && s.area.PropForDisplay(s.hoverX, s.hoverZ, s.editLevel) != core.TilePropEmpty {
+		next := cyclePropYaw(s.area.PropYawStepAt(s.hoverX, s.hoverZ))
+		before := core.CloneArea(s.area)
+		s.area.SetPropYawStep(s.hoverX, s.hoverZ, next)
+		s.brushYaw = next
+		if !core.AreaContentEqual(s.area, before) {
+			commitUndoSnapshot(s, before)
+			s.dirty = true
+		}
+		s.flash("Prop facing: " + propYawLabel(next))
+		return
+	}
+	s.brushYaw = cyclePropYaw(s.brushYaw)
+	s.flash("Brush facing: " + propYawLabel(s.brushYaw))
 }
 
 // setTileLevel records the level a placed thing sits on into a per-tile grid
@@ -580,6 +621,17 @@ func doorFacingForCell(a *core.AreaDefinition, x, z int) int {
 	return a.StartFacing
 }
 
+// doorNameFree reports whether name is unused among spawns (so a moved door can
+// keep its identity when nothing else claims the name).
+func doorNameFree(spawns []core.DoorSpawn, name string) bool {
+	for _, sp := range spawns {
+		if sp.Name == name {
+			return false
+		}
+	}
+	return true
+}
+
 // nextDoorName picks an unused "door_N" placeholder. Names must be unique within
 // the map so runtime name resolution is unambiguous.
 func nextDoorName(spawns []core.DoorSpawn) string {
@@ -791,8 +843,126 @@ func setLayerCell(layer *[]string, x, z int, b byte) {
 	(*layer)[z] = string(row)
 }
 
-// copySelection snapshots the active marquee region into the clipboard (transform
-// in core.CopyRegion; this is the editor glue).
+// regionEntities is the spawn set captured alongside a copied marquee, coords made
+// region-local (0-based from the marquee's top-left) and remapped on paste. Tiles
+// alone (core.TileRegion) don't carry entities, so the editor snapshots them here.
+type regionEntities struct {
+	packs    []core.PackSpawn
+	chests   []core.ChestSpawn
+	doors    []core.DoorSpawn
+	crystals []core.CrystalSpawn
+}
+
+func (r regionEntities) empty() bool {
+	return len(r.packs)+len(r.chests)+len(r.doors)+len(r.crystals) == 0
+}
+
+func (r regionEntities) count() int {
+	return len(r.packs) + len(r.chests) + len(r.doors) + len(r.crystals)
+}
+
+func inRect(x, z, x0, z0, x1, z1 int) bool { return x >= x0 && x <= x1 && z >= z0 && z <= z1 }
+
+// captureRegionEntities clones every spawn inside the inclusive rectangle with
+// region-local coords (member/item slices deep-copied so the snapshot is independent).
+func captureRegionEntities(a *core.AreaDefinition, x0, z0, x1, z1 int) regionEntities {
+	var out regionEntities
+	for _, p := range a.PackSpawns {
+		if inRect(p.TileX, p.TileZ, x0, z0, x1, z1) {
+			p.Members = append([]core.PackMemberRef(nil), p.Members...)
+			p.TileX, p.TileZ = p.TileX-x0, p.TileZ-z0
+			out.packs = append(out.packs, p)
+		}
+	}
+	for _, c := range a.ChestSpawns {
+		if inRect(c.TileX, c.TileZ, x0, z0, x1, z1) {
+			c.Items = append([]core.ItemKind(nil), c.Items...)
+			c.TileX, c.TileZ = c.TileX-x0, c.TileZ-z0
+			out.chests = append(out.chests, c)
+		}
+	}
+	for _, d := range a.DoorSpawns {
+		if inRect(d.TileX, d.TileZ, x0, z0, x1, z1) {
+			d.TileX, d.TileZ = d.TileX-x0, d.TileZ-z0
+			out.doors = append(out.doors, d)
+		}
+	}
+	for _, cr := range a.CrystalSpawns {
+		if inRect(cr.TileX, cr.TileZ, x0, z0, x1, z1) {
+			cr.TileX, cr.TileZ = cr.TileX-x0, cr.TileZ-z0
+			out.crystals = append(out.crystals, cr)
+		}
+	}
+	return out
+}
+
+// stampRegionEntities places the captured spawns with the region's top-left at
+// (atX,atZ), replacing any same-kind spawn already on a destination tile and giving
+// pasted doors fresh unique names (a self-referencing target is repointed to match).
+func stampRegionEntities(s *State, ents regionEntities, atX, atZ int) {
+	a := &s.area
+	for _, p := range ents.packs {
+		x, z := atX+p.TileX, atZ+p.TileZ
+		if !a.InBounds(x, z) {
+			continue
+		}
+		a.PackSpawns = removeSpawnsAt(a.PackSpawns, x, z)
+		p.TileX, p.TileZ = x, z
+		p.Members = append([]core.PackMemberRef(nil), p.Members...)
+		a.PackSpawns = append(a.PackSpawns, p)
+	}
+	for _, c := range ents.chests {
+		x, z := atX+c.TileX, atZ+c.TileZ
+		if !a.InBounds(x, z) {
+			continue
+		}
+		a.ChestSpawns = removeSpawnsAt(a.ChestSpawns, x, z)
+		c.TileX, c.TileZ = x, z
+		c.Items = append([]core.ItemKind(nil), c.Items...)
+		a.ChestSpawns = append(a.ChestSpawns, c)
+	}
+	for _, d := range ents.doors {
+		x, z := atX+d.TileX, atZ+d.TileZ
+		if !a.InBounds(x, z) {
+			continue
+		}
+		a.DoorSpawns = removeSpawnsAt(a.DoorSpawns, x, z)
+		old := d.Name
+		// Keep the door's name when it's still free — a MOVE (origin already cleared)
+		// must preserve identity so inbound links survive. Rename only on a real
+		// collision (same-map copy/paste), repointing a self-loop to the new name.
+		if old == "" || !doorNameFree(a.DoorSpawns, old) {
+			d.Name = nextDoorName(a.DoorSpawns)
+			if d.TargetMap == core.SelfMapToken && d.TargetDoor == old {
+				d.TargetDoor = d.Name
+			}
+		}
+		d.TileX, d.TileZ = x, z
+		a.DoorSpawns = append(a.DoorSpawns, d)
+	}
+	for _, cr := range ents.crystals {
+		x, z := atX+cr.TileX, atZ+cr.TileZ
+		if !a.InBounds(x, z) {
+			continue
+		}
+		a.CrystalSpawns = removeSpawnsAt(a.CrystalSpawns, x, z)
+		cr.TileX, cr.TileZ = x, z
+		a.CrystalSpawns = append(a.CrystalSpawns, cr)
+	}
+}
+
+// removeRegionEntities drops every spawn inside the inclusive rectangle (the entity
+// half of a cut / region-move).
+func removeRegionEntities(a *core.AreaDefinition, x0, z0, x1, z1 int) {
+	inSel := func(tx, tz int) bool { return inRect(tx, tz, x0, z0, x1, z1) }
+	a.PackSpawns = slices.DeleteFunc(a.PackSpawns, func(p core.PackSpawn) bool { return inSel(p.TileX, p.TileZ) })
+	a.ChestSpawns = slices.DeleteFunc(a.ChestSpawns, func(c core.ChestSpawn) bool { return inSel(c.TileX, c.TileZ) })
+	a.DoorSpawns = slices.DeleteFunc(a.DoorSpawns, func(d core.DoorSpawn) bool { return inSel(d.TileX, d.TileZ) })
+	a.CrystalSpawns = slices.DeleteFunc(a.CrystalSpawns, func(cr core.CrystalSpawn) bool { return inSel(cr.TileX, cr.TileZ) })
+}
+
+// copySelection snapshots the active marquee (grid layers + the entities on it) into
+// the clipboard. core.CopyRegion does the grid transform; entities are captured here.
 func copySelection(s *State) {
 	if !s.selActive {
 		s.flash("Select a region first (Select tool), then Ctrl+C")
@@ -803,11 +973,22 @@ func copySelection(s *State) {
 		s.flash("Nothing to copy")
 		return
 	}
-	s.flash(fmt.Sprintf("Copied %d×%d region — Ctrl+V to paste at the cursor", s.clipboard.W, s.clipboard.H))
+	s.clipEntities = captureRegionEntities(&s.area, s.selX0, s.selZ0, s.selX1, s.selZ1)
+	s.flash(copiedRegionFlash("Copied", s.clipboard, s.clipEntities) + " — Ctrl+V to paste at the cursor")
 }
 
-// pasteSelection stamps the clipboard with its top-left at (atX,atZ) under one
-// undo step. No-op off-map or with an empty clipboard.
+// copiedRegionFlash formats a "<verb> WxH region (+N entities)" status line, shared
+// by copy / cut so the entity count reads consistently.
+func copiedRegionFlash(verb string, r core.TileRegion, ents regionEntities) string {
+	msg := fmt.Sprintf("%s %d×%d region", verb, r.W, r.H)
+	if n := ents.count(); n > 0 {
+		msg += fmt.Sprintf(" (+%d entities)", n)
+	}
+	return msg
+}
+
+// pasteSelection stamps the clipboard (grid + entities) with its top-left at
+// (atX,atZ) under one undo step. No-op off-map or with an empty clipboard.
 func pasteSelection(s *State, atX, atZ int) {
 	if s.clipboard.Empty() {
 		s.flash("Clipboard empty — select a region and Ctrl+C first")
@@ -819,8 +1000,110 @@ func pasteSelection(s *State, atX, atZ int) {
 	}
 	pushUndo(s)
 	s.area.PasteRegion(s.clipboard, atX, atZ)
+	stampRegionEntities(s, s.clipEntities, atX, atZ)
 	s.dirty = true
 	s.flash(fmt.Sprintf("Pasted %d×%d region", s.clipboard.W, s.clipboard.H))
+}
+
+// cutSelection copies the marquee (grid + entities) then clears it — one undo step.
+func cutSelection(s *State) {
+	if !s.selActive {
+		s.flash("Select a region first (Select tool), then Ctrl+X")
+		return
+	}
+	copySelection(s)
+	if s.clipboard.Empty() {
+		return
+	}
+	before := core.CloneArea(s.area)
+	s.area.ClearRegion(s.selX0, s.selZ0, s.selX1, s.selZ1)
+	removeRegionEntities(&s.area, s.selX0, s.selZ0, s.selX1, s.selZ1)
+	if core.AreaContentEqual(s.area, before) {
+		return // nothing there — leave the copy, bank no undo
+	}
+	commitUndoSnapshot(s, before)
+	s.dirty = true
+	s.flash(copiedRegionFlash("Cut", s.clipboard, s.clipEntities))
+}
+
+// hasSelection / hasClipboard back the Edit-menu enable predicates for the region
+// verbs so a greyed row can't be fired with nothing selected / nothing copied.
+func hasSelection(s *State) bool { return s.selActive }
+func hasClipboard(s *State) bool { return !s.clipboard.Empty() }
+
+// menuPaste is the Edit ▸ Paste target rule: the grid tile last hovered, else the
+// selection origin, else the map center (a menu click may not be over the canvas).
+func menuPaste(s *State) {
+	x, z := s.hoverX, s.hoverZ
+	if !s.area.InBounds(x, z) {
+		if s.selActive {
+			x, z = s.selX0, s.selZ0
+		} else {
+			x, z = s.area.Width/2, s.area.Height/2
+		}
+	}
+	pasteSelection(s, x, z)
+}
+
+// selectWholeMap sets the marquee to the entire map (Ctrl+A).
+func selectWholeMap(s *State) {
+	if s.area.Width <= 0 || s.area.Height <= 0 {
+		return
+	}
+	s.selX0, s.selZ0 = 0, 0
+	s.selX1, s.selZ1 = s.area.Width-1, s.area.Height-1
+	s.selActive = true
+	s.flash("Selected whole map — Ctrl+C to copy")
+}
+
+// duplicateSelection copies the marquee and pastes it one tile down-right, moving the
+// selection onto the copy so a repeated Ctrl+D staggers duplicates (one undo each).
+func duplicateSelection(s *State) {
+	if !s.selActive {
+		s.flash("Select a region first (Select tool), then Ctrl+D")
+		return
+	}
+	copySelection(s)
+	if s.clipboard.Empty() {
+		return
+	}
+	atX, atZ := s.selX0+1, s.selZ0+1
+	if !s.area.InBounds(atX, atZ) {
+		atX, atZ = s.selX0, s.selZ0
+	}
+	pasteSelection(s, atX, atZ)
+	s.selX0, s.selZ0 = atX, atZ
+	s.selX1, s.selZ1 = atX+s.clipboard.W-1, atZ+s.clipboard.H-1
+}
+
+// moveSelectionBy shifts the committed marquee's contents (grid + entities) by
+// (dx,dz) tiles under one undo step: snapshot the region, clear the origin, stamp at
+// the offset, and follow the selection to the new location. Clamped so the region
+// stays on-map. No-op for a zero shift.
+func moveSelectionBy(s *State, dx, dz int) {
+	if !s.selActive || (dx == 0 && dz == 0) {
+		return
+	}
+	w, h := s.selX1-s.selX0+1, s.selZ1-s.selZ0+1
+	nx := core.Clamp(s.selX0+dx, 0, s.area.Width-w)
+	nz := core.Clamp(s.selZ0+dz, 0, s.area.Height-h)
+	if nx == s.selX0 && nz == s.selZ0 {
+		return
+	}
+	region := core.CopyRegion(&s.area, s.selX0, s.selZ0, s.selX1, s.selZ1)
+	ents := captureRegionEntities(&s.area, s.selX0, s.selZ0, s.selX1, s.selZ1)
+	before := core.CloneArea(s.area)
+	s.area.ClearRegion(s.selX0, s.selZ0, s.selX1, s.selZ1)
+	removeRegionEntities(&s.area, s.selX0, s.selZ0, s.selX1, s.selZ1)
+	s.area.PasteRegion(region, nx, nz)
+	stampRegionEntities(s, ents, nx, nz)
+	if core.AreaContentEqual(s.area, before) {
+		return
+	}
+	commitUndoSnapshot(s, before)
+	s.dirty = true
+	s.selX0, s.selZ0 = nx, nz
+	s.selX1, s.selZ1 = nx+w-1, nz+h-1
 }
 
 // clearSelection drops the active marquee but leaves the clipboard intact. Call

@@ -83,24 +83,30 @@ func (s *State) freeIsoRT() {
 	}
 }
 
+// isoRTSettleFrames is how many consecutive stable-size frames must pass before a
+// deferred iso-RT realloc is allowed to fire (~a tenth of a second at 60fps).
+const isoRTSettleFrames = 6
+
 // ensureIsoRT (re)allocates the off-screen target to the grid panel size. To avoid
 // the intermittent DrawModelEx crash from reallocating the GPU FBO mid-resize, the
-// realloc is DEFERRED while the requested size is still changing frame-to-frame
-// (an active window drag): the existing RT is reused (blitted to fit) until the
-// size settles. The first allocation (no RT yet) always proceeds.
+// realloc is DEFERRED until the requested size has held steady for isoRTSettleFrames
+// frames: the existing RT is reused (blitted to fit) until then. This rides out both
+// an active drag AND the brief size-stable pauses within one (a native window-border
+// drag is captured by the OS and doesn't reliably report the mouse button as down, so
+// IsMouseButtonDown can't be trusted to detect it). The first allocation (no RT yet)
+// still waits out the settle so entering the 3D view mid-drag can't alloc mid-resize.
 func (s *State) ensureIsoRT(w, h int32) {
-	changing := w != s.isoReqW || h != s.isoReqH
-	s.isoReqW, s.isoReqH = w, h
+	if w != s.isoReqW || h != s.isoReqH {
+		s.isoReqW, s.isoReqH = w, h
+		s.isoRTSettle = 0 // size just changed — restart the settle countdown
+		return
+	}
 	if s.isoRT.ID != 0 && s.isoRTW == w && s.isoRTH == h {
 		return // already the right size
 	}
-	if changing || rl.IsMouseButtonDown(rl.MouseLeftButton) {
-		// Mid-resize (size still changing) OR a drag paused mid-resize (mouse held, size
-		// momentarily stable): defer the (re)alloc this frame — any LoadRenderTexture
-		// while the window is being dragged is what trips the DrawModelEx crash. This
-		// covers the FIRST allocation too (RT still nil): the caller skips drawing when
-		// isoRT.ID == 0, so entering the 3D view mid-drag renders nothing until it settles.
-		return
+	if s.isoRTSettle < isoRTSettleFrames {
+		s.isoRTSettle++
+		return // size is holding but hasn't settled long enough yet
 	}
 	s.freeIsoRT()
 	s.isoRT = rl.LoadRenderTexture(w, h)
@@ -420,11 +426,11 @@ func drawGridIso(s *State, font rl.Font) {
 // drawIsoReadout shows the hovered column's coords + signed level, plus a hint.
 func drawIsoReadout(s *State, font rl.Font, grid rl.Rectangle) {
 	hint := "3D · right-drag orbit · shift+right pan · wheel zoom · arrows pan · L tool · R-click menu · Q/E snap · PgUp/Dn or Levels = floor · I top-down"
-	rl.DrawTextEx(font, hint, rl.NewVector2(grid.X+8, grid.Y+8), editorFontHint, 1, rl.NewColor(210, 214, 222, 200))
+	rl.DrawTextEx(font, hint, rl.NewVector2(grid.X+8, grid.Y+8), editorFontHint, 1, isoReadoutHint)
 	// Active floor + brush: the floor a paint lands on (matches the slab) and what
 	// the active tool will stamp — so editing in 3D isn't blind to either.
 	active := fmt.Sprintf("floor %s  ·  %s", signedLevelLabel(s.editLevel), s.activeBrush().Name)
-	rl.DrawTextEx(font, active, rl.NewVector2(grid.X+8, grid.Y+8+editorFontHint+4), editorFontHint, 1, rl.NewColor(150, 210, 255, 235))
+	rl.DrawTextEx(font, active, rl.NewVector2(grid.X+8, grid.Y+8+editorFontHint+4), editorFontHint, 1, isoReadoutActiveFloor)
 	if s.isoHoverX >= 0 {
 		lvl := s.area.ElevationLevelAt(s.isoHoverX, s.isoHoverZ) - core.ElevationBaseline
 		txt := fmt.Sprintf("%s  surface %+d", core.TileCoord(s.isoHoverX, s.isoHoverZ), lvl)
@@ -451,13 +457,15 @@ func drawEditorCompass(s *State, font rl.Font) {
 	rl.DrawCircleLines(int32(cx), int32(cy), boxHalf, withAlpha(editorGold, 90))
 
 	// project maps a world horizontal dir (wx,wz) to a screen offset (x right, y down).
-	// 3D: rotate into the camera basis (screen-right=(-sin,cos), screen-down=(cos,sin)
-	// in world XZ). Top-down: identity (N up, E right).
+	// 3D: rotate into the camera basis. isoCamera puts the eye at target+dir*dist with
+	// dir=(cos·cosYaw, …, cos·sinYaw) and Up=+Y, so raylib's camera right = cross(fwd,up)
+	// = (sin,-cos) and screen-down = (cos,sin) in world XZ. (The earlier (-sin,cos) right
+	// mirrored the rose, so orbiting spun it the wrong way.) Top-down: identity (N up, E right).
 	var project func(wx, wz float32) (float32, float32)
 	if s.isoView {
 		sin := float32(math.Sin(float64(s.isoYaw)))
 		cos := float32(math.Cos(float64(s.isoYaw)))
-		project = func(wx, wz float32) (float32, float32) { return -wx*sin + wz*cos, wx*cos + wz*sin }
+		project = func(wx, wz float32) (float32, float32) { return wx*sin - wz*cos, wx*cos + wz*sin }
 	} else {
 		project = func(wx, wz float32) (float32, float32) { return wx, wz }
 	}

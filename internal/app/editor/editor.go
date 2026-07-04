@@ -133,9 +133,28 @@ func init() {
 	for layer, brushes := range layerBrushes {
 		labels := make([]string, len(brushes))
 		for i, b := range brushes {
-			labels[i] = fmt.Sprintf("%d %s", i+1, b.Name)
+			if prefix := brushHotkeyPrefix(i); prefix != "" {
+				labels[i] = prefix + " " + b.Name
+			} else {
+				labels[i] = b.Name // mouse-only (past the two number rows) — no key shown
+			}
 		}
 		paletteLabels[layer] = labels
+	}
+}
+
+// brushHotkeyPrefix returns the real select-key label for palette index i — "1".."9"
+// for the number row, "Sh+1".."Sh+9" for the Shift row — or "" past index 17, where
+// the brush is mouse/scroll-only (updateHotkeys maps positions, not brush.Hotkey).
+// Numbering only the reachable brushes keeps the invisible keyboard ceiling honest.
+func brushHotkeyPrefix(i int) string {
+	switch {
+	case i < 0 || i >= 2*len(numberRowKeys):
+		return ""
+	case i < len(numberRowKeys):
+		return strconv.Itoa(i + 1)
+	default:
+		return "Sh+" + strconv.Itoa(i-len(numberRowKeys)+1)
 	}
 }
 
@@ -498,6 +517,8 @@ const (
 	// modalWallFaces is the per-tile cliff-face skin editor (base + N/E/S/W),
 	// targeting wallFaceX/wallFaceZ. See wallfaces.go.
 	modalWallFaces
+	// modalHelp is the read-only keyboard-shortcut reference (? key). See help.go.
+	modalHelp
 	// modalCount is the enum count sentinel (modalHandlers coverage assert in
 	// draw.go). Must stay last; not a dispatchable modal.
 	modalCount
@@ -523,7 +544,8 @@ const (
 	dragPack
 	dragChest
 	dragDoor
-	dragSelect // marquee region drag (toolSelect): sets the copy/paste selection on release
+	dragSelect     // marquee region drag (toolSelect): sets the copy/paste selection on release
+	dragSelectMove // drag INSIDE a committed marquee (toolSelect): moves its contents on release
 )
 
 // toolMode is the active grid-paint tool. While Brush is active, modifiers
@@ -724,8 +746,16 @@ type State struct {
 	baseline core.AreaDefinition
 
 	statusLog []statusEntry
+	// statusHistory is the rolling recall buffer (newest last, capped) so a message
+	// that auto-expired can still be read; showStatusLog toggles its panel (L key).
+	statusHistory []string
+	showStatusLog bool
 
 	brushSize int
+	// brushYaw is the pending prop facing new Props paints inherit: -1 = auto
+	// (procedural yaw), else a step in [0, core.PropYawSteps). Cycled with R on the
+	// Props layer; R over an existing prop rotates that tile instead.
+	brushYaw int
 
 	// tool is the active grid-paint tool. Zero value toolBrush = freehand paint.
 	tool toolMode
@@ -733,13 +763,16 @@ type State struct {
 
 	// Region copy/paste (toolSelect). selActive marks a committed marquee with
 	// inclusive normalized bounds sel{X0,Z0,X1,Z1}; clipboard holds the last
-	// Ctrl+C snapshot. Tiles only — entities aren't copied.
+	// Ctrl+C tile snapshot, clipEntities the spawns that sat on it.
 	selActive                  bool
 	selX0, selZ0, selX1, selZ1 int
 	// cancelHandled: set within updateHotkeys when Esc was consumed this frame
 	// (e.g. clearing a selection) so the same-frame pause-menu open is suppressed.
 	cancelHandled bool
 	clipboard                  core.TileRegion
+	// clipEntities are the spawn clones captured with clipboard (region-local coords),
+	// so a paste reproduces the packs/chests/doors/crystals that sat on the region too.
+	clipEntities regionEntities
 	// dragSnapshotDone reports whether the stroke banked its undo snapshot.
 	// dragUndoBefore is the pre-stroke area, committed LAZILY by strokePaint only
 	// once the stroke mutates a cell (a no-op stroke banks nothing).
@@ -763,6 +796,9 @@ type State struct {
 	panX    float32
 	panY    float32
 	panning bool
+	// minimapDragging: a left-press that began on the minimap; while held it drags
+	// the view (continuous recenter), even once the cursor leaves the minimap rect.
+	minimapDragging bool
 	// rightDragStart / rightDragMoved disambiguate a right-button PAN drag from a
 	// right-CLICK (context menu): the press records the start; movement past
 	// panDragThreshold marks it a drag so the release opens no menu. The mousewheel
@@ -807,6 +843,11 @@ type State struct {
 	// RT reused — reallocating the GPU FBO mid-resize then rendering into it is the
 	// intermittent DrawModelEx crash. Realloc only fires once the size settles.
 	isoReqW, isoReqH int32
+	// isoRTSettle counts consecutive frames the requested size has held steady.
+	// A native window-border drag doesn't reliably report the mouse button as down,
+	// so we can't lean on that: the realloc waits until the size is stable for
+	// isoRTSettleFrames frames, riding out the brief pauses within a resize drag.
+	isoRTSettle int
 	// isoPreview caches a NewGameState(area) powering the 3D view's entity/foe
 	// draw (chests/doors/crystals/packs); rebuilt when contentEpoch changes so
 	// the heavy build runs once per edit, not per frame. See ensureIsoPreview.
@@ -826,6 +867,9 @@ type State struct {
 	// dropdown is the single open-dropdown slot. Zero value (ddNone) = closed.
 	// See dropdown.go. The grid right-click menu is the ddContext owner.
 	dropdown dropdownState
+	// recentSnapshot caches the recent-maps list (from disk) as of when a menu was
+	// opened, so building the File menu's rows every frame doesn't re-read prefs.
+	recentSnapshot []string
 	// ctxTile{X,Z} remember the tile the open ddContext right-click menu acts on.
 	ctxTileX, ctxTileZ int
 	// faceTarget* remember the tile + direction the open ddFaceSkin dropdown edits.
@@ -948,6 +992,7 @@ func freshState(a core.AreaDefinition) State {
 		topLevel:              core.ElevationBaseline,
 		bottomLevel:           core.ElevationBaseline,
 		brushSize:             1,
+		brushYaw:              -1, // props default to procedural (auto) facing
 		zoom:                  1,
 		hoverX:                -1,
 		hoverZ:                -1,
@@ -1151,7 +1196,22 @@ func (s *State) flash(msg string) { s.pushStatus(msg, false) }
 // flashWarn pushes a warning-tinted (danger-colored) status row.
 func (s *State) flashWarn(msg string) { s.pushStatus(msg, true) }
 
+// statusHistoryMax caps the recall buffer (L-toggle panel).
+const statusHistoryMax = 30
+
 func (s *State) pushStatus(msg string, warn bool) {
+	// Rolling history so an expired toast can still be recalled (deduped vs. the last
+	// entry so a repeated flash doesn't spam it). Warnings get a leading marker.
+	rec := msg
+	if warn {
+		rec = "! " + msg
+	}
+	if n := len(s.statusHistory); n == 0 || s.statusHistory[n-1] != rec {
+		s.statusHistory = append(s.statusHistory, rec)
+		if len(s.statusHistory) > statusHistoryMax {
+			s.statusHistory = s.statusHistory[len(s.statusHistory)-statusHistoryMax:]
+		}
+	}
 	for i, e := range s.statusLog {
 		if e.msg == msg {
 			s.statusLog[i].timer = statusLogLifetime

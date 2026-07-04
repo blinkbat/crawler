@@ -526,7 +526,11 @@ func drawPropFloor(assets Resources, m *core.AreaDefinition, prop byte, x, z int
 	if prop == core.TilePropEmpty {
 		return false
 	}
+	// Authored per-tile facing wins over the procedural hash yaw when set.
 	propYaw := propYawDeg(x, z)
+	if o, ok := m.PropYawOverride(x, z); ok {
+		propYaw = o
+	}
 	propCenter := rl.NewVector3(cx, m.StandGroundYAt(x, L, z), cz)
 	if handler := inlinePropTable[prop]; handler != nil {
 		handler(assets, m, x, z, propCenter, propYaw)
@@ -1529,10 +1533,12 @@ func tileYawDeg(x, z int) float32 {
 	return float32(tileHash(x, z)&0x03) * 90
 }
 
-// steppedYaw30 maps a hash to one of 12 facings (30° steps) in [0,360) so a prop
-// reads as a deliberate facing rather than noise. Caller pre-shifts to pick bits.
+// steppedYaw30 maps a hash to one of core.PropYawSteps facings (30° steps) in
+// [0,360) so a prop reads as a deliberate facing rather than noise. Shares the
+// step count with authored PropYaw overrides so both land on the same grid.
+// Caller pre-shifts to pick bits.
 func steppedYaw30(h uint32) float32 {
-	return float32((h % 12) * 30)
+	return core.PropYawDegForStep(int(h % uint32(core.PropYawSteps)))
 }
 
 // propYawDeg returns a per-tile yaw in 30° steps, in [0,360) — stepped so each

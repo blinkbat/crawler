@@ -93,7 +93,7 @@ func applySFXVolume() {
 // if the file is missing / fails to decode, so a missing track degrades to silence.
 func loadTrack(t *musicTrack, file string) {
 	stream := rl.LoadMusicStream(userconfig.MusicTrackPath(file))
-	if stream.Stream.Buffer == nil {
+	if !musicLoaded(stream) {
 		return // missing/unsupported file — leave t.loaded false
 	}
 	stream.Looping = true

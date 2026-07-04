@@ -118,6 +118,7 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		// PropLevels/DecorLevels: optional per-tile level grids. Guarded here for
 		// parity with the editor's direct-AreaFromMapFile path, which skips validate().
 		{mapfile.SectionPropLevels, mf.PropLevels},
+		{mapfile.SectionPropYaw, mf.PropYaw},
 		{mapfile.SectionDecorLevels, mf.DecorLevels},
 	}
 	for _, layer := range optional {
@@ -254,11 +255,13 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		Elevation:        cloneRows(elevation),
 		Solids:           CloneSolids(mf.Solids),
 		PropLevels:       cloneRows(mf.PropLevels),
+		PropYaw:          cloneRows(mf.PropYaw),
 		DecorLevels:      cloneRows(mf.DecorLevels),
 		PropStack:        CloneSolids(mf.PropStack),
 		DecorStack:       CloneSolids(mf.DecorStack),
 		FaceOverrides:    faceOverridesFromMap(mf.Faces),
 		Materials:        mat,
+		WeatherMode:      WeatherModeFromName(mf.Weather),
 		StartTileX:       mf.StartX,
 		StartTileZ:       mf.StartZ,
 		StartFacing:      face,
@@ -434,6 +437,7 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 		Name:            a.Name,
 		Materials:       matName,
 		Quiet:           a.QuietMessage,
+		Weather:         WeatherModeName(a.WeatherMode),
 		Width:           a.Width,
 		Height:          a.Height,
 		StartX:          a.StartTileX,
@@ -445,6 +449,7 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 		Props:           propsGrid,
 		Ceiling:         cloneRows(ceiling),
 		Elevation:       cloneRows(elevation),
+		PropYaw:         trimAllAutoGrid(cloneRows(a.PropYaw), PropYawAuto),
 		Solids:          solids,
 		PropLevels:      propLevels,
 		DecorLevels:     decorLevels,

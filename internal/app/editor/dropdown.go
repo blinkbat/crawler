@@ -5,6 +5,7 @@ import (
 	"crawler/internal/app/input"
 	"crawler/internal/app/render"
 	"fmt"
+	"strings"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -52,6 +53,62 @@ type dropdownState struct {
 	at       rl.Vector2 // atPoint: the free-floating top-left (right-click menu)
 	atPoint  bool       // true = panel top-left sits at `at` (screen-clamped), not anchor-relative
 	rowH     float32    // per-owner row-height override; 0 = dropdownRowH (context menu wants taller rows)
+	// filter is the type-to-filter query for a filterable picker (long enemy/item/
+	// dialog lists); empty = show all. Reset when the dropdown opens/closes.
+	filter string
+}
+
+// filterableDropdown reports whether owner is a long "pick one of many" list that
+// supports type-to-filter (short fixed lists like AI mode / quest status don't).
+func filterableDropdown(o dropdownOwner) bool {
+	switch o {
+	case ddPackAdd, ddChestAdd, ddFoeKind, ddDialogCondFoe, ddDialogTriggerFoe,
+		ddDialogTriggerDialog, ddDialogSpeaker, ddDialogTriggerLocation:
+		return true
+	}
+	return false
+}
+
+// visibleDropdownEntries is dropdownEntries filtered by the live type-to-filter
+// query (case-insensitive label substring) for filterable owners. The single seam
+// both update and draw read, so cursor indices can't drift from what's shown.
+func visibleDropdownEntries(s *State) []dropdownEntry {
+	entries := dropdownEntries(s)
+	f := strings.TrimSpace(s.dropdown.filter)
+	if f == "" || !filterableDropdown(s.dropdown.owner) {
+		return entries
+	}
+	lf := strings.ToLower(f)
+	out := make([]dropdownEntry, 0, len(entries))
+	for _, e := range entries {
+		if strings.Contains(strings.ToLower(e.label), lf) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// pumpDropdownFilter appends typed characters / applies backspace to the filterable
+// dropdown's query, resetting the cursor so the top match is selected. No-op for a
+// non-filterable owner.
+func pumpDropdownFilter(s *State) {
+	if !filterableDropdown(s.dropdown.owner) {
+		return
+	}
+	for {
+		r := rl.GetCharPressed()
+		if r == 0 {
+			break
+		}
+		if r >= 32 && r < 127 {
+			s.dropdown.filter += string(rune(r))
+			s.dropdown.cursor = 0
+		}
+	}
+	if rl.IsKeyPressed(rl.KeyBackspace) && len(s.dropdown.filter) > 0 {
+		s.dropdown.filter = s.dropdown.filter[:len(s.dropdown.filter)-1]
+		s.dropdown.cursor = 0
+	}
 }
 
 const (
@@ -200,6 +257,7 @@ func layerSelectEntries(s *State) []dropdownEntry {
 		l := l
 		out = append(out, dropdownEntry{
 			label:    layerName(l),
+			desc:     layerDescriptions[l],
 			apply:    func(s *State) { s.layer = l },
 			toggle:   func(s *State) { toggleLayerVisibility(s, int(l), false) },
 			toggleOn: func(s *State) bool { return !s.layerHidden[l] },
@@ -490,8 +548,17 @@ func updateDropdown(s *State) bool {
 	if !s.dropdownOpen() {
 		return false
 	}
-	entries := dropdownEntries(s)
+	pumpDropdownFilter(s)
+	entries := visibleDropdownEntries(s)
 	if len(entries) == 0 {
+		// A filter that matches nothing keeps the panel open (so Backspace recovers);
+		// a genuinely empty list closes.
+		if filterableDropdown(s.dropdown.owner) && s.dropdown.filter != "" {
+			if editorCancelPressed() {
+				closeDropdown(s)
+			}
+			return true
+		}
 		closeDropdown(s)
 		return true
 	}
@@ -560,11 +627,19 @@ func drawDropdown(s *State, font rl.Font, theme render.Theme) {
 	if !s.dropdownOpen() {
 		return
 	}
-	entries := dropdownEntries(s)
+	entries := visibleDropdownEntries(s)
 	if len(entries) == 0 {
+		// Filterable picker with no matches: show the query + a "no matches" note so
+		// the empty panel isn't a mystery.
+		if filterableDropdown(s.dropdown.owner) && s.dropdown.filter != "" {
+			drawDropdownFilterCaption(s, font, theme, computeDropdownLayout(s, []dropdownEntry{{label: "(no matches)"}}).panel)
+		}
 		return
 	}
 	lay := computeDropdownLayout(s, entries)
+	if filterableDropdown(s.dropdown.owner) {
+		drawDropdownFilterCaption(s, font, theme, lay.panel)
+	}
 	// Opaque backing first: DrawCard fills with the translucent theme.SurfacePrimary, so
 	// over the map the rows wash out. A solid editor-window tone underneath keeps them legible.
 	rl.DrawRectangleRec(lay.panel, bgWindow)
@@ -621,12 +696,30 @@ func drawDropdown(s *State, font rl.Font, theme render.Theme) {
 		drawScrollArrow(font, false, rl.NewVector2(lay.panel.X+lay.panel.Width-16, lay.panel.Y+lay.panel.Height-16), editorFontHint, theme.TextHint)
 	}
 
-	// Show the cursored menu row's one-line explanation beneath the panel.
-	if s.dropdown.owner == ddMenu {
-		if cur := s.dropdown.cursor; cur >= 0 && cur < len(entries) && entries[cur].desc != "" {
-			drawMenuDesc(font, theme, lay.panel, entries[cur].desc)
-		}
+	// Show the cursored row's one-line explanation beneath the panel — any dropdown
+	// whose rows carry a desc (menu bar, layer picker, …), not just the menu bar.
+	if cur := s.dropdown.cursor; cur >= 0 && cur < len(entries) && entries[cur].desc != "" {
+		drawMenuDesc(font, theme, lay.panel, entries[cur].desc)
 	}
+}
+
+// drawDropdownFilterCaption paints the type-to-filter query above the panel (below
+// it near the top edge), so a filterable picker advertises the feature and shows the
+// live query.
+func drawDropdownFilterCaption(s *State, font rl.Font, theme render.Theme, panel rl.Rectangle) {
+	txt := "Filter: " + s.dropdown.filter
+	if s.dropdown.filter == "" {
+		txt = "Type to filter…"
+	}
+	w := render.MeasureRichText(font, txt, editorFontHint, 1).X + 2*dropdownPad
+	h := editorFontHint + 2*dropdownPad
+	x := panel.X
+	y := panel.Y - h - 6
+	if y < 4 {
+		y = panel.Y + panel.Height + 6
+	}
+	render.DrawCard(int32(x), int32(y), int32(w), int32(h), theme.SurfacePrimary, theme.BorderSoft, theme.BorderActive)
+	render.DrawRichText(font, txt, rl.NewVector2(x+dropdownPad, y+dropdownPad), editorFontHint, 1, theme.TextPrimary)
 }
 
 // drawMenuDesc paints the cursored-row explanation as a caption below the panel.

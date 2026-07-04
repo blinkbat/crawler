@@ -148,10 +148,7 @@ func FirstDownedPartyMember(party []PartyMember) int {
 // PartyMemberAvailable reports whether the member can act / be targeted this turn
 // — alive AND not ingested. Ingested members are alive but out of the fight.
 func PartyMemberAvailable(party []PartyMember, index int) bool {
-	if !PartyMemberAlive(party, index) {
-		return false
-	}
-	return !party[index].Ingested
+	return PartyIndexInRange(party, index) && MemberAvailable(party[index])
 }
 
 // ActivePartyCount counts members who can still act (alive AND not ingested).

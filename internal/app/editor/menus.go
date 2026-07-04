@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"crawler/internal/app/core"
 	"crawler/internal/app/input"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -27,7 +28,12 @@ var editorMenus = []menuGroup{
 	{label: "Edit", items: []dropdownEntry{
 		{label: "Undo", apply: undoOne, hotkey: "Ctrl+Z", desc: "Step back one change.", enabled: func(s *State) bool { return len(s.undo) > 0 }},
 		{label: "Redo", apply: redoOne, hotkey: "Ctrl+Y", desc: "Re-apply the last undone change.", enabled: func(s *State) bool { return len(s.redo) > 0 }},
-		{label: "Fill Layer", apply: fillEntireLayer, hotkey: "Ctrl+Shift+F", desc: "Flood the whole active layer with the current brush.", enabled: onGridLayer},
+		{label: "Fill Layer", apply: fillEntireLayer, hotkey: "Ctrl+Shift+F", desc: "Flood the whole active layer with the current brush.", enabled: canFillLayer},
+		{label: "Select All", apply: selectWholeMap, hotkey: "Ctrl+A", desc: "Select the whole map as a region."},
+		{label: "Copy Region", apply: copySelection, hotkey: "Ctrl+C", desc: "Copy the selected region (tiles + entities) to the clipboard.", enabled: hasSelection},
+		{label: "Cut Region", apply: cutSelection, hotkey: "Ctrl+X", desc: "Copy the selected region, then clear it.", enabled: hasSelection},
+		{label: "Paste Region", apply: menuPaste, hotkey: "Ctrl+V", desc: "Paste the clipboard at the cursor (or map center).", enabled: hasClipboard},
+		{label: "Duplicate", apply: duplicateSelection, hotkey: "Ctrl+D", desc: "Copy the selection and paste it one tile down-right.", enabled: hasSelection},
 	}},
 	{label: "View", items: []dropdownEntry{
 		{label: "Center on Start", apply: func(s *State) { centerViewOnTile(s, s.area.StartTileX, s.area.StartTileZ) }, desc: "Scroll the canvas to the player start tile."},
@@ -52,15 +58,57 @@ var editorMenus = []menuGroup{
 		{label: "Validate", apply: openValidateModal, desc: "Check the map for reachability and setup problems."},
 		{label: "Playtest", apply: func(s *State) { s.testRequested = true }, desc: "Launch the map in-game from its start tile."},
 	}},
+	{label: "Help", items: []dropdownEntry{
+		{label: "Keyboard Shortcuts…", apply: openHelpModal, hotkey: "?", desc: "Show the full list of editor shortcuts."},
+	}},
 }
 
 // menuEntries returns the rows of the currently-open menu (ddMenu owner), or nil
-// when the open-menu index is somehow out of range.
+// when the open-menu index is somehow out of range. The File menu appends the
+// recent-maps list dynamically (it changes at runtime, so it can't be a static row).
 func menuEntries(s *State) []dropdownEntry {
 	if s.dropdown.menu < 0 || s.dropdown.menu >= len(editorMenus) {
 		return nil
 	}
-	return editorMenus[s.dropdown.menu].items
+	items := editorMenus[s.dropdown.menu].items
+	if editorMenus[s.dropdown.menu].label == "File" {
+		if recent := recentMapEntries(s); len(recent) > 0 {
+			out := make([]dropdownEntry, 0, len(items)+len(recent))
+			out = append(out, items...)
+			out = append(out, recent...)
+			return out
+		}
+	}
+	return items
+}
+
+// recentMapEntries builds the File-menu recent-maps rows: a disabled header, then
+// one row per recent map (skipping the one already open). Opening is non-destructive
+// (openRecentPath guards unsaved changes).
+func recentMapEntries(s *State) []dropdownEntry {
+	paths := s.recentSnapshot // snapshot taken in openMenu; avoids a per-frame prefs re-read
+	if len(paths) == 0 {
+		return nil
+	}
+	cur := s.area.Path
+	var out []dropdownEntry
+	for _, p := range paths {
+		if p == cur {
+			continue // already open
+		}
+		path := p
+		out = append(out, dropdownEntry{
+			label: core.MapIDFromPath(path),
+			apply: func(s *State) { openRecentPath(s, path) },
+			desc:  "Open " + path,
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	// Lead with a non-selectable header so the list reads as a group.
+	header := dropdownEntry{label: "— Recent —", enabled: func(*State) bool { return false }}
+	return append([]dropdownEntry{header}, out...)
 }
 
 // menuBarBtns is the top-row strip, one button per menu group (built from editorMenus).
@@ -94,5 +142,6 @@ func openMenu(s *State, i int) {
 		return
 	}
 	s.dropdown = dropdownState{owner: ddMenu, menu: i, anchor: menuAnchorRect(i), growDown: true}
+	s.recentSnapshot = RecentMaps() // read prefs once per open, not per frame while the menu shows
 	input.ResetStickEdges()
 }

@@ -214,22 +214,30 @@ func DownPressed() bool {
 	return rl.IsKeyPressed(rl.KeyDown) || rl.IsKeyPressed(rl.KeyS) || padDirDown()
 }
 
-// CursorUpDown applies UpPressed / DownPressed to a wrap-around cursor in
-// [0, count). Safe for count <= 0 (returns cursor unchanged).
-func CursorUpDown(cursor, count int) int {
+// wrapCursor clamps cursor into [0, count) then applies a signed step (−1 back,
+// +1 forward, 0 no-op) with wrap-around — the shared body of the CursorUpDown /
+// CursorUpDownTextSafe / CursorLeftRightWrap navigators. Safe for count <= 0
+// (returns cursor unchanged). The re-clamp runs even on a no-press frame: a list
+// can shrink between frames and leave the stored cursor past the end.
+func wrapCursor(cursor, count, step int) int {
 	if count <= 0 {
 		return cursor
 	}
-	// Re-clamp even on a no-press frame: a list can shrink between frames and
-	// leave the stored cursor past the end until the next nav press.
 	cursor = core.Clamp(cursor, 0, count-1)
+	return core.WrapIndex(cursor+step, count)
+}
+
+// CursorUpDown applies UpPressed / DownPressed to a wrap-around cursor in
+// [0, count). Safe for count <= 0 (returns cursor unchanged).
+func CursorUpDown(cursor, count int) int {
+	step := 0
 	if UpPressed() {
-		cursor = core.WrapIndex(cursor-1, count)
+		step--
 	}
 	if DownPressed() {
-		cursor = core.WrapIndex(cursor+1, count)
+		step++
 	}
-	return cursor
+	return wrapCursor(cursor, count, step)
 }
 
 // CursorUpDownTextSafe is CursorUpDown without W/S, for a list with an active
@@ -237,18 +245,14 @@ func CursorUpDown(cursor, count int) int {
 // text field doesn't scroll when W/S are typed. Uses Arrow{Up,Down}Pressed (the
 // "arrows + pad, no WASD" rule) so that vocabulary lives in one place.
 func CursorUpDownTextSafe(cursor, count int) int {
-	if count <= 0 {
-		return cursor
-	}
-	// Same no-press re-clamp as CursorUpDown — see there.
-	cursor = core.Clamp(cursor, 0, count-1)
+	step := 0
 	if ArrowUpPressed() {
-		cursor = core.WrapIndex(cursor-1, count)
+		step--
 	}
 	if ArrowDownPressed() {
-		cursor = core.WrapIndex(cursor+1, count)
+		step++
 	}
-	return cursor
+	return wrapCursor(cursor, count, step)
 }
 
 // --- Editor bindings ---------------------------------------------------------
@@ -318,18 +322,7 @@ func CursorStep() int {
 // [0, count) — the panels overlay moves the member column with it. Safe for
 // count <= 0.
 func CursorLeftRightWrap(cursor, count int) int {
-	if count <= 0 {
-		return cursor
-	}
-	// Same no-press re-clamp as CursorUpDown.
-	cursor = core.Clamp(cursor, 0, count-1)
-	switch CursorLeftRight() {
-	case 1:
-		return core.WrapIndex(cursor+1, count)
-	case -1:
-		return core.WrapIndex(cursor-1, count)
-	}
-	return cursor
+	return wrapCursor(cursor, count, CursorLeftRight())
 }
 
 // TargetNext/PreviousPressed advance/retreat the combat target cursor. Left/Right
@@ -547,16 +540,16 @@ func MapPanInput() (float32, float32) {
 	if gamepadConnected() {
 		x += applyDeadzone(rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisLeftX), mapStickDeadzone)
 		y += applyDeadzone(rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisLeftY), mapStickDeadzone)
-		if rl.IsGamepadButtonDown(gamepadID, rl.GamepadButtonLeftFaceLeft) {
+		if padDown(rl.GamepadButtonLeftFaceLeft) {
 			x -= 1
 		}
-		if rl.IsGamepadButtonDown(gamepadID, rl.GamepadButtonLeftFaceRight) {
+		if padDown(rl.GamepadButtonLeftFaceRight) {
 			x += 1
 		}
-		if rl.IsGamepadButtonDown(gamepadID, rl.GamepadButtonLeftFaceUp) {
+		if padDown(rl.GamepadButtonLeftFaceUp) {
 			y -= 1
 		}
-		if rl.IsGamepadButtonDown(gamepadID, rl.GamepadButtonLeftFaceDown) {
+		if padDown(rl.GamepadButtonLeftFaceDown) {
 			y += 1
 		}
 	}

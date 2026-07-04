@@ -431,11 +431,11 @@ func handleEnemyStoneslam(ctx enemySpellCtx) bool {
 	}
 	switch {
 	case hits == 0:
-		setBattleMessage(g, fmt.Sprintf("%s raises stone fists, but finds no targets.", core.TheEnemy(ctx.def)))
+		setBattleMessage(g, ctx.enemyLine(" raises stone fists, but finds no targets."))
 	case kills > 0:
-		setBattleMessageCat(g, fmt.Sprintf("%s slams the ground — %d crushed.", core.TheEnemy(ctx.def), kills), core.LogDamageParty)
+		setBattleMessageCat(g, ctx.enemyLine(" slams the ground — %d crushed.", kills), core.LogDamageParty)
 	default:
-		setBattleMessageCat(g, fmt.Sprintf("%s slams the ground — the whole party staggers.", core.TheEnemy(ctx.def)), core.LogDamageParty)
+		setBattleMessageCat(g, ctx.enemyLine(" slams the ground — the whole party staggers."), core.LogDamageParty)
 	}
 	audio.Play(audio.SoundEnemyHit)
 	// No targets = connected with nothing; don't count it.
@@ -448,7 +448,7 @@ func handleEnemyRaiseBones(ctx enemySpellCtx) bool {
 	g := ctx.g
 	pack := core.ActivePack(g)
 	if pack == nil {
-		setBattleMessage(g, fmt.Sprintf("%s gestures, but the bones refuse to rise.", core.TheEnemy(ctx.def)))
+		setBattleMessage(g, ctx.enemyLine(" gestures, but the bones refuse to rise."))
 		return false
 	}
 	skeleton := core.NewEnemy(core.EnemySkeleton)
@@ -458,7 +458,7 @@ func handleEnemyRaiseBones(ctx enemySpellCtx) bool {
 	// the expanded pack.Members, so it acts the round AFTER this cast. The append
 	// reallocates pack.Members (it's at exact capacity), dangling ctx.enemy — but the
 	// AttackBump is applied by resolveEnemySpell on the slot-refetched live caster.
-	setBattleMessage(g, fmt.Sprintf("%s incants — a skeleton claws up from the ground!", core.TheEnemy(ctx.def)))
+	setBattleMessage(g, ctx.enemyLine(" incants — a skeleton claws up from the ground!"))
 	audio.Play(audio.SoundInputHit)
 	return true
 }
@@ -1249,6 +1249,20 @@ func applyAllyTargetSkill(g *core.GameState, skill core.SkillID, cat core.LogCat
 	return true
 }
 
+// applyPartyWideBuffSkill is the party-wide-buff sibling of applyAllyTargetSkill /
+// applyEnemyDebuffSkill: pay + begin the turn, stamp the tier-folded effect on every
+// available member (caster included), then hand off to msg for the skill's log line.
+// Always lands (no proc / no target gate); finishActorTurn is shared. Skills that also
+// touch enemies (Smoke Bomb) stay bespoke.
+func applyPartyWideBuffSkill(g *core.GameState, skill core.SkillID, msg func(actor *core.PartyMember, effect core.SkillEffect, count int) string) bool {
+	actor := beginPartyAction(g)
+	effect := core.EffectiveSkillEffect(actor, skill)
+	count := stampPartyWideBuff(g, effect, skill)
+	setBattleMessage(g, msg(actor, effect, count))
+	finishActorTurn(g)
+	return true
+}
+
 // applyCripple stamps the SPD debuff onto the target via the enemy BuffStats
 // mirror (EffectiveEnemyStats folds it into the ATB rate while it runs). No
 // damage / proc roll; re-cast overwrites (no-stack).
@@ -1381,14 +1395,11 @@ func applyMassMend(g *core.GameState, quality int) bool {
 // applyBless stamps the tier-folded stat buff on every available member (caster
 // included). Always lands (no proc roll); re-cast replaces (no-stack).
 func applyBless(g *core.GameState, quality int) bool {
-	actor := beginPartyAction(g)
-	effect := core.EffectiveSkillEffect(actor, core.SkillBless)
-	blessed := stampPartyWideBuff(g, effect, core.SkillBless)
-	// Report the EFFECTIVE per-stat boost (all four share one magnitude), not the base.
-	setBattleMessage(g, qualityLine(quality, actor.Name, " blesses %d allies (+%d stats, %d turns).",
-		blessed, effect.BuffStats.STR, effect.BuffTurns))
-	finishActorTurn(g)
-	return true
+	return applyPartyWideBuffSkill(g, core.SkillBless, func(actor *core.PartyMember, effect core.SkillEffect, count int) string {
+		// Report the EFFECTIVE per-stat boost (all four share one magnitude), not the base.
+		return qualityLine(quality, actor.Name, " blesses %d allies (+%d stats, %d turns).",
+			count, effect.BuffStats.STR, effect.BuffTurns)
+	})
 }
 
 // --- Smite (Cleric, press-tap magic damage) ---
@@ -1734,13 +1745,10 @@ func applyCombust(g *core.GameState, quality int) bool {
 // --- Bulwark of Faith (Cleric, press party-wide Armor/MDef aura) ---
 
 func applyBulwark(g *core.GameState, quality int) bool {
-	actor := beginPartyAction(g)
-	effect := core.EffectiveSkillEffect(actor, core.SkillBulwark)
-	warded := stampPartyWideBuff(g, effect, core.SkillBulwark)
-	setBattleMessage(g, qualityLine(quality, actor.Name, " raises a bulwark of faith — %d allies gain +%d Armor / +%d MDef (%d turns).",
-		warded, effect.BuffArmor, effect.BuffMDef, effect.BuffTurns))
-	finishActorTurn(g)
-	return true
+	return applyPartyWideBuffSkill(g, core.SkillBulwark, func(actor *core.PartyMember, effect core.SkillEffect, count int) string {
+		return qualityLine(quality, actor.Name, " raises a bulwark of faith — %d allies gain +%d Armor / +%d MDef (%d turns).",
+			count, effect.BuffArmor, effect.BuffMDef, effect.BuffTurns)
+	})
 }
 
 // --- Dispel (Wizard, press enemy-buff strip) ---
@@ -1789,10 +1797,7 @@ func applyResurrect(g *core.GameState, quality int) bool {
 	if idx < 0 {
 		// Defensive: the only downed ally could have been released/changed between
 		// setup and apply. Refund and bail cleanly.
-		refundSkillMP(g, core.SkillResurrect)
-		setBattleStatus(g, msgNoTarget)
-		finishActorTurn(g)
-		return false
+		return cancelGoneTarget(g, core.SkillResurrect)
 	}
 	actor := beginPartyAction(g)
 	m := &g.Party[idx]
@@ -1959,13 +1964,10 @@ func applyTaunt(g *core.GameState, quality int) bool {
 // --- War Banner (Warrior, press party-wide STR/VIT rally) ---
 
 func applyWarBanner(g *core.GameState, quality int) bool {
-	actor := beginPartyAction(g)
-	effect := core.EffectiveSkillEffect(actor, core.SkillWarBanner)
-	rallied := stampPartyWideBuff(g, effect, core.SkillWarBanner)
-	setBattleMessage(g, qualityLine(quality, actor.Name, " plants a war banner — %d allies rally (+%d STR, +%d Armor, %d turns).",
-		rallied, effect.BuffStats.STR, effect.BuffArmor, effect.BuffTurns))
-	finishActorTurn(g)
-	return true
+	return applyPartyWideBuffSkill(g, core.SkillWarBanner, func(actor *core.PartyMember, effect core.SkillEffect, count int) string {
+		return qualityLine(quality, actor.Name, " plants a war banner — %d allies rally (+%d STR, +%d Armor, %d turns).",
+			count, effect.BuffStats.STR, effect.BuffArmor, effect.BuffTurns)
+	})
 }
 
 // --- Stone Skin (Warrior, press single-ally Armor/MDef ward) ---

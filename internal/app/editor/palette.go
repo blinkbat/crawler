@@ -81,6 +81,10 @@ var (
 	// distinct from the white selectionOutline ghost on the same canvas.
 	marqueeOutline = rl.NewColor(255, 206, 84, 235)
 	marqueeFill    = rl.NewColor(255, 206, 84, 40)
+	// pasteGhost* previews where a Ctrl+V (or a selection move) will land. Cyan so it
+	// reads apart from the amber marquee and the white brush ghost on the same canvas.
+	pasteGhostOutline = rl.NewColor(96, 220, 232, 230)
+	pasteGhostFill    = rl.NewColor(96, 220, 232, 38)
 	// entityMarkerOutline rings pack/chest/start markers. Aliases render.MarkerOutline
 	// so canvas and minimap can't drift on the silhouette tone.
 	entityMarkerOutline = render.MarkerOutline
@@ -170,6 +174,10 @@ var (
 	isoBlockedWire = rl.NewColor(255, 96, 96, 255)
 	isoBG          = rl.NewColor(26, 28, 34, 255)
 	isoActiveFloor = withAlpha(editorCyan, 55)
+	// Iso corner-readout text tones: the orbit/zoom hint line, and the active-floor
+	// + brush line (a lighter cyan echoing editorCyan's active-floor slab).
+	isoReadoutHint        = rl.NewColor(210, 214, 222, 200)
+	isoReadoutActiveFloor = rl.NewColor(150, 210, 255, 235)
 
 	// rampConnectorColor strokes the ramp low→high connector on the canvas.
 	rampConnectorColor = rl.NewColor(120, 230, 140, 220)

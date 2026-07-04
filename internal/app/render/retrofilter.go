@@ -322,26 +322,28 @@ func uploadRetroUniforms(g *core.GameState) {
 // if the RT/shader somehow aren't ready, so the FX never silently vanishes.
 func DrawFilteredCombatFX(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if !retroRT.init || !retroLoaded {
-		rl.BeginMode3D(camera)
-		rl.DisableDepthTest()
-		TickAndDrawVFX(camera, g, assets)
-		rl.EnableDepthTest()
-		rl.EndMode3D()
-		DrawHitGlyphs(camera, g, assets)
+		drawCombatFXInline(camera, g, assets)
 		return
 	}
 	rl.BeginTextureMode(retroRT.rt)
 	rl.ClearBackground(rl.Blank) // transparent FX layer (alpha-composites on blit)
-	// Particles (3D, depth off so battle FX paint over) then hit-glyphs (2D screen
-	// space) — both land in the RT and the one -height blit flips them upright.
+	drawCombatFXInline(camera, g, assets)
+	rl.EndTextureMode()
+	blitRetroRT(g, true)
+}
+
+// drawCombatFXInline draws the combat FX in draw order — VFX particles (3D, depth
+// off so battle FX paint over the scene) then hit-glyphs (2D screen space). Shared
+// by DrawFilteredCombatFX's RT path and its crisp fallback so the order and the
+// depth-test bracketing can't drift; inside the RT path the one -height blit flips
+// the result upright.
+func drawCombatFXInline(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	rl.BeginMode3D(camera)
 	rl.DisableDepthTest()
 	TickAndDrawVFX(camera, g, assets)
 	rl.EnableDepthTest()
 	rl.EndMode3D()
 	DrawHitGlyphs(camera, g, assets)
-	rl.EndTextureMode()
-	blitRetroRT(g, true)
 }
 
 // DrawCrispSpritePass draws billboards (+VFX, unless withVFX is false) UNFILTERED
