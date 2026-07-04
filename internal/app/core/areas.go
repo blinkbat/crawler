@@ -156,14 +156,6 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	if err := mf.ValidateEntityBounds(); err != nil {
 		return AreaDefinition{}, err
 	}
-	customs := make([]CustomEnemyDef, 0, len(mf.CustomEnemies))
-	for _, ce := range mf.CustomEnemies {
-		def, err := CustomEnemyDefFromMap(ce)
-		if err != nil {
-			return AreaDefinition{}, err
-		}
-		customs = append(customs, def)
-	}
 	spawns := make([]PackSpawn, 0, len(mf.Packs))
 	for _, p := range mf.Packs {
 		if len(p.Members) == 0 {
@@ -171,15 +163,9 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		}
 		members := make([]PackMemberRef, 0, len(p.Members))
 		for _, name := range p.Members {
-			// Custom enemies win a name collision with a built-in kind, else the
-			// author's overrides (stats/skills/rewards) would be silently dropped.
-			if def, ok := CustomEnemyByName(customs, name); ok {
-				members = append(members, CustomPackMember(def))
-				continue
-			}
 			kind, ok := EnemyKindFromName(name)
 			if !ok {
-				return AreaDefinition{}, fmt.Errorf("unknown enemy kind or custom enemy %q", name)
+				return AreaDefinition{}, fmt.Errorf("unknown enemy kind %q", name)
 			}
 			members = append(members, BuiltinPackMember(kind))
 		}
@@ -270,7 +256,6 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		DoorSpawns:       doors,
 		CrystalSpawns:    crystals,
 		CrystalsAuthored: mf.CrystalsDefined,
-		CustomEnemies:    customs,
 		QuietMessage:     mf.Quiet,
 		Dialogs:          dialogs,
 		Triggers:         triggers,
@@ -334,17 +319,6 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 		ordered, backCount := PartitionMembersByRow(s.Members)
 		names := make([]string, 0, len(ordered))
 		for _, member := range ordered {
-			if customName := member.CustomName; customName != "" {
-				safeName := SanitizeCustomEnemyName(customName)
-				if safeName == "" {
-					return mapfile.MapFile{}, fmt.Errorf("custom enemy member at (%d,%d) has empty name after sanitize", s.TileX, s.TileZ)
-				}
-				if _, ok := CustomEnemyByName(a.CustomEnemies, safeName); !ok {
-					return mapfile.MapFile{}, fmt.Errorf("unknown custom enemy %q in pack at (%d,%d)", customName, s.TileX, s.TileZ)
-				}
-				names = append(names, safeName)
-				continue
-			}
 			kindName, ok := EnemyKindName(member.Kind)
 			if !ok {
 				return mapfile.MapFile{}, fmt.Errorf("unknown enemy kind %d in pack at (%d,%d)", int(member.Kind), s.TileX, s.TileZ)
@@ -413,14 +387,6 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 		}
 	}
 	elevation = mapfile.OptionalLayerOrBlank(elevation, a.Width, a.Height, ElevationGround)
-	customs := make([]mapfile.MapCustomEnemy, 0, len(a.CustomEnemies))
-	for _, ce := range a.CustomEnemies {
-		mapCE, err := MapCustomEnemyFromDef(ce)
-		if err != nil {
-			return mapfile.MapFile{}, err
-		}
-		customs = append(customs, mapCE)
-	}
 	dialogLines, err := DialogsToLines(a.Dialogs)
 	if err != nil {
 		return mapfile.MapFile{}, err
@@ -466,7 +432,6 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 		Doors:           doors,
 		Crystals:        crystals,
 		CrystalsDefined: a.CrystalsAuthored,
-		CustomEnemies:   customs,
 		Dialogs:         dialogLines,
 		Triggers:        triggerLines,
 		Locations:       locationLines,
@@ -897,8 +862,7 @@ func EnemyKindFromName(s string) (EnemyKind, bool) {
 // SanitizeFilename normalizes a string into a safe filename stem: lowercase
 // ASCII letters/digits/underscore/hyphen only, spaces → underscore, rest stripped.
 // Returns `fallback` (or "" so the caller can refuse) when nothing usable remains.
-// KEEPS hyphens — distinct from slugify (folds hyphens, no fallback) and
-// SanitizeCustomEnemyName (preserves case+punctuation); don't substitute.
+// KEEPS hyphens — distinct from slugify (folds hyphens, no fallback); don't substitute.
 func SanitizeFilename(name, fallback string) string {
 	out := strings.ToLower(strings.TrimSpace(name))
 	out = strings.ReplaceAll(out, " ", "_")

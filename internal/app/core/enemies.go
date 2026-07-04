@@ -458,7 +458,6 @@ func init() {
 		seenKind[def.Kind] = struct{}{}
 	}
 	for _, def := range enemyDefinitions {
-		// Shared with the custom-enemy loader (customenemy.go).
 		if err := validateEnemyStatBounds(enemyStatBounds{
 			Name:            def.Name,
 			SkillCastChance: def.SkillCastChance,
@@ -546,9 +545,6 @@ func EnemyInfo(kind EnemyKind) EnemyDefinition {
 // (if set) and Armor applied — for renderer/log text about a live enemy.
 func EnemyInfoFor(enemy Enemy) EnemyDefinition {
 	def := *enemyGoverningDef(&enemy)
-	if enemy.HasDefinitionOverride {
-		def.Kind = enemy.Kind
-	}
 	if enemy.MaxHP > 0 {
 		def.MaxHP = enemy.MaxHP
 	}
@@ -558,14 +554,10 @@ func EnemyInfoFor(enemy Enemy) EnemyDefinition {
 	return def
 }
 
-// enemyGoverningDef returns a POINTER to the governing definition (embedded
-// DefinitionOverride for a custom enemy, else the registry row) without copying
-// the ~200-byte struct — for the per-frame narrow accessors. Does NOT apply live
-// MaxHP/Armor (use EnemyInfoFor). Panics on an unregistered kind.
+// enemyGoverningDef returns a POINTER to the governing registry definition without
+// copying the ~200-byte struct — for the per-frame narrow accessors. Does NOT apply
+// live MaxHP/Armor (use EnemyInfoFor). Panics on an unregistered kind.
 func enemyGoverningDef(e *Enemy) *EnemyDefinition {
-	if e.HasDefinitionOverride {
-		return &e.DefinitionOverride
-	}
 	if def, ok := enemyByKind[e.Kind]; ok {
 		return def
 	}
@@ -682,8 +674,7 @@ func NewEnemy(kind EnemyKind) Enemy {
 
 // newEnemyFromDef builds the base spawn Enemy from a definition: difficulty-scaled
 // HP, alive, with the def's drop item + armor. The single spawn-construction site
-// shared by NewEnemy and CustomEnemyDef.Instantiate (which augments the override
-// fields). SkillCastCount stays nil — nil-map reads return 0, so the lookup is
+// (NewEnemy). SkillCastCount stays nil — nil-map reads return 0, so the lookup is
 // safe before any cast; handleEnemyRaiseBones lazily allocates.
 func newEnemyFromDef(kind EnemyKind, def EnemyDefinition) Enemy {
 	maxHP := ScaleEnemyDifficulty(def.MaxHP)

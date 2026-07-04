@@ -219,17 +219,12 @@ func placePacks(a *AreaDefinition) []Pack {
 		members := make([]Enemy, 0, len(spawn.Members))
 		for _, member := range spawn.Members {
 			e := NewEnemy(member.Kind)
-			if name := member.CustomName; name != "" {
-				if def, ok := CustomEnemyByName(a.CustomEnemies, name); ok {
-					e = def.Instantiate()
-				}
-			}
 			e.Row = member.Row // carry authored formation rank (front/back)
 			members = append(members, e)
 		}
 		packs = append(packs, Pack{
-			TileX:     snap.TileX,
-			TileZ:     snap.TileZ,
+			TileX: snap.TileX,
+			TileZ: snap.TileZ,
 			// Honor the authored floor when standable at the snapped tile; else fall
 			// back to the ground surface (covers legacy spawns with Level 0).
 			Level:     a.resolveEntityLevel(snap.TileX, snap.TileZ, spawn.Level),

@@ -276,7 +276,29 @@ func twoColTracks(n int, rightX, colW, colTrackW, baseY float32) []rl.Rectangle 
 
 // computeFoeViewLayout is the single geometry source for the modal's draw and
 // hit-test (so widgets and click rects can't drift).
+var (
+	foeViewLayoutCache      foeViewLayout
+	foeViewLayoutCacheW     int32
+	foeViewLayoutCacheH     int32
+	foeViewLayoutCacheReady bool
+)
+
+// computeFoeViewLayout returns the Visualizer geometry, memoized on screen size:
+// its inputs are all constants + centeredCardRect(screen), so it only changes on a
+// window resize. Both the modal's Update and Draw call it every frame, so caching
+// collapses the ~5 slice allocations to once per resize.
 func computeFoeViewLayout() foeViewLayout {
+	w, h := render.ScreenSize()
+	if foeViewLayoutCacheReady && foeViewLayoutCacheW == w && foeViewLayoutCacheH == h {
+		return foeViewLayoutCache
+	}
+	l := buildFoeViewLayout()
+	foeViewLayoutCache, foeViewLayoutCacheW, foeViewLayoutCacheH = l, w, h
+	foeViewLayoutCacheReady = true
+	return l
+}
+
+func buildFoeViewLayout() foeViewLayout {
 	card := centeredCardRect(foeModalW, foeModalH)
 	preview := rl.NewRectangle(
 		card.X+foePad,
@@ -631,11 +653,9 @@ func updateVisualizerModal(s *State, cb visualizerCallbacks) Action {
 // active-tab sliders/buttons, the prev/next arrows + name span, then
 // Save/Reset/Close. Behavior-identical to the old per-modal click handlers.
 func handleVisualizerClick(s *State, l *foeViewLayout, mp rl.Vector2, cb visualizerCallbacks) {
-	for i := range l.tabBtns {
-		if pointIn(mp, l.tabBtns[i]) {
-			selectFoeViewTab(s, i, cb.drag)
-			return
-		}
+	if i := firstRectHit(mp, l.tabBtns); i >= 0 {
+		selectFoeViewTab(s, i, cb.drag)
+		return
 	}
 	if s.foeViewTab == foeTabLayout {
 		for i := range foeFields {
@@ -656,10 +676,7 @@ func handleVisualizerClick(s *State, l *foeViewLayout, mp rl.Vector2, cb visuali
 				return
 			}
 		}
-		for i := range l.assetBtns {
-			if !pointIn(mp, l.assetBtns[i]) {
-				continue
-			}
+		if i := firstRectHit(mp, l.assetBtns); i >= 0 {
 			applyAssetAction(s, cb.override, i)
 			return
 		}
@@ -688,11 +705,6 @@ func handleVisualizerClick(s *State, l *foeViewLayout, mp rl.Vector2, cb visuali
 		closeVisualizer(s, cb)
 		return
 	}
-}
-
-// padRect grows r by (dx, dy) on every side (fatter click band for thin tracks).
-func padRect(r rl.Rectangle, dx, dy float32) rl.Rectangle {
-	return rl.NewRectangle(r.X-dx, r.Y-dy, r.Width+2*dx, r.Height+2*dy)
 }
 
 // applyPreviewZoomWheel dollies the preview on a wheel turn over the pane (shared;

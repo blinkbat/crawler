@@ -9,7 +9,7 @@ import (
 
 // Editor chrome font ladder — its OWN smaller scale, not the render.Font*
 // tokens (which are too large for the editor's tight buttons). sounds.go keeps
-// its own soundFont* trio.
+// its own soundFont* pair.
 const (
 	editorFontTopbar = float32(20) // topbar map-id label
 	editorFontBody   = float32(18) // buttons + primary panel text
@@ -27,6 +27,21 @@ const tooltipLineH = float32(14)
 // bodyLineH is the body-font line height used to vertically center editorFontBody
 // text in a row (r.Y + (r.Height-bodyLineH)/2).
 const bodyLineH = float32(16)
+
+// fieldTextInsetX is the left text pad inside an editable text field / readonly
+// value box (drawTextField / drawReadonlyValue and the sound-modal fields).
+const fieldTextInsetX = float32(8)
+
+// panelHeadingInsetX / panelHeadingInsetY position a side-panel's DrawHeading from
+// its top-left corner (the BRUSHES + MAP panels).
+const (
+	panelHeadingInsetX = int32(12)
+	panelHeadingInsetY = int32(8)
+)
+
+// modalHeadingInsetY is the Y offset from a modal card's top edge to its heading
+// baseline (paired with modalContentInset for X in drawModalHeaderAt).
+const modalHeadingInsetY = int32(12)
 
 // Editor UI chrome palette: the editor's own buttons, panels, borders, and
 // overlays (map-content colors live in layerBrushes, editor.go).
@@ -73,6 +88,12 @@ var (
 	// charGlyphFG is the glyph foreground it backs.
 	glyphShadow = withAlpha(outlineHard, 200)
 	charGlyphFG = rl.NewColor(248, 250, 252, 235)
+	// recentSwatchFallback tints a recent-brush swatch whose brush carries no color.
+	recentSwatchFallback = rl.NewColor(80, 80, 90, 255)
+	// Editor compass (drawEditorCompass): red north needle; the pale south needle
+	// and cardinal letters share compassPale.
+	compassNeedleNorth = rl.NewColor(232, 92, 74, 255)
+	compassPale        = rl.NewColor(212, 216, 224, 235)
 	// sentinelHatchStripe is the diagonal scrim marking a "semantic" (non-color) swatch.
 	sentinelHatchStripe = rl.NewColor(0, 0, 0, 110)
 	// selectionOutline is the white ring around brush-ghost / rect-drag / pack-drag previews.

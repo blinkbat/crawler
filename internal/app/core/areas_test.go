@@ -355,48 +355,6 @@ func TestAreaFromMapFile_ValidatesOptionalLayerDimensions(t *testing.T) {
 	}
 }
 
-// TestPackMember_CustomNameShadowsBuiltin: a custom enemy whose name collides
-// with a built-in ("goblin") must resolve to the CUSTOM def — pack resolution
-// checks the map's CustomEnemies before the built-in registry.
-func TestPackMember_CustomNameShadowsBuiltin(t *testing.T) {
-	// Sanity: the name really collides with a built-in kind.
-	if _, ok := EnemyKindFromName("goblin"); !ok {
-		t.Fatal("precondition: \"goblin\" should name a built-in kind")
-	}
-
-	row, err := MapCustomEnemyFromDef(CustomEnemyDef{
-		Name:     "goblin", // deliberately collides with the built-in
-		BaseKind: EnemyRat, // a DIFFERENT base, so a shadow would be visible
-		HP:       99,
-		Stats:    Stats{STR: 1, DEX: 1, INT: 1, WIS: 1, VIT: 1, SPD: 1},
-		XPValue:  7,
-		Tier:     2,
-	})
-	if err != nil {
-		t.Fatalf("MapCustomEnemyFromDef: %v", err)
-	}
-	mf := mapfile.MapFile{
-		Name: "Collide", Materials: "dungeon", Width: 3, Height: 3,
-		StartX: 1, StartZ: 1, StartFace: "east",
-		Walls:         []string{"...", "...", "..."},
-		Floor:         []string{"...", "...", "..."},
-		Decor:         []string{"...", "...", "..."},
-		Props:         []string{"...", "...", "..."},
-		CustomEnemies: []mapfile.MapCustomEnemy{row},
-		Packs:         []mapfile.MapPack{{Members: []string{"goblin"}, X: 0, Z: 0}},
-	}
-	area, err := AreaFromMapFile(mf, "maps/collide.map")
-	if err != nil {
-		t.Fatalf("AreaFromMapFile: %v", err)
-	}
-	if len(area.PackSpawns) != 1 || len(area.PackSpawns[0].Members) != 1 {
-		t.Fatalf("pack did not resolve: %+v", area.PackSpawns)
-	}
-	if got := area.PackSpawns[0].Members[0].CustomName; got != "goblin" {
-		t.Errorf("colliding name resolved to the built-in (CustomName=%q), want the custom def %q", got, "goblin")
-	}
-}
-
 // TestChestOnStartTileRejected: a chest on the player-start tile blocks the
 // spawn, so it must be rejected at load rather than silently dropped at runtime.
 func TestChestOnStartTileRejected(t *testing.T) {

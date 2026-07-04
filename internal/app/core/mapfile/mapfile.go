@@ -64,7 +64,7 @@ type MapFile struct {
 	// Weather is the optional per-area ambient-weather override: "" / "auto" (roof-
 	// gated default), "clear" (never rains), "rain" (always storming). Absent on
 	// pre-weather maps → auto; written only when non-auto so old maps stay byte-stable.
-	Weather string
+	Weather   string
 	Width     int
 	Height    int
 	StartX    int
@@ -108,9 +108,6 @@ type MapFile struct {
 	// Chests is the authored chest list. Items is a comma-separated list of
 	// ItemDefinition.Name strings; empty = empty chest (renders open).
 	Chests []MapChest
-	// CustomEnemies is the author-defined enemy template list; optional,
-	// emitted after doors:.
-	CustomEnemies []MapCustomEnemy
 	// Doors is the authored door list: each names itself, its destination map +
 	// matching-door name (or "self"), and the tile + post-transition facing.
 	// Resolved at step-on time. Bidirectional pairs are author-authored — the
@@ -275,9 +272,9 @@ type MapDoor struct {
 	Z          int
 	// Level is the voxel floor this door belongs to (section @N suffix; 0 = plain
 	// `doors:`). See sectionFor.
-	Level      int
-	Facing     string
-	Style      string
+	Level  int
+	Facing string
+	Style  string
 }
 
 // MapCrystal is one authored healing crystal at a tile. On-disk "X Z" only
@@ -373,38 +370,6 @@ const (
 	AssetFileMode = 0o644
 )
 
-// MapCustomEnemy is one author-defined enemy template. Positional whitespace-
-// separated on a single line:
-//
-//	<name> <base_kind> <hp> <mp> <str> <dex> <int> <wis> <vit> <spd> <armor> <mdef> <xp> <tier> <dmg> <sklch> <spwr> <skills>
-//
-// Skills is `-` for none or a comma-separated list. BaseKind is the on-disk enemy
-// name whose sprite + flavor the custom enemy reuses (resolved via core).
-type MapCustomEnemy struct {
-	Name            string
-	BaseKind        string
-	HP              int
-	MP              int
-	STR             int
-	DEX             int
-	INT             int
-	WIS             int
-	VIT             int
-	SPD             int
-	Armor           int
-	MDef            int
-	XPValue         int
-	Tier            int
-	AttackDamage    int
-	SkillCastChance float64
-	SpellPower      int
-	Skills          []string
-}
-
-// customEnemyNoSkillsToken is the placeholder for a custom enemy with no skills
-// (mirrors EmptyChestToken; keeps the row at customEnemyFieldCount fields).
-const customEnemyNoSkillsToken = "-"
-
 // layerSlot is which grid/section the upcoming rows go into.
 type layerSlot int
 
@@ -420,7 +385,6 @@ const (
 	slotChests
 	slotDoors
 	slotCrystals
-	slotCustomEnemies
 	slotDialogs
 	slotTriggers
 	slotLocations
@@ -440,27 +404,26 @@ const (
 // Section header names — on-disk labels (header line is name+colon); sectionFor
 // and Encode share these so reader and writer can't drift.
 const (
-	SectionWalls         = "walls"
-	SectionFloor         = "floor"
-	SectionDecor         = "decor"
-	SectionProps         = "props"
-	SectionCeiling       = "ceiling"
-	SectionElevation     = "elevation"
-	SectionEnemies       = "enemies"
-	SectionChests        = "chests"
-	SectionDoors         = "doors"
-	SectionCrystals      = "crystals"
-	SectionCustomEnemies = "custom_enemies"
-	SectionDialogs       = "dialogs"
-	SectionTriggers      = "triggers"
-	SectionLocations     = "locations"
-	SectionSolids        = "solids"
-	SectionPropLevels    = "prop_levels"
-	SectionDecorLevels   = "decor_levels"
-	SectionFaces         = "faces"
-	SectionPropStack     = "propstack"
-	SectionDecorStack    = "decorstack"
-	SectionPropYaw       = "prop_yaw"
+	SectionWalls       = "walls"
+	SectionFloor       = "floor"
+	SectionDecor       = "decor"
+	SectionProps       = "props"
+	SectionCeiling     = "ceiling"
+	SectionElevation   = "elevation"
+	SectionEnemies     = "enemies"
+	SectionChests      = "chests"
+	SectionDoors       = "doors"
+	SectionCrystals    = "crystals"
+	SectionDialogs     = "dialogs"
+	SectionTriggers    = "triggers"
+	SectionLocations   = "locations"
+	SectionSolids      = "solids"
+	SectionPropLevels  = "prop_levels"
+	SectionDecorLevels = "decor_levels"
+	SectionFaces       = "faces"
+	SectionPropStack   = "propstack"
+	SectionDecorStack  = "decorstack"
+	SectionPropYaw     = "prop_yaw"
 )
 
 // Header-line keys — the preamble's "key: value" lines. parseHeaderLine reads,
@@ -494,7 +457,6 @@ var layerSections = []layerSection{
 	{SectionChests, slotChests, nil},
 	{SectionDoors, slotDoors, nil},
 	{SectionCrystals, slotCrystals, nil},
-	{SectionCustomEnemies, slotCustomEnemies, nil},
 	{SectionDialogs, slotDialogs, nil},
 	{SectionTriggers, slotTriggers, nil},
 	{SectionLocations, slotLocations, nil},
@@ -736,15 +698,6 @@ func Parse(r io.Reader) (MapFile, error) {
 				return mf, err
 			}
 			mf.Crystals = append(mf.Crystals, MapCrystal{X: x, Z: z, Level: stateLevel})
-			continue
-		}
-
-		if state == slotCustomEnemies {
-			ce, err := parseCustomEnemyLine(line, lineNo)
-			if err != nil {
-				return mf, err
-			}
-			mf.CustomEnemies = append(mf.CustomEnemies, ce)
 			continue
 		}
 
@@ -1281,50 +1234,6 @@ func (mf *MapFile) validate() error {
 		}
 		seenNames[d.Name] = struct{}{}
 	}
-	// Custom enemies: rows encode space-delimited (strings.Fields re-parse) with
-	// comma-joined skills, so whitespace in name/base-kind/skill — or a comma in a
-	// skill token — shifts every later column on reload. Reject at the data-model
-	// boundary (mirrors the pack-member and door-name guards) so a direct
-	// mapfile.Save caller fails loudly instead of writing an unloadable map.
-	seenCE := make(map[string]struct{}, len(mf.CustomEnemies))
-	for _, ce := range mf.CustomEnemies {
-		if ce.Name == "" || strings.ContainsAny(ce.Name, " \t") {
-			return fmt.Errorf("custom enemy name %q must be non-empty with no whitespace", ce.Name)
-		}
-		if ce.BaseKind == "" || strings.ContainsAny(ce.BaseKind, " \t") {
-			return fmt.Errorf("custom enemy %q base kind %q must be non-empty with no whitespace", ce.Name, ce.BaseKind)
-		}
-		// Runtime binds a pack member to the FIRST custom enemy of that name, so a
-		// duplicate is silently dead weight — reject it (mirrors the door-name dedup).
-		if _, dup := seenCE[ce.Name]; dup {
-			return fmt.Errorf("duplicate custom enemy name %q in map", ce.Name)
-		}
-		seenCE[ce.Name] = struct{}{}
-		// Every numeric field is non-negative and skill-cast chance is a probability —
-		// the parser rejects out-of-range values, so mirror both here or Save could
-		// write a .map Load refuses (validate()'s whole reason for being).
-		for _, v := range []struct {
-			name string
-			val  int
-		}{
-			{"hp", ce.HP}, {"mp", ce.MP}, {"str", ce.STR}, {"dex", ce.DEX},
-			{"int", ce.INT}, {"wis", ce.WIS}, {"vit", ce.VIT}, {"spd", ce.SPD},
-			{"armor", ce.Armor}, {"mdef", ce.MDef}, {"xp", ce.XPValue},
-			{"tier", ce.Tier}, {"dmg", ce.AttackDamage}, {"spwr", ce.SpellPower},
-		} {
-			if v.val < 0 {
-				return fmt.Errorf("custom enemy %q field %s cannot be negative (%d)", ce.Name, v.name, v.val)
-			}
-		}
-		if ce.SkillCastChance < 0 || ce.SkillCastChance > 1 {
-			return fmt.Errorf("custom enemy %q skill-cast chance must be within [0,1] (%g)", ce.Name, ce.SkillCastChance)
-		}
-		for _, s := range ce.Skills {
-			if s == "" || strings.ContainsAny(s, ", \t") {
-				return fmt.Errorf("custom enemy %q skill %q must be non-empty with no comma or whitespace", ce.Name, s)
-			}
-		}
-	}
 	return nil
 }
 
@@ -1418,37 +1327,6 @@ const (
 	facesEncodeFormat = "%d %d %s\n"
 )
 
-// customEnemyFieldCount is the current-schema column count (MDef included);
-// legacy (pre-MDef) rows are customEnemyFieldCountLegacy and the parser accepts
-// both, defaulting MDef to 0 on the legacy path.
-const (
-	customEnemyFieldCount       = 18
-	customEnemyFieldCountLegacy = 17
-)
-
-// customEnemySchema maps the post-stats columns to their field index. Two
-// layouts: current (MDef present) and legacy (mdef = -1, later columns shift
-// left one). One struct keeps the split in one place, not eight reassignments.
-type customEnemySchema struct {
-	armor  int
-	mdef   int // -1 when the row predates the MDef column
-	xp     int
-	tier   int
-	dmg    int
-	skch   int
-	spwr   int
-	skills int
-}
-
-var (
-	customEnemyCurrentSchema = customEnemySchema{armor: 10, mdef: 11, xp: 12, tier: 13, dmg: 14, skch: 15, spwr: 16, skills: 17}
-	customEnemyLegacySchema  = customEnemySchema{armor: 10, mdef: -1, xp: 11, tier: 12, dmg: 13, skch: 14, spwr: 15, skills: 16}
-)
-
-// customEnemyEncodeFormat: named so init() asserts its `%`-verb count matches
-// customEnemyFieldCount (a schema bump touching one without the other panics).
-const customEnemyEncodeFormat = "%s %s %d %d %d %d %d %d %d %d %d %d %d %d %d %g %d %s\n"
-
 // fprintfVerbCount counts `%`-verbs in a format string (literal `%%` skipped).
 func fprintfVerbCount(format string) int {
 	verbs := 0
@@ -1463,61 +1341,6 @@ func fprintfVerbCount(format string) int {
 		verbs++
 	}
 	return verbs
-}
-
-func init() {
-	if verbs := fprintfVerbCount(customEnemyEncodeFormat); verbs != customEnemyFieldCount {
-		panic(fmt.Sprintf("mapfile: customEnemyEncodeFormat has %d verbs, customEnemyFieldCount is %d — they must match", verbs, customEnemyFieldCount))
-	}
-	// skills is the final column, so its index must be width-1 — guards the
-	// decoder's index table against drifting from the field count.
-	if customEnemyCurrentSchema.skills != customEnemyFieldCount-1 {
-		panic(fmt.Sprintf("mapfile: customEnemyCurrentSchema.skills is %d, expected customEnemyFieldCount-1 (%d)", customEnemyCurrentSchema.skills, customEnemyFieldCount-1))
-	}
-	if customEnemyLegacySchema.skills != customEnemyFieldCountLegacy-1 {
-		panic(fmt.Sprintf("mapfile: customEnemyLegacySchema.skills is %d, expected customEnemyFieldCountLegacy-1 (%d)", customEnemyLegacySchema.skills, customEnemyFieldCountLegacy-1))
-	}
-	// Round-trip self-test: Encode's column order (customEnemyEncodeArgs) and the
-	// decoder's index schema share no structure, so a reorder in one would silently
-	// corrupt saved rows. Encode a sentinel with a distinct value per column and
-	// assert it parses back identically — this ties args↔format↔schema↔parse.
-	sentinel := MapCustomEnemy{
-		Name: "schemacheck", BaseKind: "rat",
-		HP: 2, MP: 3, STR: 4, DEX: 5, INT: 6, WIS: 7, VIT: 8, SPD: 9,
-		Armor: 10, MDef: 11, XPValue: 12, Tier: 13, AttackDamage: 14,
-		SkillCastChance: 0.15, SpellPower: 16,
-	}
-	line := strings.TrimRight(fmt.Sprintf(customEnemyEncodeFormat, customEnemyEncodeArgs(sentinel)...), "\n")
-	got, err := parseCustomEnemyLine(line, 0)
-	if err != nil {
-		panic("mapfile: custom enemy schema self-test failed to parse encoded sentinel: " + err.Error())
-	}
-	// Compare via the encode-args (all scalar — MapCustomEnemy's Skills slice makes
-	// the struct itself uncomparable; both sentinel/got carry no skills here).
-	want := customEnemyEncodeArgs(sentinel)
-	for i, g := range customEnemyEncodeArgs(got) {
-		if g != want[i] {
-			panic(fmt.Sprintf("mapfile: custom enemy encode/decode column %d mismatch — customEnemyEncodeArgs and customEnemyCurrentSchema disagree (got %v, want %v)", i, g, want[i]))
-		}
-	}
-}
-
-// customEnemyEncodeArgs is the SINGLE source for the custom_enemies: column order.
-// Encode and the schema self-test both consume it (must match customEnemyEncodeFormat
-// verbs and customEnemyCurrentSchema indices, both init-asserted).
-func customEnemyEncodeArgs(ce MapCustomEnemy) []any {
-	skills := customEnemyNoSkillsToken
-	if len(ce.Skills) > 0 {
-		skills = strings.Join(ce.Skills, ",")
-	}
-	return []any{
-		ce.Name, ce.BaseKind,
-		ce.HP, ce.MP,
-		ce.STR, ce.DEX, ce.INT, ce.WIS, ce.VIT, ce.SPD,
-		ce.Armor, ce.MDef, ce.XPValue, ce.Tier, ce.AttackDamage,
-		ce.SkillCastChance, ce.SpellPower,
-		skills,
-	}
 }
 
 // init asserts each per-section encode format's `%`-verb count matches its
@@ -1541,83 +1364,6 @@ func init() {
 			panic(fmt.Sprintf("mapfile: %s has %d verbs, expected %d to match its field-count constant", fc.name, verbs, fc.fields))
 		}
 	}
-}
-
-// parseCustomEnemyLine decodes one custom_enemies: row (field order on
-// MapCustomEnemy). Accepts the legacy 17-field width (pre-MDef) too.
-func parseCustomEnemyLine(line string, lineNo int) (MapCustomEnemy, error) {
-	fields := strings.Fields(line)
-	legacy := len(fields) == customEnemyFieldCountLegacy
-	if !legacy && len(fields) != customEnemyFieldCount {
-		return MapCustomEnemy{}, fmt.Errorf("line %d: custom enemy expects %d fields, got %d", lineNo, customEnemyFieldCount, len(fields))
-	}
-	ce := MapCustomEnemy{
-		Name:     fields[0],
-		BaseKind: fields[1],
-	}
-	// MDef sits between Armor and XPValue in the current schema; legacy omits it.
-	schema := customEnemyCurrentSchema
-	if legacy {
-		schema = customEnemyLegacySchema
-	}
-	intFields := []struct {
-		dst  *int
-		raw  string
-		name string
-	}{
-		{&ce.HP, fields[2], "hp"},
-		{&ce.MP, fields[3], "mp"},
-		{&ce.STR, fields[4], "str"},
-		{&ce.DEX, fields[5], "dex"},
-		{&ce.INT, fields[6], "int"},
-		{&ce.WIS, fields[7], "wis"},
-		{&ce.VIT, fields[8], "vit"},
-		{&ce.SPD, fields[9], "spd"},
-		{&ce.Armor, fields[schema.armor], "armor"},
-		{&ce.XPValue, fields[schema.xp], "xp"},
-		{&ce.Tier, fields[schema.tier], "tier"},
-		{&ce.AttackDamage, fields[schema.dmg], "dmg"},
-		{&ce.SpellPower, fields[schema.spwr], "spwr"},
-	}
-	if schema.mdef >= 0 {
-		intFields = append(intFields, struct {
-			dst  *int
-			raw  string
-			name string
-		}{&ce.MDef, fields[schema.mdef], "mdef"})
-	}
-	for _, f := range intFields {
-		v, err := parseIntField(f.raw, "custom enemy "+f.name, lineNo)
-		if err != nil {
-			return MapCustomEnemy{}, err
-		}
-		// All numeric fields are non-negative; rejecting a negative also catches
-		// a wrong-width row mis-sliced under the legacy/current split.
-		if v < 0 {
-			return MapCustomEnemy{}, fmt.Errorf("line %d: custom enemy %s cannot be negative (%d) — check the column count", lineNo, f.name, v)
-		}
-		*f.dst = v
-	}
-	chance, err := strconv.ParseFloat(fields[schema.skch], 64)
-	if err != nil {
-		return MapCustomEnemy{}, fmt.Errorf("line %d: bad custom enemy sklch %q", lineNo, fields[schema.skch])
-	}
-	// Skill-cast chance is a probability in [0,1]; bounding both ends also catches
-	// a width mis-slice that shifts an integer stat (usually >1) into this column.
-	if chance < 0 || chance > 1 {
-		return MapCustomEnemy{}, fmt.Errorf("line %d: custom enemy skill-cast chance must be within [0,1] (%g) — check the column count", lineNo, chance)
-	}
-	ce.SkillCastChance = chance
-	if fields[schema.skills] != customEnemyNoSkillsToken {
-		for _, name := range strings.Split(fields[schema.skills], ",") {
-			name = strings.TrimSpace(name)
-			if name == "" {
-				return MapCustomEnemy{}, fmt.Errorf("line %d: empty custom enemy skill entry", lineNo)
-			}
-			ce.Skills = append(ce.Skills, name)
-		}
-	}
-	return ce, nil
 }
 
 // leveledSectionName returns a section's on-disk header for a given floor: the
@@ -1797,14 +1543,6 @@ func (mf MapFile) Encode(w io.Writer) error {
 			return nil
 		}); err != nil {
 		return err
-	}
-	// custom_enemies: emits only when present (byte-identical otherwise). Order on
-	// MapCustomEnemy, matching parseCustomEnemyLine.
-	if len(mf.CustomEnemies) > 0 {
-		fmt.Fprintln(bw, SectionCustomEnemies+":")
-		for _, ce := range mf.CustomEnemies {
-			fmt.Fprintf(bw, customEnemyEncodeFormat, customEnemyEncodeArgs(ce)...)
-		}
 	}
 	// dialogs / triggers: emit only when present (byte-identical otherwise); each
 	// entry is a pre-encoded JSON object written verbatim.

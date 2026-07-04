@@ -986,14 +986,23 @@ func finishDrag(s *State) {
 // applyToolBrushed runs the brush over the brush-size square at (x,z). Entity
 // brushes collapse to a single cell.
 func applyToolBrushed(s *State, x, z int) {
+	forEachBrushCell(s, x, z, func(x, z int) { applyTool(s, x, z) })
+}
+
+// forEachBrushCell invokes fn for each cell the current brush covers when stamped
+// at (cx,cz): a single cell for entity / size-1 / multi-tile-footprint brushes,
+// else the brushSize×brushSize block centered on it. Shared by the paint path
+// (applyToolBrushed) and the 3D hover preview (drawIsoBrushPreview) so the covered
+// set can't drift.
+func forEachBrushCell(s *State, cx, cz int, fn func(x, z int)) {
 	half := s.brushSize / 2
 	if !isGridLayer(s.layer) || s.brushSize <= 1 || brushHasMultiTileFootprint(s) {
-		applyTool(s, x, z)
+		fn(cx, cz)
 		return
 	}
 	for dz := -half; dz <= half; dz++ {
 		for dx := -half; dx <= half; dx++ {
-			applyTool(s, x+dx, z+dz)
+			fn(cx+dx, cz+dz)
 		}
 	}
 }

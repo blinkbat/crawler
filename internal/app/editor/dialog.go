@@ -366,6 +366,12 @@ func init() {
 		if !found {
 			panic("editor: dialog action picker missing a row for action kind " + string(k))
 		}
+		// The picker labels each kind via dialogActionLabel; a kind that fell through to
+		// its "None" default would show a duplicate "None" row and mislabel the node/
+		// choice action button. Mirror the condKindLabel/triggerKindLabel asserts above.
+		if dialogActionLabel(&core.DialogAction{Kind: k}) == "None" {
+			panic("editor: dialogActionLabel missing a case for dialog action kind " + string(k))
+		}
 	}
 	// Every quest op must likewise be reachable from a quest-kind picker row (a quest
 	// op added to core without a picker row would be uneditable + mislabeled).
@@ -459,10 +465,8 @@ func dialogTriggerKindEntries(s *State) []dropdownEntry {
 
 func dialogTriggerDialogEntries(s *State) []dropdownEntry {
 	return fieldEntries(s.area.Dialogs, func(d core.DialogDefinition) string { return d.ID }, func(s *State, d core.DialogDefinition) {
-		if t := currentDialogTrigger(s); t != nil && t.DialogID != d.ID {
-			pushUndo(s)
-			t.DialogID = d.ID
-			s.dirty = true
+		if t := currentDialogTrigger(s); t != nil {
+			setIfChanged(s, &t.DialogID, d.ID)
 		}
 	})
 }
@@ -478,10 +482,8 @@ func dialogTriggerFoeEntries(s *State) []dropdownEntry {
 // dialogTriggerLocationEntries lists the area's regions for an enterLocation trigger.
 func dialogTriggerLocationEntries(s *State) []dropdownEntry {
 	return fieldEntries(s.area.Locations, locationLabel, func(s *State, loc core.Location) {
-		if t := currentDialogTrigger(s); t != nil && t.LocationID != loc.ID {
-			pushUndo(s)
-			t.LocationID = loc.ID
-			s.dirty = true
+		if t := currentDialogTrigger(s); t != nil {
+			setIfChanged(s, &t.LocationID, loc.ID)
 		}
 	})
 }
@@ -1004,30 +1006,12 @@ func updateDialogNodeEditModal(s *State) Action {
 		return ActionNone
 	}
 
-	// No field focused — list navigation + shortcuts.
-	if editorCancelPressed() {
-		returnToDialogNodes(s)
-		return ActionNone
-	}
-	if editorTabPressed() {
-		s.focus = focusDialogNodeText
-		return ActionNone
-	}
-	if len(n.Choices) > 0 {
-		s.modalCursor = input.CursorUpDown(s.modalCursor, len(n.Choices))
-	}
-	if editorCommitPressed() {
-		if len(n.Choices) > 0 {
-			openDialogChoiceEditModal(s, s.modalCursor)
-		}
-		return ActionNone
-	}
-	if editorAddPressed() {
-		addDialogChoice(s)
-		return ActionNone
-	}
-	if len(n.Choices) > 0 && editorDeletePressed() {
-		removeDialogChoice(s, s.modalCursor)
+	// No field focused — shared list nav + shortcuts, then the node-only M toggle.
+	if subListNav(s, len(n.Choices), focusDialogNodeText,
+		func() { returnToDialogNodes(s) },
+		func() { openDialogChoiceEditModal(s, s.modalCursor) },
+		func() { addDialogChoice(s) },
+		func() { removeDialogChoice(s, s.modalCursor) }) {
 		return ActionNone
 	}
 	if rl.IsKeyPressed(rl.KeyM) {
@@ -1199,30 +1183,13 @@ func updateDialogChoiceEditModal(s *State) Action {
 		return ActionNone
 	}
 
-	// No field focused — list nav + shortcuts.
-	if editorCancelPressed() {
-		returnToDialogNodeEdit(s)
+	// No field focused — shared list nav + shortcuts.
+	if subListNav(s, len(c.Conditions), focusDialogChoiceLabel,
+		func() { returnToDialogNodeEdit(s) },
+		func() { openDialogCondEditModal(s, s.modalCursor) },
+		func() { addDialogCond(s) },
+		func() { removeDialogCond(s, s.modalCursor) }) {
 		return ActionNone
-	}
-	if editorTabPressed() {
-		s.focus = focusDialogChoiceLabel
-		return ActionNone
-	}
-	if len(c.Conditions) > 0 {
-		s.modalCursor = input.CursorUpDown(s.modalCursor, len(c.Conditions))
-	}
-	if editorCommitPressed() {
-		if len(c.Conditions) > 0 {
-			openDialogCondEditModal(s, s.modalCursor)
-		}
-		return ActionNone
-	}
-	if editorAddPressed() {
-		addDialogCond(s)
-		return ActionNone
-	}
-	if len(c.Conditions) > 0 && editorDeletePressed() {
-		removeDialogCond(s, s.modalCursor)
 	}
 	return ActionNone
 }
@@ -1873,6 +1840,41 @@ func toggleTriggerOnce(s *State) {
 }
 
 // --- small shared helpers --------------------------------------------------
+
+// subListNav runs the shared "no text field focused" keyboard tail of the dialog
+// node/choice edit modals: Esc backs out (onCancel), Tab focuses the first field,
+// Up/Down move the row cursor, Enter opens the selected sub-item's editor (onCommit,
+// only when count>0), A adds (onAdd), X removes (onDel, only when count>0). Returns
+// true when it consumed the frame; the caller handles any extra keys (the node
+// modal's M) after a false return.
+func subListNav(s *State, count int, focusFirst focusField, onCancel, onCommit, onAdd, onDel func()) bool {
+	if editorCancelPressed() {
+		onCancel()
+		return true
+	}
+	if editorTabPressed() {
+		s.focus = focusFirst
+		return true
+	}
+	if count > 0 {
+		s.modalCursor = input.CursorUpDown(s.modalCursor, count)
+	}
+	if editorCommitPressed() {
+		if count > 0 {
+			onCommit()
+		}
+		return true
+	}
+	if editorAddPressed() {
+		onAdd()
+		return true
+	}
+	if count > 0 && editorDeletePressed() {
+		onDel()
+		return true
+	}
+	return false
+}
 
 // Editor dialog-list layout tokens.
 const (

@@ -612,7 +612,7 @@ func brushTooltipLines(layer Layer, b Brush) []string {
 		switch {
 		case core.IsRampChar(b.Char):
 			return []string{b.Name, "Walkable slope — bridges up one level"}
-		case b.Char == core.FloorDeepWater:
+		case core.IsBlockingFloor(b.Char):
 			return []string{b.Name, "Blocks movement (renders flat)"}
 		}
 	}
@@ -891,17 +891,22 @@ func drawModalButtonsSel(font rl.Font, rects []rl.Rectangle, labels []string, se
 	}
 }
 
-func modalButtonHit(rects []rl.Rectangle) int {
-	if !rl.IsMouseButtonPressed(rl.MouseLeftButton) {
-		return -1
-	}
-	mp := rl.GetMousePosition()
+// firstRectHit returns the index of the first rect containing mp, or -1. Shared by
+// the modal-button / thumbnail / visualizer-tab hit loops.
+func firstRectHit(mp rl.Vector2, rects []rl.Rectangle) int {
 	for i, r := range rects {
 		if pointIn(mp, r) {
 			return i
 		}
 	}
 	return -1
+}
+
+func modalButtonHit(rects []rl.Rectangle) int {
+	if !rl.IsMouseButtonPressed(rl.MouseLeftButton) {
+		return -1
+	}
+	return firstRectHit(rl.GetMousePosition(), rects)
 }
 
 // modalCmd is a labeled action for a modal's buttons: label + action on one row,
@@ -996,11 +1001,7 @@ func entityModalLayoutFor(cursor, count int, addLabels, actLabels []string) enti
 	actRects := buttonGrid(gridX, actTop, gridW, actLabels)
 	listTop := card.Y + entityListTop
 	listBottom := actTop - modalBtnGap
-	maxRows := int((listBottom - listTop) / entityListRowH)
-	if maxRows < 1 {
-		maxRows = 1
-	}
-	topRow, end := scrollWindow(cursor, count, maxRows)
+	topRow, end := scrollWindow(cursor, count, visibleRowCount(listBottom-listTop, entityListRowH))
 	return entityModalLayout{card, listTop, entityListRowH, topRow, end, actRects, addRects}
 }
 
@@ -1211,6 +1212,12 @@ func drawMinimap(s *State) {
 		return
 	}
 	scale := mr.Width / float32(s.area.Width)
+	// Reuse the epoch-keyed column-top cache rather than re-walking each voxel column
+	// per pixel (and re-walking the SAME tile once per covering pixel when the map is
+	// smaller than the minimap). columnTopLevel needs refreshElevGrid to have run this
+	// frame; the 3D path never calls it, so ensure it here — idempotent + cheap when
+	// already current for this contentEpoch.
+	refreshElevGrid(s)
 	drawOverlayBacking(mr)
 	rl.DrawRectangleRec(mr, minimapFloorCol)
 
@@ -1228,7 +1235,7 @@ func drawMinimap(s *State) {
 			}
 			// Paint a pixel where a tile rises above the walkable baseline
 			// (cliff/wall = structure); pits below stay blank.
-			if s.area.ElevationLevelAt(tx, tz) > core.ElevationBaseline {
+			if columnTopLevel(tx, tz) > core.ElevationBaseline {
 				rl.DrawPixel(int32(mr.X)+int32(px), int32(mr.Y)+int32(py), wallCol)
 			}
 		}
@@ -1334,7 +1341,7 @@ func brushRecentRect(s *State, i int) rl.Rectangle {
 func recentSwatchColor(ref brushRef) rl.Color {
 	palette := layerBrushes[ref.layer]
 	if ref.idx < 0 || ref.idx >= len(palette) {
-		return rl.NewColor(80, 80, 90, 255)
+		return recentSwatchFallback
 	}
 	return palette[ref.idx].Color
 }
@@ -1359,7 +1366,7 @@ func drawBrushRecents(s *State, font rl.Font) {
 		}
 		rl.DrawRectangleLinesEx(r, 1, border)
 		if ln := layerName(ref.layer); len(ln) > 0 {
-			render.DrawTextWithShadow(font, ln[:1], r.X+3, r.Y+1, editorFontTick, rl.NewColor(245, 245, 250, 255))
+			render.DrawTextWithShadow(font, ln[:1], r.X+3, r.Y+1, editorFontTick, charGlyphFG)
 		}
 	}
 }
@@ -1679,7 +1686,7 @@ func drawPalette(s *State, font rl.Font, theme render.Theme) {
 		rl.NewVector2(s.rect.palette.X+s.rect.palette.Width, s.rect.palette.Y+s.rect.palette.Height),
 		1, outlineHard)
 
-	render.DrawHeading(font, "BRUSHES", int32(s.rect.palette.X+12), int32(s.rect.palette.Y+8), theme.BorderStrong)
+	render.DrawHeading(font, "BRUSHES", int32(s.rect.palette.X)+panelHeadingInsetX, int32(s.rect.palette.Y)+panelHeadingInsetY, theme.BorderStrong)
 
 	// Reclamp scroll (entry count can change between frames).
 	ScrollPalette(s, 0)
@@ -1827,6 +1834,8 @@ const (
 	propCellRadiusFrac    = float32(0.36) // per-cell prop circle radius
 	doorFacingArrowFrac   = float32(0.28) // door facing arrow length (fraction of cell)
 	startFacingArrowFrac  = float32(0.42) // player-start facing arrow length (fraction of cell)
+	packLabelFontFrac     = float32(0.42) // pack-marker leader-initial font size (fraction of cell)
+	packBadgeFontFrac     = float32(0.28) // pack-marker "xN" count badge font size (fraction of cell)
 )
 
 // drawFacingArrow strokes a facing arrow from tile center (cx,cy) toward `facing`,
@@ -2025,7 +2034,7 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 		rl.NewVector2(s.rect.metadata.X, s.rect.metadata.Y+s.rect.metadata.Height),
 		1, outlineHard)
 
-	render.DrawHeading(font, "MAP", int32(s.rect.metadata.X+12), int32(s.rect.metadata.Y+8), theme.BorderStrong)
+	render.DrawHeading(font, "MAP", int32(s.rect.metadata.X)+panelHeadingInsetX, int32(s.rect.metadata.Y)+panelHeadingInsetY, theme.BorderStrong)
 
 	// Reclamp scroll (content height varies with the badge's row count).
 	ScrollMetadata(s, 0)
@@ -2135,13 +2144,13 @@ func drawTextField(font rl.Font, r rl.Rectangle, text string, focused bool) {
 			display += " "
 		}
 	}
-	render.DrawRichText(font, display, rl.NewVector2(r.X+8, r.Y+(r.Height-bodyLineH)/2), editorFontBody, 1, textEntry)
+	render.DrawRichText(font, display, rl.NewVector2(r.X+fieldTextInsetX, r.Y+(r.Height-bodyLineH)/2), editorFontBody, 1, textEntry)
 }
 
 func drawReadonlyValue(font rl.Font, r rl.Rectangle, text string) {
 	rl.DrawRectangleRec(r, bgFieldInset)
 	rl.DrawRectangleLinesEx(r, 1, editorBorderInactive)
-	render.DrawRichText(font, text, rl.NewVector2(r.X+8, r.Y+(r.Height-bodyLineH)/2), editorFontBody, 1, textReadonly)
+	render.DrawRichText(font, text, rl.NewVector2(r.X+fieldTextInsetX, r.Y+(r.Height-bodyLineH)/2), editorFontBody, 1, textReadonly)
 }
 
 // --- Grid ------------------------------------------------------------------
@@ -2393,13 +2402,13 @@ func drawGrid(s *State, font rl.Font) {
 		rl.DrawCircle(int32(cx), int32(cy), cell*packMarkerRadiusFrac, col)
 		rl.DrawCircleLines(int32(cx), int32(cy), cell*packMarkerRadiusFrac, fadeAlpha(entityMarkerOutline, entityAlpha))
 		label := packMarkerInitial(core.PackMemberDisplayName(s.area, sp, leaderSlot))
-		measure := render.MeasureRichText(font, label, cell*0.42, 1)
+		measure := render.MeasureRichText(font, label, cell*packLabelFontFrac, 1)
 		render.DrawRichText(font, label,
 			rl.NewVector2(cx-measure.X/2, cy-measure.Y/2),
-			cell*0.42, 1, fadeAlpha(entityMarkerOutline, entityAlpha))
+			cell*packLabelFontFrac, 1, fadeAlpha(entityMarkerOutline, entityAlpha))
 		if len(sp.Members) > 1 {
 			badge := fmt.Sprintf("x%d", len(sp.Members))
-			bsize := cell * 0.28
+			bsize := cell * packBadgeFontFrac
 			bm := render.MeasureRichText(font, badge, bsize, 1)
 			bx := cx + cell*0.18
 			by := cy - cell*0.42
@@ -2513,14 +2522,8 @@ func drawGrid(s *State, font rl.Font) {
 
 	// Rectangle drag preview.
 	if s.drag == dragRect && s.hoverX >= 0 {
-		x0, x1 := s.rectAnchorX, s.hoverX
-		z0, z1 := s.rectAnchorZ, s.hoverZ
-		if x0 > x1 {
-			x0, x1 = x1, x0
-		}
-		if z0 > z1 {
-			z0, z1 = z1, z0
-		}
+		x0, x1 := min(s.rectAnchorX, s.hoverX), max(s.rectAnchorX, s.hoverX)
+		z0, z1 := min(s.rectAnchorZ, s.hoverZ), max(s.rectAnchorZ, s.hoverZ)
 		cx, cy := s.rect.tileCorner(x0, z0)
 		r := rl.NewRectangle(cx, cy, float32(x1-x0+1)*cell, float32(z1-z0+1)*cell)
 		// Box previews outline-only; Rect fills.
@@ -2819,8 +2822,15 @@ func fadeAlpha(c rl.Color, alpha float32) rl.Color {
 	return render.FadeColor(c, alpha)
 }
 
+// padRect grows r by (dx, dy) on each side; a negative delta shrinks it. The signed
+// rect-inflation primitive shared by the fat click-bands (foeview sliders) and the
+// uniform-shrink insetRect shorthand.
+func padRect(r rl.Rectangle, dx, dy float32) rl.Rectangle {
+	return rl.NewRectangle(r.X-dx, r.Y-dy, r.Width+2*dx, r.Height+2*dy)
+}
+
 func insetRect(r rl.Rectangle, inset float32) rl.Rectangle {
-	return rl.NewRectangle(r.X+inset, r.Y+inset, r.Width-2*inset, r.Height-2*inset)
+	return padRect(r, -inset, -inset)
 }
 
 // brushPreviewColor returns a tint for the active brush so the rect-drag preview
@@ -2981,12 +2991,18 @@ func scrollWindow(cursor, total, rowsVisible int) (top, end int) {
 // windowedRowList lays out a scrolling fixed-pitch list of count rows in a band
 // at (x,y), w wide, areaH tall. Returns a length-count slice where only on-window
 // rows [topRow,end) carry real rects (off-window stay zero, so they don't draw/hit).
-func windowedRowList(x, y, w, rowH, pitch float32, cursor, count int, areaH float32) (topRow, end int, rects []rl.Rectangle) {
-	maxRows := int(areaH / pitch)
-	if maxRows < 1 {
-		maxRows = 1
+// visibleRowCount is how many fixed-pitch rows fit in a band areaH tall (floor 1) —
+// the shared list-window sizing behind windowedRowList / entityModalLayoutFor /
+// openModalListGeom so the three can't drift.
+func visibleRowCount(areaH, pitch float32) int {
+	if n := int(areaH / pitch); n > 1 {
+		return n
 	}
-	topRow, end = scrollWindow(cursor, count, maxRows)
+	return 1
+}
+
+func windowedRowList(x, y, w, rowH, pitch float32, cursor, count int, areaH float32) (topRow, end int, rects []rl.Rectangle) {
+	topRow, end = scrollWindow(cursor, count, visibleRowCount(areaH, pitch))
 	rects = make([]rl.Rectangle, count)
 	for i := topRow; i < end; i++ {
 		rects[i] = rl.NewRectangle(x, y+float32(i-topRow)*pitch, w, rowH)
@@ -2995,6 +3011,17 @@ func windowedRowList(x, y, w, rowH, pitch float32, cursor, count int, areaH floa
 }
 
 // --- Status & modals -------------------------------------------------------
+
+// gridCornerCard computes the bottom-left status-card rect (maxW-wide content, rH
+// tall) inside the grid pane and paints its card frame, returning the rect. Shared
+// by the transient toast (drawStatus) and the recall panel (drawStatusHistory) so
+// their corner geometry + framing can't drift.
+func gridCornerCard(s *State, theme render.Theme, maxW, rH float32) rl.Rectangle {
+	r := rl.NewRectangle(s.rect.grid.X+12, s.rect.grid.Y+s.rect.grid.Height-rH-8, maxW+24, rH)
+	render.DrawCard(int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height),
+		theme.SurfacePrimary, theme.BorderSoft, theme.BorderStrong)
+	return r
+}
 
 func drawStatus(s *State, font rl.Font, theme render.Theme) {
 	const lineH = 22
@@ -3007,9 +3034,7 @@ func drawStatus(s *State, font rl.Font, theme render.Theme) {
 		}
 	}
 	rH := float32(len(s.statusLog))*lineH + pad
-	r := rl.NewRectangle(s.rect.grid.X+12, s.rect.grid.Y+s.rect.grid.Height-rH-8, maxW+24, rH)
-	render.DrawCard(int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height),
-		theme.SurfacePrimary, theme.BorderSoft, theme.BorderStrong)
+	r := gridCornerCard(s, theme, maxW, rH)
 	for i, e := range s.statusLog {
 		y := r.Y + pad/2 + float32(i)*lineH
 		alpha := core.Clamp(e.timer/statusLogLifetime, 0, 1)
@@ -3040,9 +3065,7 @@ func drawStatusHistory(s *State, font rl.Font, theme render.Theme) {
 		}
 	}
 	rH := float32(len(hist)+1)*lineH + 2*pad
-	r := rl.NewRectangle(s.rect.grid.X+12, s.rect.grid.Y+s.rect.grid.Height-rH-8, maxW+24, rH)
-	render.DrawCard(int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height),
-		theme.SurfacePrimary, theme.BorderSoft, theme.BorderStrong)
+	r := gridCornerCard(s, theme, maxW, rH)
 	render.DrawRichText(font, title, rl.NewVector2(r.X+12, r.Y+pad), editorFontHint, 1, theme.TextHint)
 	for i, m := range hist {
 		y := r.Y + pad + float32(i+1)*lineH
@@ -3089,8 +3112,13 @@ func drawModalHeaderAt(font rl.Font, theme render.Theme, card rl.Rectangle, titl
 	drawModalVeil(theme)
 	render.DrawCard(int32(card.X), int32(card.Y), int32(card.Width), int32(card.Height),
 		theme.SurfacePrimary, theme.BorderSoft, accent)
-	render.DrawHeading(font, title, int32(card.X+modalContentInset), int32(card.Y+12), accent)
+	render.DrawHeading(font, title, int32(card.X+modalContentInset), int32(card.Y)+modalHeadingInsetY, accent)
 }
+
+// openModalPromptDY is the Y (up from the card bottom) of the open-modal sub-mode
+// prompt row — the rename field and the delete-confirm line share it so the two
+// sub-modes can't drift.
+const openModalPromptDY = float32(86)
 
 // openModalListGeom returns the open-map list geometry (card, first row Y, row
 // height, visible window), shared by draw and hit-test.
@@ -3155,7 +3183,7 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 	}
 
 	if s.modalRenamingActive {
-		fieldR := rl.NewRectangle(r.X+modalContentInset, r.Y+r.Height-86, r.Width-2*modalContentInset, textFieldH)
+		fieldR := rl.NewRectangle(r.X+modalContentInset, r.Y+r.Height-openModalPromptDY, r.Width-2*modalContentInset, textFieldH)
 		drawTextField(font, fieldR, s.modalRenaming, true)
 		labels := cmdLabels(openRenameCmds(s))
 		drawModalButtons(font, modalButtonRow(r, labels), labels)
@@ -3164,7 +3192,7 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 	if s.modalConfirmDelete {
 		path := s.modalPaths[s.modalCursor]
 		render.DrawRichText(font, fmt.Sprintf("Delete %s? This is permanent.", core.MapIDFromPath(path)),
-			rl.NewVector2(r.X+modalContentInset, r.Y+r.Height-86), editorFontLabel, 1, theme.BorderDanger)
+			rl.NewVector2(r.X+modalContentInset, r.Y+r.Height-openModalPromptDY), editorFontLabel, 1, theme.BorderDanger)
 		labels := cmdLabels(openDeleteConfirmCmds(s))
 		drawModalButtons(font, modalButtonRow(r, labels), labels)
 		return
@@ -3318,7 +3346,7 @@ func drawDoorEditModal(s *State, font rl.Font, theme render.Theme) {
 	// Facing row.
 	lastFacing := l.facing[core.FacingCount-1]
 	drawLabel(font, "Facing / wall to affix to (player walks out this way)",
-		rl.NewRectangle(l.facing[0].X, l.facing[0].Y-16, lastFacing.X+lastFacing.Width-l.facing[0].X, 14))
+		rl.NewRectangle(l.facing[0].X, l.facing[0].Y-labelCaptionGap, lastFacing.X+lastFacing.Width-l.facing[0].X, labelCaptionH))
 	for i, fr := range l.facing {
 		drawButton(font, fr, core.FacingShortLabels[i], door.Facing == i)
 	}
@@ -3326,7 +3354,7 @@ func drawDoorEditModal(s *State, font rl.Font, theme render.Theme) {
 	// Style row.
 	lastStyle := l.style[core.DoorStyleCount-1]
 	drawLabel(font, "Style (visual fixture)",
-		rl.NewRectangle(l.style[0].X, l.style[0].Y-16, lastStyle.X+lastStyle.Width-l.style[0].X, 14))
+		rl.NewRectangle(l.style[0].X, l.style[0].Y-labelCaptionGap, lastStyle.X+lastStyle.Width-l.style[0].X, labelCaptionH))
 	for i, sr := range l.style {
 		drawButton(font, sr, core.DoorStyleLabel(core.DoorStyle(i)), door.Style == core.DoorStyle(i))
 	}
@@ -3451,9 +3479,12 @@ func entityRowColor(k entityKindRow) rl.Color {
 		return render.MarkerDoor
 	case elCrystal:
 		return render.MarkerCrystal
-	default:
+	case elStart:
 		return render.MarkerStart
 	}
+	// A new entityKindRow must add its dot color above — fail loud rather than
+	// silently painting it start-gold via a catch-all default.
+	panic("editor: entityRowColor missing a case for entity row kind")
 }
 
 // entityListGeom is the shared Objects-modal layout (card, first row Y, rows,

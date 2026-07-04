@@ -21,10 +21,21 @@ const (
 	scrollMetadata
 	scrollCanvasV
 	scrollCanvasH
+	// scrollbarCount sizes the coverage assert below; keep last.
+	scrollbarCount
 )
 
 // scrollbarIDs is the iteration order for update + draw.
 var scrollbarIDs = [...]scrollbarID{scrollPalette, scrollMetadata, scrollCanvasV, scrollCanvasH}
+
+// init trips at startup if the enum and scrollbarIDs drift: every real bar (all
+// but scrollNone) must be listed, or it silently never updates/draws (scrollbarGeom/
+// Offset/setOffset switches have no default to catch the omission).
+func init() {
+	if len(scrollbarIDs) != int(scrollbarCount)-1 {
+		panic("editor: scrollbarIDs length must equal scrollbarCount-1 — add the new bar to scrollbarIDs so it updates + draws")
+	}
+}
 
 const (
 	scrollbarThickness = float32(11)  // gutter width (V) / height (H) in px

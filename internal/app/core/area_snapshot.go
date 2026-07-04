@@ -74,7 +74,6 @@ func AreaContentEqual(a, b AreaDefinition) bool {
 		!chestSpawnsEqual(a.ChestSpawns, b.ChestSpawns) ||
 		!slices.Equal(a.DoorSpawns, b.DoorSpawns) ||
 		!slices.Equal(a.CrystalSpawns, b.CrystalSpawns) ||
-		!customEnemiesEqual(a.CustomEnemies, b.CustomEnemies) ||
 		!dialogsEqual(a.Dialogs, b.Dialogs) ||
 		!slices.Equal(a.Triggers, b.Triggers) ||
 		!slices.Equal(a.Locations, b.Locations) {
@@ -183,19 +182,6 @@ func chestSpawnsEqual(a, b []ChestSpawn) bool {
 	})
 }
 
-func customEnemiesEqual(a, b []CustomEnemyDef) bool {
-	return slices.EqualFunc(a, b, func(ap, bp CustomEnemyDef) bool {
-		return ap.Name == bp.Name && ap.BaseKind == bp.BaseKind &&
-			ap.HP == bp.HP && ap.MP == bp.MP &&
-			ap.Stats == bp.Stats && ap.Armor == bp.Armor && ap.MDef == bp.MDef &&
-			ap.XPValue == bp.XPValue && ap.Tier == bp.Tier &&
-			ap.AttackDamage == bp.AttackDamage &&
-			ap.SkillCastChance == bp.SkillCastChance &&
-			ap.SpellPower == bp.SpellPower &&
-			slices.Equal(ap.Skills, bp.Skills)
-	})
-}
-
 // CloneArea deep-copies an AreaDefinition for editor undo/redo snapshots.
 func CloneArea(a AreaDefinition) AreaDefinition {
 	out := a
@@ -247,11 +233,6 @@ func CloneArea(a AreaDefinition) AreaDefinition {
 	out.DoorSpawns = append([]DoorSpawn(nil), a.DoorSpawns...)
 	// CrystalSpawn is all-comparable, so a plain slice copy is a full deep copy.
 	out.CrystalSpawns = append([]CrystalSpawn(nil), a.CrystalSpawns...)
-	out.CustomEnemies = make([]CustomEnemyDef, len(a.CustomEnemies))
-	for i, ce := range a.CustomEnemies {
-		out.CustomEnemies[i] = ce
-		out.CustomEnemies[i].Skills = append([]SkillID(nil), ce.Skills...)
-	}
 	out.Dialogs = CloneDialogs(a.Dialogs)
 	// DialogTrigger is all-comparable, so a plain slice copy is a full deep copy.
 	out.Triggers = append([]DialogTrigger(nil), a.Triggers...)

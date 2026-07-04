@@ -36,7 +36,6 @@ Add a new "kind" of anything and forget a parallel table → the program won't s
 - **Equip slots:** `core.equipSlotInfo` sized `[EquipSlotCount]` (missing = compile error), init-asserted non-empty (`core/items.go`).
 - **Panel-tab drawers/hints:** `panelTabs` is `[PanelTabCount]panelTabInfo` (missing = compile error); init asserts every row has both a `draw` func and a `footer` hint (`render/panels.go`).
 - **Timing grades:** `core.timingGrades` + `render.qualityVisuals` + `battle.gradeSounds` all length-checked vs `TimingQualityCount` (four-file edit).
-- **Mapfile schema:** `customEnemyEncodeFormat` verb count == `customEnemyFieldCount` (`core/mapfile/mapfile.go` init).
 - **Rain kinds:** every `core.RainKind` → non-zero `rainVisuals` row (`render/weather.go` init).
 
 ## Gotchas (non-obvious, load-bearing)

@@ -560,10 +560,12 @@ const (
 	toolFlood                  // flood-fill the connected region
 	toolPick                   // eyedropper: sample the cell's char into the brush
 	toolSelect                 // marquee: drag a region to copy (Ctrl+C) / paste (Ctrl+V)
+	// toolModeCount sizes the label/help tables (init-asserted below); keep last.
+	toolModeCount
 )
 
 // toolModeLabels are the toolbar button captions, indexed by toolMode.
-var toolModeLabels = [...]string{
+var toolModeLabels = [toolModeCount]string{
 	toolBrush:  "Brush",
 	toolLine:   "Line",
 	toolRect:   "Rect",
@@ -574,7 +576,7 @@ var toolModeLabels = [...]string{
 }
 
 // toolModeHelp is the hover-tooltip text per tool, indexed by toolMode.
-var toolModeHelp = [...]string{
+var toolModeHelp = [toolModeCount]string{
 	toolBrush:  "Paint freehand with the selected brush.",
 	toolLine:   "Drag a straight line of tiles.",
 	toolRect:   "Drag a filled rectangle.",
@@ -582,6 +584,16 @@ var toolModeHelp = [...]string{
 	toolFlood:  "Flood-fill the connected same-tile region.",
 	toolPick:   "Eyedropper — sample the clicked tile into the brush.",
 	toolSelect: "Marquee — drag a region, then Ctrl+C to copy, Ctrl+V to paste.",
+}
+
+// init trips at startup if a toolMode lacks a toolbar caption or hover help — the
+// [toolModeCount] arrays above would otherwise silently leave a new tool blank.
+func init() {
+	for m := toolMode(0); m < toolModeCount; m++ {
+		if toolModeLabels[m] == "" || toolModeHelp[m] == "" {
+			panic("editor: toolMode " + strconv.Itoa(int(m)) + " missing a toolModeLabels/toolModeHelp entry")
+		}
+	}
 }
 
 // brushRef identifies a palette brush as (layer, index). Used by recent-brushes.
@@ -643,11 +655,11 @@ type State struct {
 	focus      focusField
 	numericBuf string
 
-	modal              modalKind
-	modalPaths         []string
-	modalCursor        int
-	modalFilename      string
-	modalRenaming      string
+	modal         modalKind
+	modalPaths    []string
+	modalCursor   int
+	modalFilename string
+	modalRenaming string
 	// modalRenamingActive is the Open-modal rename sub-mode flag. Separate from the
 	// modalRenaming text so backspacing the field to empty doesn't silently exit rename
 	// (the text can't double as the mode sentinel).
@@ -769,7 +781,7 @@ type State struct {
 	// cancelHandled: set within updateHotkeys when Esc was consumed this frame
 	// (e.g. clearing a selection) so the same-frame pause-menu open is suppressed.
 	cancelHandled bool
-	clipboard                  core.TileRegion
+	clipboard     core.TileRegion
 	// clipEntities are the spawn clones captured with clipboard (region-local coords),
 	// so a paste reproduces the packs/chests/doors/crystals that sat on the region too.
 	clipEntities regionEntities
@@ -853,6 +865,11 @@ type State struct {
 	// the heavy build runs once per edit, not per frame. See ensureIsoPreview.
 	isoPreview      *core.GameState
 	isoPreviewEpoch uint64
+	// isoSpan{Min,Max} caches the 3D view's level span (isoLevelSpan) on
+	// contentEpoch so Update + Draw don't each rescan the whole grid per frame.
+	isoSpanMin, isoSpanMax int
+	isoSpanEpoch           uint64
+	isoSpanReady           bool
 
 	// Ctrl+F5 "test from cursor": when set, the run loop uses testStartOverrideX/Z
 	// as the playtest start, then resets the flag.

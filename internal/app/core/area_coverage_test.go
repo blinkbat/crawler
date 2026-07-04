@@ -27,7 +27,7 @@ func TestAreaDefinitionFieldsTracked(t *testing.T) {
 		"WeatherMode": true,
 		"StartTileX":  true, "StartTileZ": true, "StartFacing": true,
 		"PackSpawns": true, "ChestSpawns": true, "DoorSpawns": true,
-		"CrystalSpawns": true, "CrystalsAuthored": true, "CustomEnemies": true,
+		"CrystalSpawns": true, "CrystalsAuthored": true,
 		"QuietMessage": true, "Dialogs": true, "Triggers": true, "Locations": true,
 	}
 	tp := reflect.TypeOf(AreaDefinition{})

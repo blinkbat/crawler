@@ -89,8 +89,8 @@ const SpritesDirName = "maps/sprites"
 // spritesDir resolves the sprites asset folder; spritesFilePath joins a basename
 // onto it. Single home for the ResolveAssetDir(SpritesDirName) construction shared
 // by the enemy/party override path + save helpers.
-func spritesDir() string                   { return ResolveAssetDir(SpritesDirName) }
-func spritesFilePath(name string) string   { return filepath.Join(spritesDir(), name) }
+func spritesDir() string                 { return ResolveAssetDir(SpritesDirName) }
+func spritesFilePath(name string) string { return filepath.Join(spritesDir(), name) }
 
 // EnemySlug is the filesystem-safe key for an enemy kind: slugify(Name)
 // ("Feral Rat" → "feral_rat"). Doubles as the PNG basename + override-map key.
@@ -100,9 +100,9 @@ func EnemySlug(kind EnemyKind) string {
 
 // slugify lowercases s, collapses non-alphanumeric runs to one underscore, and
 // trims edge underscores. On-disk contract for the sprite-asset key (visuals.json
-// key + <slug>.png). Distinct from SanitizeFilename / SanitizeCustomEnemyName /
-// SkillOnDiskName (which only lowercases + maps spaces→underscores, keeping other
-// punctuation) — don't swap; each owns a different on-disk format.
+// key + <slug>.png). Distinct from SanitizeFilename / SkillOnDiskName (which only
+// lowercase + map spaces→underscores, keeping other punctuation) — don't swap;
+// each owns a different on-disk format.
 func slugify(s string) string {
 	var b strings.Builder
 	prevUnderscore := false

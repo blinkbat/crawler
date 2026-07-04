@@ -948,8 +948,8 @@ func turnEntryFor(g *GameState, actor ActorRef) (TurnEntry, bool) {
 	if actor.Index < 0 || actor.Index >= len(members) {
 		return TurnEntry{}, false
 	}
-	// Pointer, not a copy: Enemy embeds a full DefinitionOverride and this runs
-	// per queue entry every battle frame; the dead-entry early-return costs no copy.
+	// Pointer, not a copy: Enemy is a wide struct and this runs per queue entry
+	// every battle frame; the dead-entry early-return costs no copy.
 	enemy := &members[actor.Index]
 	if !enemy.Alive {
 		return TurnEntry{}, false

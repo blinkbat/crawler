@@ -21,18 +21,18 @@ import (
 
 // Iso scene tunables (world units inside the off-screen render).
 const (
-	isoFovy     = float32(46)
-	isoPitchDeg = 38.0           // default camera tilt above the horizon
-	isoPanSpeed = float32(0.05)  // shift+right-drag pan: screen px → world units (real scale)
+	isoFovy      = float32(46)
+	isoPitchDeg  = 38.0           // default camera tilt above the horizon
+	isoPanSpeed  = float32(0.05)  // shift+right-drag pan: screen px → world units (real scale)
 	isoOrbitRate = float32(0.004) // right-drag tumble: radians per screen px (kept gentle — full-speed felt twitchy)
-	isoMinPitch = float32(0.12)  // tumble pitch clamp (near-horizon)
-	isoMaxPitch = float32(1.50)  // tumble pitch clamp (near top-down)
-	isoMinZoom  = float32(0.3)   // 3D-view zoom clamp (parallels minZoom/maxZoom for the canvas)
-	isoMaxZoom  = float32(6)
+	isoMinPitch  = float32(0.12)  // tumble pitch clamp (near-horizon)
+	isoMaxPitch  = float32(1.50)  // tumble pitch clamp (near top-down)
+	isoMinZoom   = float32(0.3)   // 3D-view zoom clamp (parallels minZoom/maxZoom for the canvas)
+	isoMaxZoom   = float32(6)
 
 	// Default orbit, shared by freshState (initial camera) and resetView (Home) so
 	// the two can't drift.
-	isoDefaultYaw   = float32(math.Pi / 4)              // 45° default orbit
+	isoDefaultYaw   = float32(math.Pi / 4)                 // 45° default orbit
 	isoDefaultPitch = float32(isoPitchDeg * math.Pi / 180) // tilt above horizon
 )
 
@@ -142,6 +142,19 @@ func isoLevelSpan(s *State) (minL, maxL int) {
 	return minL, maxL
 }
 
+// cachedLevelSpan is isoLevelSpan memoized on contentEpoch. The 3D view needs the
+// span from both Update (updateIsoCanvas) and Draw (drawGridIso) each frame, and it
+// only changes on a content edit — so in steady state both full-grid scans collapse
+// to a cache read.
+func (s *State) cachedLevelSpan() (minL, maxL int) {
+	if !s.isoSpanReady || s.isoSpanEpoch != s.contentEpoch {
+		s.isoSpanMin, s.isoSpanMax = isoLevelSpan(s)
+		s.isoSpanEpoch = s.contentEpoch
+		s.isoSpanReady = true
+	}
+	return s.isoSpanMin, s.isoSpanMax
+}
+
 // isoCamera builds the orbit camera in REAL world coordinates (core.TileSize /
 // core.LevelStep), so render.DrawArea — the live game renderer — draws the editor
 // scene identically. One of four 45° yaws, fixed pitch, fit-to-map distance ×
@@ -230,6 +243,50 @@ func (s *State) isoColumnBox(x, z, minL int) (center, size rl.Vector3) {
 	return center, size
 }
 
+// rayAABBHit is a pure-Go ray / axis-aligned-box slab test: entry distance +
+// whether the ray hits [boxMin,boxMax]. It replaces the CGo rl.GetRayCollisionBox
+// in the per-column pick loop (isoPick tests W×H boxes per frame, so a CGo crossing
+// per cell was the pick's dominant cost). Matches GetRayCollisionBox's nearest-entry
+// (tmin) semantics; a ray starting inside the box reports distance 0. Fixed-size
+// arrays (not slices) keep it allocation-free on the hot path.
+func rayAABBHit(ray rl.Ray, boxMin, boxMax rl.Vector3) (dist float32, hit bool) {
+	o := [3]float32{ray.Position.X, ray.Position.Y, ray.Position.Z}
+	d := [3]float32{ray.Direction.X, ray.Direction.Y, ray.Direction.Z}
+	lo := [3]float32{boxMin.X, boxMin.Y, boxMin.Z}
+	hi := [3]float32{boxMax.X, boxMax.Y, boxMax.Z}
+	tmin := float32(-math.MaxFloat32)
+	tmax := float32(math.MaxFloat32)
+	for i := 0; i < 3; i++ {
+		if d[i] == 0 {
+			if o[i] < lo[i] || o[i] > hi[i] {
+				return 0, false // parallel to this slab and outside it
+			}
+			continue
+		}
+		t1 := (lo[i] - o[i]) / d[i]
+		t2 := (hi[i] - o[i]) / d[i]
+		if t1 > t2 {
+			t1, t2 = t2, t1
+		}
+		if t1 > tmin {
+			tmin = t1
+		}
+		if t2 < tmax {
+			tmax = t2
+		}
+		if tmin > tmax {
+			return 0, false
+		}
+	}
+	if tmax < 0 {
+		return 0, false // box entirely behind the ray origin
+	}
+	if tmin < 0 {
+		tmin = 0 // ray origin inside the box
+	}
+	return tmin, true
+}
+
 // isoWrongLevel reports whether painting at (x,z) would land on a floor that is
 // NOT the visible top surface there — the active edit floor (editLevel) differs
 // from the column's surface level. The Elevation layer is exempt: it's how you
@@ -264,16 +321,7 @@ func drawIsoBrushPreview(s *State) {
 	if wrong {
 		col = isoBlockedWire
 	}
-	half := s.brushSize / 2
-	if !isGridLayer(s.layer) || s.brushSize <= 1 {
-		s.drawIsoCellBox(hx, hz, col)
-		return
-	}
-	for dz := -half; dz <= half; dz++ {
-		for dx := -half; dx <= half; dx++ {
-			s.drawIsoCellBox(hx+dx, hz+dz, col)
-		}
-	}
+	forEachBrushCell(s, hx, hz, func(x, z int) { s.drawIsoCellBox(x, z, col) })
 }
 
 // drawIsoCellBox outlines cell (x,z) at the active floor's height (where a paint
@@ -296,7 +344,7 @@ func (s *State) drawIsoCellBox(x, z int, col rl.Color) {
 // the mouse into the panel's local space and use the viewport-aware -Ex variant
 // with the panel's dims — matching the projection the RT was rendered with. (A
 // prior hand-rolled Unproject produced a Z-flipped ray under raylib-go's matrix
-// conventions, so nothing ever picked; see iso_pick_debug_test.go.)
+// conventions, so nothing ever picked; see iso_pick_test.go.)
 func isoRayInRect(mp rl.Vector2, rect rl.Rectangle, cam rl.Camera3D) rl.Ray {
 	local := rl.NewVector2(mp.X-rect.X, mp.Y-rect.Y)
 	return rl.GetScreenToWorldRayEx(local, cam, int32(rect.Width), int32(rect.Height))
@@ -317,10 +365,11 @@ func (s *State) isoPick(cam rl.Camera3D, mp rl.Vector2, minL int) (int, int) {
 	for z := 0; z < s.area.Height; z++ {
 		for x := 0; x < s.area.Width; x++ {
 			center, size := s.isoColumnBox(x, z, minL)
-			half := rl.Vector3Scale(size, 0.5)
-			bb := rl.NewBoundingBox(rl.Vector3Subtract(center, half), rl.Vector3Add(center, half))
-			if c := rl.GetRayCollisionBox(ray, bb); c.Hit && c.Distance < best {
-				best, bestX, bestZ = c.Distance, x, z
+			hw, hh, hd := size.X*0.5, size.Y*0.5, size.Z*0.5
+			boxMin := rl.NewVector3(center.X-hw, center.Y-hh, center.Z-hd)
+			boxMax := rl.NewVector3(center.X+hw, center.Y+hh, center.Z+hd)
+			if dist, ok := rayAABBHit(ray, boxMin, boxMax); ok && dist < best {
+				best, bestX, bestZ = dist, x, z
 			}
 		}
 	}
@@ -367,7 +416,7 @@ func drawGridIso(s *State, font rl.Font) {
 	if s.isoRT.ID == 0 {
 		return
 	}
-	minL, maxL := isoLevelSpan(s)
+	minL, maxL := s.cachedLevelSpan()
 	cam := s.isoCamera(minL, maxL)
 
 	rl.BeginTextureMode(s.isoRT)
@@ -487,8 +536,8 @@ func drawEditorCompass(s *State, font rl.Font) {
 	tail := rl.NewVector2(cx-nx*(r-2), cy-ny*(r-2))
 	wingA := rl.NewVector2(cx+px*4, cy+py*4)
 	wingB := rl.NewVector2(cx-px*4, cy-py*4)
-	fillTri(tip, wingA, wingB, rl.NewColor(232, 92, 74, 255))
-	fillTri(tail, wingA, wingB, rl.NewColor(206, 212, 222, 235))
+	fillTri(tip, wingA, wingB, compassNeedleNorth)
+	fillTri(tail, wingA, wingB, compassPale)
 	rl.DrawCircle(int32(cx), int32(cy), 2.5, withAlpha(editorGold, 230))
 
 	// Cardinal letters (N brightest), placed outside the ring.
@@ -499,7 +548,7 @@ func drawEditorCompass(s *State, font rl.Font) {
 	}{{"N", 0, -1, true}, {"E", 1, 0, false}, {"S", 0, 1, false}, {"W", -1, 0, false}} {
 		ox, oy := project(L.wx, L.wz)
 		m := render.MeasureRichText(font, L.name, editorFontTick, 1)
-		col := rl.NewColor(212, 216, 224, 235)
+		col := compassPale
 		if L.bright {
 			col = editorGold
 		}
@@ -544,7 +593,7 @@ func updateIsoCanvas(s *State, mp rl.Vector2) {
 		s.isoYaw -= math.Pi / 2
 	}
 
-	minL, maxL := isoLevelSpan(s)
+	minL, maxL := s.cachedLevelSpan()
 	cam := s.isoCamera(minL, maxL)
 	s.isoHoverX, s.isoHoverZ = s.isoPick(cam, mp, minL)
 	// Mirror the pick onto hoverX/Z so the shared rect/line/select + finishDrag

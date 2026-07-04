@@ -23,12 +23,11 @@ const (
 	objViewLabelH = float32(18)
 	objViewRowGap = float32(10) // gap between a label and the next thumb
 	objViewBtnW   = float32(104)
-	// objViewZoom{Min,Max} clamp a preview's wheel dolly; Rot/Zoom rates tune the
-	// drag-rotate and wheel-zoom sensitivity.
-	objViewZoomMin  = float32(0.4)
-	objViewZoomMax  = float32(4)
-	objViewRotRate  = float32(0.01)
-	objViewZoomRate = float32(0.12)
+	// objViewZoom{Min,Max} clamp a preview's wheel dolly; objViewRotRate tunes the
+	// drag-rotate sensitivity (wheel-zoom reuses the canvas' canvasZoomWheelRate).
+	objViewZoomMin = float32(0.4)
+	objViewZoomMax = float32(4)
+	objViewRotRate = float32(0.01)
 )
 
 // objPreview is one thumbnail's view pose: drag-rotate yaw/pitch (radians, added
@@ -77,12 +76,7 @@ type objectViewLayout struct {
 // thumbAt returns the LOCAL thumb index (0..len-1) under mp, or -1. The object
 // index is l.start + the returned value.
 func thumbAt(l objectViewLayout, mp rl.Vector2) int {
-	for i, r := range l.thumbs {
-		if pointIn(mp, r) {
-			return i
-		}
-	}
-	return -1
+	return firstRectHit(mp, l.thumbs)
 }
 
 // computeObjectViewLayout builds the current page's geometry (shared by draw +
@@ -161,7 +155,7 @@ func updateObjectViewModal(s *State) Action {
 		if hoverThumb >= 0 {
 			idx := l.start + hoverThumb
 			v := s.objPreviewView(idx)
-			v.zoom = wheelZoom(v.zoom, w, objViewZoomRate, objViewZoomMin, objViewZoomMax)
+			v.zoom = wheelZoom(v.zoom, w, canvasZoomWheelRate, objViewZoomMin, objViewZoomMax)
 			s.setObjPreviewView(idx, v)
 		} else if w < 0 {
 			setObjectViewPage(s, s.objectViewPage+1, l.pageCount)

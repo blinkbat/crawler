@@ -7,11 +7,9 @@ import (
 
 type MaterialSet int
 
-// PackMemberRef is one authored pack member. Built-ins carry only Kind; custom
-// enemies carry their base Kind (visual fallback) plus CustomName for lookup.
+// PackMemberRef is one authored pack member: an enemy Kind plus its formation Row.
 type PackMemberRef struct {
-	Kind       EnemyKind
-	CustomName string
+	Kind EnemyKind
 	// Row is the authored formation rank. Zero value RowFront, so pre-rows
 	// packs read as all-front.
 	Row Row
@@ -20,8 +18,8 @@ type PackMemberRef struct {
 // PackSpawn is one authored pack: a tile position + its enemy roster. The field
 // renders one figure (highest-tier member); the rest reveal at battle start.
 type PackSpawn struct {
-	TileX   int
-	TileZ   int
+	TileX int
+	TileZ int
 	// Level is the voxel floor the pack stands on. Zero = ground (auto on a flat
 	// or single-floor map); a deck spawn carries its surface level so it doesn't
 	// collide with whatever sits at the same (x,z) on another floor.
@@ -77,8 +75,8 @@ const (
 )
 
 type DoorSpawn struct {
-	TileX      int
-	TileZ      int
+	TileX int
+	TileZ int
 	// Level is the voxel floor the door sits on (zero = ground/auto). See PackSpawn.Level.
 	Level      int
 	Name       string
@@ -243,8 +241,8 @@ func (g *GameState) JournalRowCount() int {
 // which point it renders open and ignores interaction. Blocks movement onto its
 // tile — opened from an adjacent square.
 type Chest struct {
-	TileX  int
-	TileZ  int
+	TileX int
+	TileZ int
 	// Level is the voxel floor the chest rests on (resolved from ChestSpawn.Level),
 	// so it renders on its deck rather than the column ground. See resolveEntityLevel.
 	Level  int
@@ -257,8 +255,8 @@ type Chest struct {
 // autosaves, then it goes dormant. Recharges +1 per landed step up to
 // CrystalRechargeSteps (re-arms). Charge state persists in SaveData.
 type Crystal struct {
-	TileX   int
-	TileZ   int
+	TileX int
+	TileZ int
 	// Level is the voxel floor the crystal sits on (resolved from CrystalSpawn.Level).
 	Level   int
 	Charge  int
@@ -328,9 +326,9 @@ type AreaDefinition struct {
 	// zero value Auto = the roof-gated default. Serialized as the map `weather:` key.
 	WeatherMode WeatherMode
 	StartTileX  int
-	StartTileZ      int
-	StartFacing     int
-	PackSpawns      []PackSpawn
+	StartTileZ  int
+	StartFacing int
+	PackSpawns  []PackSpawn
 	// ChestSpawns is the authored chest list → runtime Chests in NewGameState.
 	ChestSpawns []ChestSpawn
 	// DoorSpawns is the authored door list → runtime g.Doors in NewGameState.
@@ -341,10 +339,7 @@ type AreaDefinition struct {
 	// EMPTY CrystalSpawns means "deliberately none" — placeCrystals only
 	// synthesizes the default entrance crystal when this is false (legacy maps).
 	CrystalsAuthored bool
-	// CustomEnemies are area-scoped author-defined enemy templates; pack spawns
-	// reference them by Name, instantiated via CustomEnemyDef.Instantiate.
-	CustomEnemies []CustomEnemyDef
-	QuietMessage  string
+	QuietMessage     string
 	// Dialogs are the area's authored branching conversations (see dialog.go),
 	// started by StartDialog (by id).
 	Dialogs []DialogDefinition
@@ -1008,11 +1003,6 @@ type Enemy struct {
 	HP    int
 	MaxHP int
 	Alive bool
-	// CustomName is non-empty for area CustomEnemies; Kind stays the base kind
-	// (reuses the sprite) while DefinitionOverride holds the authored stats/text.
-	CustomName            string
-	DefinitionOverride    EnemyDefinition
-	HasDefinitionOverride bool
 	// Item is the steal loot kind (from EnemyDefinition.Item), reset to ItemNone
 	// once stolen so an enemy can't be looted twice.
 	Item ItemKind
