@@ -70,44 +70,7 @@ func SeedLocationPresence(g *GameState) {
 	}
 }
 
-// FireEnterLocationTriggers fires the first eligible enter-location dialog for any
-// region the party just stepped INTO on level (rising edge). Updates the inside set
-// for every region first so re-entry without leaving can't re-fire, and so a region
-// the player left is re-armed. Returns true when a dialog started.
-func FireEnterLocationTriggers(g *GameState, x, z, level int) bool {
-	if g == nil || g.DialogOpen {
-		// A dialog is mid-open (e.g. an enter-tile trigger fired on this same step).
-		// Defer region detection entirely so a crossing isn't recorded as "inside"
-		// and silently consumed unfired — it re-evaluates on a later step.
-		return false
-	}
-	if g.InsideLocations == nil {
-		g.InsideLocations = make(map[string]bool, len(g.Area.Locations))
-	}
-	fired := false
-	for _, loc := range g.Area.Locations {
-		inside := loc.Contains(x, z, level)
-		was := g.InsideLocations[loc.ID]
-		if inside && !was {
-			// One enter-dialog per step: if another region already fired, leave this
-			// crossing UNrecorded so it fires on a later step while still inside.
-			if fired {
-				continue
-			}
-			id := loc.ID
-			if fireFirstMatchingTrigger(g, func(t DialogTrigger) bool {
-				return t.Kind == DialogTriggerEnterLocation && t.LocationID == id
-			}) {
-				fired = true
-			} else if hasEligibleEnterLocationTrigger(g, id) {
-				// A trigger matched but failed to START (e.g. unresolved DialogID).
-				// Leave the crossing UNrecorded so it retries on a later step rather
-				// than silently consuming the rising edge. An already-fired Once
-				// trigger is NOT eligible here, so it records normally (no retry loop).
-				continue
-			}
-		}
-		g.InsideLocations[loc.ID] = inside
-	}
-	return fired
-}
+// Region entry is handled by the general trigger engine: an `atLocation` condition
+// (trigger.go) tests whether the party stands inside a named region, and
+// EvaluateTriggers polls it on each step landing. InsideLocations / SeedLocationPresence
+// are retained below only as a cheap presence cache for any UI that wants it.

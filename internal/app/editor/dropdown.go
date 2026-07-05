@@ -2,6 +2,7 @@ package editor
 
 import (
 	"crawler/internal/app/core"
+	"crawler/internal/app/core/mapfile"
 	"crawler/internal/app/input"
 	"crawler/internal/app/render"
 	"fmt"
@@ -29,16 +30,23 @@ const (
 	ddDialogCondKind                      // condition editor: pick the condition kind
 	ddDialogQuestStatus                   // condition editor: pick the required quest status (Active / Complete)
 	ddDialogCondFoe                       // condition editor: pick the foe kind for a foeKilled condition
-	ddDialogTriggerKind                   // trigger editor: pick the trigger kind (enter-tile / foe-killed)
-	ddDialogTriggerDialog                 // trigger editor: pick which dialog the trigger starts
-	ddDialogTriggerFoe                    // trigger editor: pick the foe kind for a foeKilled trigger
-	ddDialogTriggerLocation               // trigger editor: pick the region for an enterLocation trigger
+	ddTrigCondKind                        // trigger editor: pick the primary condition kind
+	ddTrigActKind                         // trigger editor: pick the primary action kind
+	ddDialogTriggerDialog                 // trigger editor: pick which dialog a Start-dialog action starts
+	ddDialogTriggerFoe                    // trigger editor: pick the foe kind for a foeKilled condition
+	ddDialogTriggerLocation               // trigger editor: pick the region for an atLocation condition
+	ddTrigActFoe                          // trigger editor: pick the foe kind for a spawnFoe action
+	ddTrigSwitchOp                        // trigger editor: pick the setSwitch action's operation
+	ddTrigCounterOp                       // trigger editor: pick the setCounter action's operation
+	ddWallFeatureKind                     // wall-feature editor: pick switch / bombable / secret
 	ddDialogActionKind                    // action editor: pick the end-action (none / start / complete quest / event)
 	ddLayer                               // top-bar layer picker: pick the active layer; each row carries a hide/show eye
 	ddFaceSkin                            // tile right-click: pick a cliff-face skin for one face (or all) of the tile
 	ddContext                             // grid right-click menu: edit/delete spawns, start facing, regions, erase (see context.go)
 	ddDoorFacing                          // door editor: pick the door's facing (replaces the N/E/S/W button/key row)
 	ddDoorStyle                           // door editor: pick the door's style (replaces the 1/2/3 button/key row)
+	ddDoorTargetMap                       // door editor: pick the target map from all .map ids on disk (+ self)
+	ddDoorTargetDoor                      // door editor: pick the target door from the target map's authored doors
 	ddSoundAssign                         // sound editor: pick the user sound bound to a built-in cue (replaces the < > steppers)
 
 	dropdownOwnerCount // sentinel; keep last. Every owner above ddNone needs a dropdownEntryBuilders entry.
@@ -66,7 +74,8 @@ type dropdownState struct {
 func filterableDropdown(o dropdownOwner) bool {
 	switch o {
 	case ddPackAdd, ddChestAdd, ddFoeKind, ddDialogCondFoe, ddDialogTriggerFoe,
-		ddDialogTriggerDialog, ddDialogSpeaker, ddDialogTriggerLocation, ddSoundAssign:
+		ddDialogTriggerDialog, ddDialogSpeaker, ddDialogTriggerLocation, ddSoundAssign,
+		ddDoorTargetMap, ddDoorTargetDoor:
 		return true
 	}
 	return false
@@ -200,16 +209,23 @@ var dropdownEntryBuilders = map[dropdownOwner]func(*State) []dropdownEntry{
 	ddDialogCondKind:        dialogCondKindEntries,
 	ddDialogQuestStatus:     dialogQuestStatusEntries,
 	ddDialogCondFoe:         dialogCondFoeEntries,
-	ddDialogTriggerKind:     dialogTriggerKindEntries,
+	ddTrigCondKind:          trigCondKindEntries,
+	ddTrigActKind:           trigActKindEntries,
 	ddDialogTriggerDialog:   dialogTriggerDialogEntries,
 	ddDialogTriggerFoe:      dialogTriggerFoeEntries,
 	ddDialogTriggerLocation: dialogTriggerLocationEntries,
+	ddTrigActFoe:            trigActFoeEntries,
+	ddTrigSwitchOp:          trigSwitchOpEntries,
+	ddTrigCounterOp:         trigCounterOpEntries,
+	ddWallFeatureKind:       wallFeatureKindEntries,
 	ddDialogActionKind:      dialogActionKindEntries,
 	ddLayer:                 layerSelectEntries,
 	ddFaceSkin:              faceSkinEntries,
 	ddContext:               contextEntries,
 	ddDoorFacing:            doorFacingEntries,
 	ddDoorStyle:             doorStyleEntries,
+	ddDoorTargetMap:         doorTargetMapEntries,
+	ddDoorTargetDoor:        doorTargetDoorEntries,
 	ddSoundAssign:           soundAssignEntries,
 }
 
@@ -253,6 +269,91 @@ func doorStyleEntries(s *State) []dropdownEntry {
 		})
 	}
 	return out
+}
+
+// setDoorTarget writes the edited door's TargetMap (mapField) or TargetDoor
+// (doorField) via the lazy-undo seam. Picking the current value is a no-op.
+func setDoorTarget(s *State, field *string, val string) {
+	if s.modalDoorIdx < 0 || s.modalDoorIdx >= len(s.area.DoorSpawns) {
+		return
+	}
+	setIfChanged(s, field, val)
+}
+
+// openDoorTargetMapPicker loads every .map id on disk into doorPickMaps (once, at
+// open) and opens the target-map dropdown. "self" heads the list; the current map
+// is elided (it's what "self" means).
+func openDoorTargetMapPicker(s *State, anchor rl.Rectangle) {
+	paths, _ := mapfile.ListByModTime(core.MapsDir())
+	selfID := ""
+	if s.area.Path != "" {
+		selfID = core.MapIDFromPath(s.area.Path)
+	}
+	maps := make([]string, 0, len(paths)+1)
+	maps = append(maps, core.SelfMapToken) // "self" — a same-map portal
+	for _, p := range paths {
+		id := core.MapIDFromPath(p)
+		if id == "" || id == selfID {
+			continue
+		}
+		maps = append(maps, id)
+	}
+	s.doorPickMaps = maps
+	openFieldDropdown(s, ddDoorTargetMap, anchor)
+}
+
+// openDoorTargetDoorPicker loads the target map's authored door names into
+// doorPickDoors (once, at open) and opens the target-door dropdown. A self/current
+// -map target reads the in-memory doors; a cross-map target loads that map from disk.
+func openDoorTargetDoorPicker(s *State, anchor rl.Rectangle) {
+	s.doorPickDoors = nil
+	if s.modalDoorIdx >= 0 && s.modalDoorIdx < len(s.area.DoorSpawns) {
+		target := s.area.DoorSpawns[s.modalDoorIdx].TargetMap
+		var spawns []core.DoorSpawn
+		if target == "" || core.IsSelfPortal(s.area, target) {
+			spawns = s.area.DoorSpawns
+		} else if dest, err := core.LoadArea(core.MapPath(target)); err == nil {
+			spawns = dest.DoorSpawns
+		}
+		names := make([]string, 0, len(spawns))
+		for _, d := range spawns {
+			if d.Name != "" {
+				names = append(names, d.Name)
+			}
+		}
+		s.doorPickDoors = names
+	}
+	openFieldDropdown(s, ddDoorTargetDoor, anchor)
+}
+
+// doorTargetMapEntries builds the target-map picker from the cached map-id list
+// (populated by openDoorTargetMapPicker so the builder never touches disk).
+func doorTargetMapEntries(s *State) []dropdownEntry {
+	if s.modalDoorIdx < 0 || s.modalDoorIdx >= len(s.area.DoorSpawns) {
+		return nil
+	}
+	return fieldEntries(s.doorPickMaps, func(id string) string { return id },
+		func(s *State, id string) {
+			if s.modalDoorIdx < 0 || s.modalDoorIdx >= len(s.area.DoorSpawns) {
+				return
+			}
+			setDoorTarget(s, &s.area.DoorSpawns[s.modalDoorIdx].TargetMap, id)
+		})
+}
+
+// doorTargetDoorEntries builds the target-door picker from the cached name list
+// (populated by openDoorTargetDoorPicker). Empty when the target map has no doors.
+func doorTargetDoorEntries(s *State) []dropdownEntry {
+	if s.modalDoorIdx < 0 || s.modalDoorIdx >= len(s.area.DoorSpawns) {
+		return nil
+	}
+	return fieldEntries(s.doorPickDoors, func(name string) string { return name },
+		func(s *State, name string) {
+			if s.modalDoorIdx < 0 || s.modalDoorIdx >= len(s.area.DoorSpawns) {
+				return
+			}
+			setDoorTarget(s, &s.area.DoorSpawns[s.modalDoorIdx].TargetDoor, name)
+		})
 }
 
 // faceSkinEntries builds the tile face-skin picker. Lists the FaceSkins roster;

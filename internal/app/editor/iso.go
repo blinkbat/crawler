@@ -439,6 +439,7 @@ func drawGridIso(s *State, font rl.Font) {
 	if g := s.ensureIsoPreview(); g != nil {
 		render.DrawChests(cam, g, frameAssets)
 		render.DrawDoors(cam, g, frameAssets)
+		render.DrawWallFeatures(cam, g, frameAssets)
 		render.DrawCrystals(cam, g, frameAssets)
 		render.DrawEnemies(cam, g, frameAssets)
 	}

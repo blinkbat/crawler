@@ -156,6 +156,8 @@ func drawPanelsBody(g *core.GameState, assets Resources) {
 			float32(tx)+float32(tabW)/2-m.X/2,
 			float32(tabRowY)+float32(tabH)/2-m.Y/2-1,
 			FontBody, txt)
+		// Unspent-points badge (Character / Skills) — pulses to draw the eye.
+		drawTabPointBadge(font, tx, tabRowY, tabW, tabH, tabUnspentCount(g, t))
 	}
 
 	// Info strip on every tab: area name left, gold right. Shared chrome so it's always visible.
@@ -252,6 +254,41 @@ var tabLabelMeasureCache measureCache
 
 func measureTabLabel(font rl.Font, label string) rl.Vector2 {
 	return tabLabelMeasureCache.measure(font, label, FontBody, 1)
+}
+
+// tabUnspentCount returns the count that drives a tab's unspent-points badge:
+// pending stat points on Character, banked skill points on Skills, else 0.
+func tabUnspentCount(g *core.GameState, t core.PanelTab) int {
+	switch t {
+	case core.PanelTabCharacter:
+		return core.TotalPendingLevelUps(g.Party)
+	case core.PanelTabSkills:
+		return core.TotalSkillPoints(g.Party)
+	default:
+		return 0
+	}
+}
+
+// drawTabPointBadge paints a small pulsing gilt count badge on a tab chip's
+// top-right — the "you have unspent points in this tab" cue. No-op when count<=0.
+func drawTabPointBadge(font rl.Font, tx, tabRowY, tabW, tabH int32, count int) {
+	if count <= 0 {
+		return
+	}
+	label := strconv.Itoa(count)
+	m := tabLabelMeasureCache.measure(font, label, FontSmall, 1)
+	bw := m.X + 14
+	if bw < 22 {
+		bw = 22
+	}
+	const bh = float32(20)
+	bx := float32(tx+tabW) - bw - 5
+	by := float32(tabRowY) + 5
+	throb := 0.55 + 0.45*pulseAttention() // 2.4 Hz "look here" breathe
+	// Soft glow halo so the badge reads as lit, not flat.
+	glow := rl.NewRectangle(bx-3, by-3, bw+6, bh+6)
+	rl.DrawRectangleRounded(glow, 1, 10, fadeColor(inkAccent, 0.22*throb))
+	drawStatusPill(font, bx, by, bw, bh, fadeColor(inkAccent, 0.55+0.35*throb), giltBright, label, statusGlyphDark, true)
 }
 
 // memberCardGutter is the single per-member-card layout unit: inter-column gap AND content inset, so they can't drift apart.
@@ -546,15 +583,23 @@ func drawFormationCard(font rl.Font, g *core.GameState, i int, quad rl.Rectangle
 	drawTextWithShadow(font, "XP", rightX+colPitch, ay, FontSmall, textMuted)
 	drawTextRightAligned(font, formatRatioSpaced(m.XP, core.XPForLevel(m.Level)), rightX+rightW, ay, FontSmall, textPrimary)
 
-	// Allocate CTA — cursored member with something to spend.
-	if highlight && (m.PendingLevelUps > 0 || m.SkillPoints > 0) {
+	// Level-up points GLOW — shown for EVERY member with unspent points (not just the
+	// cursored one) so the player spots at a glance which chars have points to spend.
+	// The pulse is the brisk 2.4 Hz "look here" throb.
+	if m.PendingLevelUps > 0 || m.SkillPoints > 0 {
 		// formationCTAInset, not footerBaselineY: this CTA sits inside a dense
 		// formation quadrant and rides tighter to the bottom than a modal footer hint.
 		hintY := quad.Y + quad.Height - formationCTAInset
+		glowCol := fadeColor(inkAccent, 0.55+0.45*pulseAttention())
 		if m.PendingLevelUps > 0 {
-			drawHintSegs(font, []HintSeg{Hint("allocate "+strconv.Itoa(m.PendingLevelUps)+" stat pt"+plural(m.PendingLevelUps), GlyphA)}, rightX, hintY, FontSmall, inkAccent, 1)
+			if highlight {
+				// Cursored: full CTA with the confirm glyph.
+				drawHintSegs(font, []HintSeg{Hint("allocate "+strconv.Itoa(m.PendingLevelUps)+" stat pt"+plural(m.PendingLevelUps), GlyphA)}, rightX, hintY, FontSmall, glowCol, 1)
+			} else {
+				drawTextWithShadow(font, "+"+strconv.Itoa(m.PendingLevelUps)+" stat pt"+plural(m.PendingLevelUps), rightX, hintY, FontSmall, glowCol)
+			}
 		} else if m.SkillPoints > 0 {
-			drawTextWithShadow(font, strconv.Itoa(m.SkillPoints)+" skill pt"+plural(m.SkillPoints)+" (Skills tab)", rightX, hintY, FontSmall, inkAccent)
+			drawTextWithShadow(font, strconv.Itoa(m.SkillPoints)+" skill pt"+plural(m.SkillPoints)+" (Skills tab)", rightX, hintY, FontSmall, glowCol)
 		}
 	}
 }

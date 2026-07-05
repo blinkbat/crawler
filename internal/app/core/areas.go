@@ -226,6 +226,10 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	if err != nil {
 		return AreaDefinition{}, err
 	}
+	wallFeatures, err := WallFeaturesFromLines(mf.WallFeatures)
+	if err != nil {
+		return AreaDefinition{}, err
+	}
 	ceiling := mapfile.OptionalLayerOrBlank(mf.Ceiling, mf.Width, mf.Height, TileCeilingOpen)
 	elevation := mapfile.OptionalLayerOrBlank(mf.Elevation, mf.Width, mf.Height, ElevationGround)
 	area := AreaDefinition{
@@ -260,6 +264,7 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		Dialogs:          dialogs,
 		Triggers:         triggers,
 		Locations:        locations,
+		WallFeatures:     wallFeatures,
 	}
 	// Validate crystals now the area's BlockedAt geometry is built: reject a
 	// hand-edited crystal on a blocked tile (renders embedded) or a duplicate
@@ -399,6 +404,10 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 	if err != nil {
 		return mapfile.MapFile{}, err
 	}
+	wallFeatureLines, err := WallFeaturesToLines(a.WallFeatures)
+	if err != nil {
+		return mapfile.MapFile{}, err
+	}
 	// Per-floor scatter (props/decor): a nil stack passes the legacy grid through;
 	// a materialized stack projects to grid + *_levels: and emits propstack:/
 	// decorstack: only when a column carries content on more than one floor.
@@ -435,6 +444,7 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 		Dialogs:         dialogLines,
 		Triggers:        triggerLines,
 		Locations:       locationLines,
+		WallFeatures:    wallFeatureLines,
 	}, nil
 }
 

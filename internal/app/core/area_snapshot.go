@@ -75,8 +75,9 @@ func AreaContentEqual(a, b AreaDefinition) bool {
 		!slices.Equal(a.DoorSpawns, b.DoorSpawns) ||
 		!slices.Equal(a.CrystalSpawns, b.CrystalSpawns) ||
 		!dialogsEqual(a.Dialogs, b.Dialogs) ||
-		!slices.Equal(a.Triggers, b.Triggers) ||
-		!slices.Equal(a.Locations, b.Locations) {
+		!triggersEqual(a.Triggers, b.Triggers) ||
+		!slices.Equal(a.Locations, b.Locations) ||
+		!slices.Equal(a.WallFeatures, b.WallFeatures) {
 		return false
 	}
 	return true
@@ -100,7 +101,7 @@ func faceOverridesEqual(a, b []FaceOverride) bool {
 	return true
 }
 
-// dialogsEqual deep-compares dialog lists. Nodes/choices carry a *DialogAction
+// dialogsEqual deep-compares dialog lists. Nodes/choices carry a *Action
 // pointer, so those need a deref-aware walk rather than ==.
 func dialogsEqual(a, b []DialogDefinition) bool {
 	return slices.EqualFunc(a, b, func(ad, bd DialogDefinition) bool {
@@ -123,11 +124,32 @@ func dialogChoiceEqual(a, b DialogChoice) bool {
 		slices.Equal(a.Conditions, b.Conditions)
 }
 
-func dialogActionEqual(a, b *DialogAction) bool {
+func dialogActionEqual(a, b *Action) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return *a == *b
+	return actionValueEqual(*a, *b)
+}
+
+// actionValueEqual deep-compares two Actions (the Items slice rules out ==).
+func actionValueEqual(a, b Action) bool {
+	return a.Kind == b.Kind && a.DialogID == b.DialogID &&
+		a.QuestID == b.QuestID && a.QuestOp == b.QuestOp && a.EventID == b.EventID &&
+		a.Switch == b.Switch && a.SwitchOp == b.SwitchOp &&
+		a.Counter == b.Counter && a.CounterOp == b.CounterOp &&
+		a.TileX == b.TileX && a.TileZ == b.TileZ && a.Level == b.Level &&
+		a.FoeKind == b.FoeKind && a.Count == b.Count && a.Text == b.Text &&
+		slices.Equal(a.Items, b.Items)
+}
+
+// triggersEqual deep-compares trigger lists (Conditions is all-comparable so
+// slices.Equal fits; Actions need actionValueEqual for the Items slice).
+func triggersEqual(a, b []Trigger) bool {
+	return slices.EqualFunc(a, b, func(x, y Trigger) bool {
+		return x.ID == y.ID && x.Preserve == y.Preserve &&
+			slices.Equal(x.Conditions, y.Conditions) &&
+			slices.EqualFunc(x.Actions, y.Actions, actionValueEqual)
+	})
 }
 
 // optionalLayerEqual compares two optional grid layers, treating an absent/short
@@ -234,10 +256,12 @@ func CloneArea(a AreaDefinition) AreaDefinition {
 	// CrystalSpawn is all-comparable, so a plain slice copy is a full deep copy.
 	out.CrystalSpawns = append([]CrystalSpawn(nil), a.CrystalSpawns...)
 	out.Dialogs = CloneDialogs(a.Dialogs)
-	// DialogTrigger is all-comparable, so a plain slice copy is a full deep copy.
-	out.Triggers = append([]DialogTrigger(nil), a.Triggers...)
+	// Triggers carry Conditions/Actions slices, so deep-copy each.
+	out.Triggers = cloneTriggers(a.Triggers)
 	// Location is likewise all-comparable — a plain copy is a full deep copy.
 	out.Locations = append([]Location(nil), a.Locations...)
+	// WallFeature is all-comparable — a plain copy is a full deep copy.
+	out.WallFeatures = append([]WallFeature(nil), a.WallFeatures...)
 	return out
 }
 
@@ -255,7 +279,7 @@ func CloneDialogs(in []DialogDefinition) []DialogDefinition {
 }
 
 // CloneDialogDef deep-copies a single definition (Nodes, Choices, Conditions,
-// and the *DialogAction pointers) so the copy shares no mutable backing.
+// and the *Action pointers) so the copy shares no mutable backing.
 func CloneDialogDef(d DialogDefinition) DialogDefinition {
 	out := DialogDefinition{
 		ID:          d.ID,
@@ -281,10 +305,39 @@ func CloneDialogDef(d DialogDefinition) DialogDefinition {
 	return out
 }
 
-func cloneDialogAction(a *DialogAction) *DialogAction {
+func cloneDialogAction(a *Action) *Action {
 	if a == nil {
 		return nil
 	}
-	cp := *a
+	cp := cloneActionValue(*a)
 	return &cp
+}
+
+// cloneActionValue deep-copies an Action (detaching its Items slice).
+func cloneActionValue(a Action) Action {
+	a.Items = append([]ItemKind(nil), a.Items...)
+	return a
+}
+
+// cloneTriggers deep-copies a trigger list so the copy shares no Conditions/Actions
+// backing (Actions carry an Items slice).
+func cloneTriggers(in []Trigger) []Trigger {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]Trigger, len(in))
+	for i, t := range in {
+		ct := t
+		ct.Conditions = append([]Condition(nil), t.Conditions...)
+		if len(t.Actions) == 0 {
+			ct.Actions = nil
+		} else {
+			ct.Actions = make([]Action, len(t.Actions))
+			for j, a := range t.Actions {
+				ct.Actions[j] = cloneActionValue(a)
+			}
+		}
+		out[i] = ct
+	}
+	return out
 }

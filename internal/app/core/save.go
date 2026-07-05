@@ -60,10 +60,15 @@ type SaveData struct {
 	// older saves load with fresh (charged) crystals. Without it a reload re-arms
 	// a spent crystal — a free heal+save fountain.
 	Crystals []CrystalSave `json:"crystals,omitempty"`
-	// TriggersFired persists which Once dialog triggers fired (by trigger ID,
-	// see dialogtrigger.go) so an intro cutscene doesn't replay on reload. A
-	// stale key matches nothing and is inert. omitempty for older saves.
+	// TriggersFired persists which non-Preserve triggers fired (by trigger ID,
+	// see trigger.go) so an intro cutscene doesn't replay on reload. A stale key
+	// matches nothing and is inert. omitempty for older saves.
 	TriggersFired map[string]bool `json:"triggersFired,omitempty"`
+	// Switches / Counters persist the trigger system's shared state so switch-gated
+	// world changes survive reload (a Preserve trigger re-applies them on load). Stale
+	// keys are inert. omitempty for older saves.
+	Switches map[string]bool `json:"switches,omitempty"`
+	Counters map[string]int  `json:"counters,omitempty"`
 }
 
 // CrystalSave is the persisted charge state of one healing crystal.
@@ -120,6 +125,8 @@ func NewSaveData(g *GameState) SaveData {
 		Bestiary:      maps.Clone(g.Bestiary),
 		Crystals:      crystalSaves(g.Crystals),
 		TriggersFired: maps.Clone(g.TriggersFired),
+		Switches:      maps.Clone(g.Switches),
+		Counters:      maps.Clone(g.Counters),
 	}
 }
 
@@ -239,6 +246,9 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	g.StepCount = MaxZero(data.StepCount)
 	// Detached copy (nil stays nil, lazy-inited on fire).
 	g.TriggersFired = maps.Clone(data.TriggersFired)
+	// Restore trigger state: switch/counter values gate the conditions below.
+	g.Switches = maps.Clone(data.Switches)
+	g.Counters = maps.Clone(data.Counters)
 	// Overlay saved crystal charge by TILE, not index: an edited map can yield
 	// the same crystal COUNT at a different tile, and an index overlay would
 	// re-arm a spent charge onto a relocated crystal.
@@ -312,6 +322,11 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	// enter-location dialog. Mirrors the door-reposition paths in run.go.
 	SeedLocationPresence(&g)
 	RevealRadius(&g, x, z, SightRadius)
+	// Re-apply switch-gated world state (opened walls, spawns) whose Preserve triggers
+	// hold under the restored switches/counters — the world rebuilt fresh from the .map,
+	// so a durable trigger must run again to re-open what a prior session opened. World-
+	// only: skips dialog/message actions so a load never pops a surprise conversation.
+	EvaluateWorldTriggers(&g)
 	return g, nil
 }
 

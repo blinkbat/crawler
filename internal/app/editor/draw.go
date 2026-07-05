@@ -242,6 +242,7 @@ var modalHandlers = map[modalKind]modalHandler{
 	modalDialogCondEdit:    {draw: drawDialogCondEditModal, update: updateDialogCondEditModal},
 	modalDialogTriggerList: {draw: drawDialogTriggerListModal, update: updateDialogTriggerListModal},
 	modalDialogTriggerEdit: {draw: drawDialogTriggerEditModal, update: updateDialogTriggerEditModal},
+	modalWallFeatureEdit:   {draw: drawWallFeatureEditModal, update: updateWallFeatureEditModal},
 	modalLocationEdit:      {draw: drawLocationEditModal, update: updateLocationEditModal},
 	modalHelp:              {draw: drawHelpModal, update: updateHelpModal},
 	modalCrystalEdit:       {draw: drawCrystalEditModal, update: updateCrystalEditModal},
@@ -275,7 +276,9 @@ const (
 	doorHitOutside doorEditHitTarget = iota
 	doorHitName
 	doorHitTargetMap
+	doorHitTargetMapPick
 	doorHitTargetDoor
+	doorHitTargetDoorPick
 	doorHitFacing
 	doorHitStyle
 	doorHitDelete
@@ -292,15 +295,24 @@ type doorEditHit struct {
 // so update and draw stay in sync. Facing + style are single picker buttons
 // (each opens a dropdown), not per-value button rows.
 type doorEditLayout struct {
-	card      rl.Rectangle
-	nameField rl.Rectangle
-	mapField  rl.Rectangle
-	doorField rl.Rectangle
-	facingBtn rl.Rectangle
-	styleBtn  rl.Rectangle
-	deleteBtn rl.Rectangle
-	closeBtn  rl.Rectangle
+	card        rl.Rectangle
+	nameField   rl.Rectangle
+	mapField    rl.Rectangle
+	mapPickBtn  rl.Rectangle // ▼ opens the target-map picker (all .map ids on disk)
+	doorField   rl.Rectangle
+	doorPickBtn rl.Rectangle // ▼ opens the target-door picker (target map's doors)
+	facingBtn   rl.Rectangle
+	styleBtn    rl.Rectangle
+	deleteBtn   rl.Rectangle
+	closeBtn    rl.Rectangle
 }
+
+// doorPickBtnW is the width of the ▼ picker button trailing the target-map /
+// target-door text fields; doorPickBtnGap is the breath between field and button.
+const (
+	doorPickBtnW   = float32(46)
+	doorPickBtnGap = float32(6)
+)
 
 func doorEditLayoutFor() doorEditLayout {
 	r := centeredCardRect(doorEditModalW, doorEditModalH)
@@ -312,8 +324,13 @@ func doorEditLayoutFor() doorEditLayout {
 	rowGap := dialogRowGap
 	fields := stackRows(x, y, fw, fieldH, rowGap, 3)
 	nameField := fields[0]
-	mapField := fields[1]
-	doorField := fields[2]
+	// Target map / door fields keep free-text entry but trade their right edge for a
+	// ▼ picker button (pick from disk, or still type a not-yet-created id).
+	fieldW := fw - doorPickBtnW - doorPickBtnGap
+	mapField := rl.NewRectangle(fields[1].X, fields[1].Y, fieldW, fields[1].Height)
+	mapPickBtn := rl.NewRectangle(fields[1].X+fieldW+doorPickBtnGap, fields[1].Y, doorPickBtnW, fields[1].Height)
+	doorField := rl.NewRectangle(fields[2].X, fields[2].Y, fieldW, fields[2].Height)
+	doorPickBtn := rl.NewRectangle(fields[2].X+fieldW+doorPickBtnGap, fields[2].Y, doorPickBtnW, fields[2].Height)
 	y += 3*rowGap + dialogStackTailGap
 	// Facing + style picker buttons (full-width, one per row) — each opens a dropdown.
 	facingBtn := rl.NewRectangle(x, y, fw, fieldH)
@@ -322,14 +339,16 @@ func doorEditLayoutFor() doorEditLayout {
 	deleteBtn := bottomLeftBtn(r)
 	closeBtn := bottomRightBtn(r)
 	return doorEditLayout{
-		card:      r,
-		nameField: nameField,
-		mapField:  mapField,
-		doorField: doorField,
-		facingBtn: facingBtn,
-		styleBtn:  styleBtn,
-		deleteBtn: deleteBtn,
-		closeBtn:  closeBtn,
+		card:        r,
+		nameField:   nameField,
+		mapField:    mapField,
+		mapPickBtn:  mapPickBtn,
+		doorField:   doorField,
+		doorPickBtn: doorPickBtn,
+		facingBtn:   facingBtn,
+		styleBtn:    styleBtn,
+		deleteBtn:   deleteBtn,
+		closeBtn:    closeBtn,
 	}
 }
 
@@ -344,8 +363,12 @@ func doorEditHitTest(s *State, p rl.Vector2) doorEditHit {
 		return doorEditHit{kind: doorHitName}
 	case pointIn(p, l.mapField):
 		return doorEditHit{kind: doorHitTargetMap}
+	case pointIn(p, l.mapPickBtn):
+		return doorEditHit{kind: doorHitTargetMapPick}
 	case pointIn(p, l.doorField):
 		return doorEditHit{kind: doorHitTargetDoor}
+	case pointIn(p, l.doorPickBtn):
+		return doorEditHit{kind: doorHitTargetDoorPick}
 	case pointIn(p, l.facingBtn):
 		return doorEditHit{kind: doorHitFacing}
 	case pointIn(p, l.styleBtn):
@@ -3493,9 +3516,11 @@ func drawDoorEditModal(s *State, font rl.Font, theme render.Theme) {
 
 	drawLabel(font, "Target map (bare id, or 'self')", labelAbove(l.mapField))
 	drawTextField(font, l.mapField, door.TargetMap, s.focus == focusDoorTargetMap)
+	drawButton(font, l.mapPickBtn, "▼", s.dropdown.owner == ddDoorTargetMap)
 
 	drawLabel(font, "Target door (Name on destination map)", labelAbove(l.doorField))
 	drawTextField(font, l.doorField, door.TargetDoor, s.focus == focusDoorTargetDoor)
+	drawButton(font, l.doorPickBtn, "▼", s.dropdown.owner == ddDoorTargetDoor)
 
 	// Facing picker (opens ddDoorFacing).
 	facingName, _ := core.FacingName(door.Facing)

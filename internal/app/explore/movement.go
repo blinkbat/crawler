@@ -100,6 +100,10 @@ func Update(g *core.GameState) {
 	if g.Player.Anim.Kind == core.AnimNone && tryUseAdjacentCrystal(g) {
 		return
 	}
+	// Use (Square / F) flips a wall switch or blasts a bombable wall the party faces.
+	if g.Player.Anim.Kind == core.AnimNone && tryUseWallFeature(g) {
+		return
+	}
 	updatePlayer(g, dt)
 }
 
@@ -116,6 +120,42 @@ func tryAdjacentInteraction(find func() int, act func(idx int)) bool {
 	}
 	act(idx)
 	return true
+}
+
+// tryUseWallFeature flips a wall switch / blasts a bombable wall the party faces
+// (Use = Square / F). Secret walls are found by BUMPING (see startStep), not Use.
+// Activating sets the fixture's switch and re-evaluates triggers.
+func tryUseWallFeature(g *core.GameState) bool {
+	if !input.UsePressed() {
+		return false
+	}
+	idx := core.FacedWallFeature(g, true) // switch / bombable only
+	if idx < 0 {
+		return false
+	}
+	if core.ActivateWallFeature(g, idx) {
+		audio.Play(audio.SoundInputHit)
+		return true
+	}
+	return false
+}
+
+// tryBumpSecretWall reveals a secret wall the party walks INTO (a blocked forward
+// step). Only forward bumps (forward==1) count, and only secret-kind fixtures
+// (switch/bombable use the Use button). Returns true if one activated.
+func tryBumpSecretWall(g *core.GameState, forward int) bool {
+	if forward != 1 {
+		return false
+	}
+	idx := core.FacedWallFeature(g, false)
+	if idx < 0 || !g.Area.WallFeatures[idx].UsesBump() {
+		return false
+	}
+	if core.ActivateWallFeature(g, idx) {
+		audio.Play(audio.SoundInputHit)
+		return true
+	}
+	return false
 }
 
 // tryOpenAdjacentChest opens an adjacent non-looted chest's modal on Confirm.
@@ -667,6 +707,7 @@ func startStep(p *core.Player, g *core.GameState, forward int) {
 	if dir, ok := facingForTile(p, targetX, targetZ); ok {
 		l, stepOK := g.Area.ResolveStepLanding(p.TileX, p.Level, p.TileZ, dir)
 		if !stepOK {
+			tryBumpSecretWall(g, forward) // walking into a secret wall reveals it
 			return
 		}
 		landLevel = l
@@ -684,6 +725,7 @@ func startStep(p *core.Player, g *core.GameState, forward int) {
 	// the engagement branch already consumed the pack-tile case. The voxel
 	// level-aware variant lets a prop block only its own levels (walk under a deck).
 	if !core.CanEnterLanding(g, targetX, targetZ, landLevel, core.EnterOpts{AllowDoorTile: true}, g.Area.IsVoxel()) {
+		tryBumpSecretWall(g, forward) // a blocked forward step into a secret wall reveals it
 		return
 	}
 	// Ground height left from — captured before the TileX/Z/Level advance so a
@@ -829,8 +871,9 @@ func updateAnimation(g *core.GameState, dt float32) float32 {
 		// runs even if an enter-tile dialog opened, so its inside-set stays current
 		// (the firing itself no-ops while a dialog is up).
 		if g.DoorPrompt < 0 {
-			core.FireEnterTileTriggers(g, g.Player.TileX, g.Player.TileZ)
-			core.FireEnterLocationTriggers(g, g.Player.TileX, g.Player.TileZ, g.Player.Level)
+			// Poll the trigger engine on the step landing: enterTile / atLocation and
+			// any other conditions are re-evaluated here (see core.EvaluateTriggers).
+			core.EvaluateTriggers(g)
 		}
 	}
 	// If landing opened an overlay, swallow the remainder so the caller doesn't

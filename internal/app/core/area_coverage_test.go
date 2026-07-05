@@ -29,6 +29,7 @@ func TestAreaDefinitionFieldsTracked(t *testing.T) {
 		"PackSpawns": true, "ChestSpawns": true, "DoorSpawns": true,
 		"CrystalSpawns": true, "CrystalsAuthored": true,
 		"QuietMessage": true, "Dialogs": true, "Triggers": true, "Locations": true,
+		"WallFeatures": true,
 	}
 	tp := reflect.TypeOf(AreaDefinition{})
 	for i := 0; i < tp.NumField(); i++ {

@@ -26,6 +26,31 @@ func TestRestorePackFull_DropsSummonsRevivesAuthored(t *testing.T) {
 	}
 }
 
+// TestRestorePackFull_ReSeatsFrontRowCap: reviving a pack after a flee must not
+// leave more than EnemyFrontRowCap members in the front row. Combat promotes
+// back→front on deaths but never demotes, so a downed front member (still RowFront)
+// plus the back member promoted to cover it are ALL front-row after a naive revive.
+// RestorePackFull resets everyone to back then re-shunts, capping the front row.
+func TestRestorePackFull_ReSeatsFrontRowCap(t *testing.T) {
+	// Authored 2 front + 1 back; mid-fight a front foe died and the back foe was
+	// promoted, so at flee time three members carry RowFront (one dead).
+	pack := &Pack{Members: []Enemy{
+		{Kind: EnemyRat, MaxHP: 10, HP: 0, Alive: false, Row: RowFront}, // died in front
+		{Kind: EnemyRat, MaxHP: 10, HP: 4, Alive: true, Row: RowFront},  // living front
+		{Kind: EnemyRat, MaxHP: 10, HP: 6, Alive: true, Row: RowFront},  // promoted from back
+	}}
+	RestorePackFull(pack)
+	front := 0
+	for i := range pack.Members {
+		if pack.Members[i].Alive && pack.Members[i].Row == RowFront {
+			front++
+		}
+	}
+	if front > EnemyFrontRowCap {
+		t.Fatalf("front row over cap after restore: %d living front, cap %d", front, EnemyFrontRowCap)
+	}
+}
+
 // TestDropCrystalsOnPacks: a crystal sharing a pack's tile is removed (both block).
 func TestDropCrystalsOnPacks(t *testing.T) {
 	packs := []Pack{{TileX: 3, TileZ: 4, Members: []Enemy{{Kind: EnemyRat, Alive: true}}}}

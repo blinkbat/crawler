@@ -1108,6 +1108,25 @@ func HasUnspentPoints(m *PartyMember) bool {
 	return m.PendingLevelUps > 0 || m.SkillPoints > 0
 }
 
+// TotalPendingLevelUps sums unspent stat points across the party — the Character
+// tab's badge count. TotalSkillPoints does the same for the Skills tab.
+func TotalPendingLevelUps(party []PartyMember) int {
+	n := 0
+	for i := range party {
+		n += party[i].PendingLevelUps
+	}
+	return n
+}
+
+// TotalSkillPoints sums banked skill points across the party (Skills tab badge).
+func TotalSkillPoints(party []PartyMember) int {
+	n := 0
+	for i := range party {
+		n += party[i].SkillPoints
+	}
+	return n
+}
+
 // PartyStatusKind tags the single highest-priority status a member is afflicted
 // by — the single source of truth for the party card and Tome badge surfaces.
 type PartyStatusKind int

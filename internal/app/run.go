@@ -367,6 +367,7 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	render.DrawWorld(camera, game, assets)
 	render.DrawChests(camera, game, assets)
 	render.DrawDoors(camera, game, assets)
+	render.DrawWallFeatures(camera, game, assets)
 	render.DrawCrystals(camera, game, assets)
 	if !exemptSprites {
 		// In battle, paint the billboards OVER the environment (no clipping into walls

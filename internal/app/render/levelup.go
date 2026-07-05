@@ -52,7 +52,13 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 	if staged > 0 {
 		primary += "   ·   " + strconv.Itoa(staged) + " staged"
 	}
-	drawTextWithShadow(font, primary, float32(cardX+levelUpHeaderX), float32(cardY+levelUpHeaderY), FontBody, textPrimary)
+	// Unspent points glow (matches the char-panel / tab cue) so the "you still have
+	// points" state reads at a glance; a fully-spent readout sits calm in textPrimary.
+	primaryCol := textPrimary
+	if statRemaining > 0 {
+		primaryCol = fadeColor(inkAccent, 0.6+0.4*pulseAttention())
+	}
+	drawTextWithShadow(font, primary, float32(cardX+levelUpHeaderX), float32(cardY+levelUpHeaderY), FontBody, primaryCol)
 	if m.SkillPoints > 0 {
 		secondary := strconv.Itoa(m.SkillPoints) + " skill pt" + plural(m.SkillPoints) + " banked — spend in the Skills tab"
 		drawTextWithShadow(font, secondary, float32(cardX+levelUpHeaderX), float32(cardY+levelUpHeaderSubY), FontSmall, inkAccent)

@@ -483,17 +483,17 @@ func setDecorFloor(s *State, x, z int, c byte) {
 	setTileLevel(s, &s.area.DecorLevels, x, z, s.editLevel)
 }
 
-// moveStartTo relocates the player start to (x,z) when startBlockers allows, banking
-// ONE undo and dirtying on success (flashing the first blocker otherwise). The single
-// home for the three move-start paths — entity brush, start-drag, right-click "Move
-// start here" — which had drifted: the entity-brush copy skipped the undo snapshot.
-// Returns whether the start actually moved.
+// moveStartTo relocates the player start to (x,z) when startBlockers allows, setting
+// the optimistic dirty flag on success (flashing the first blocker otherwise). It does
+// NOT bank undo itself — the caller owns the snapshot seam: the entity-brush path runs
+// under strokePaint's lazy snapshot (banking once per stroke, not once per swept tile),
+// and the direct callers (start-drag release, right-click "Move start here", Shift+Arrow
+// nudge) wrap it in commitPaintIfChanged. Returns whether the start actually moved.
 func moveStartTo(s *State, x, z int) bool {
 	if msg := firstBlocker(startBlockers(&s.area, x, z)...); msg != "" {
 		s.flash(msg)
 		return false
 	}
-	pushUndo(s)
 	s.area.StartTileX = x
 	s.area.StartTileZ = z
 	s.dirty = true
@@ -1069,9 +1069,15 @@ func pasteSelection(s *State, atX, atZ int) {
 		s.flash("Hover over the map, then Ctrl+V to paste at the cursor")
 		return
 	}
-	pushUndo(s)
+	// Lazy undo (mirrors cut/move): pasting content identical to what's already there
+	// (or a paste fully clipped off-map) must not bank a dead undo step or falsely dirty.
+	before := core.CloneArea(s.area)
 	s.area.PasteRegion(s.clipboard, atX, atZ)
 	stampRegionEntities(s, s.clipEntities, atX, atZ)
+	if core.AreaContentEqual(s.area, before) {
+		return
+	}
+	commitUndoSnapshot(s, before)
 	s.dirty = true
 	s.flash(fmt.Sprintf("Pasted %d×%d region", s.clipboard.W, s.clipboard.H))
 }
@@ -1240,7 +1246,11 @@ func duplicateSelection(s *State) {
 	}
 	pasteSelection(s, atX, atZ)
 	s.selX0, s.selZ0 = atX, atZ
-	s.selX1, s.selZ1 = atX+s.clipboard.W-1, atZ+s.clipboard.H-1
+	// Clamp the follow-on marquee to the map: an edge duplicate would otherwise leave
+	// selX1/selZ1 off-map, which makes a later moveSelectionBy compute a negative Clamp
+	// max (region wider than the map) and botch the move.
+	s.selX1 = core.Clamp(atX+s.clipboard.W-1, atX, s.area.Width-1)
+	s.selZ1 = core.Clamp(atZ+s.clipboard.H-1, atZ, s.area.Height-1)
 }
 
 // moveSelectionBy shifts the committed marquee's contents (grid + entities) by
@@ -1574,7 +1584,7 @@ func writeAreaTo(s *State, path string) error {
 	s.baseline = core.CloneArea(s.area)
 	s.dirty = false
 	s.autosaveTimer = 0
-	clearRecovery() // persisted to disk — no pending crash-recovery snapshot
+	clearRecovery()       // persisted to disk — no pending crash-recovery snapshot
 	rememberLastMap(path) // reopen here next session (NewDefault)
 	return nil
 }
@@ -2344,29 +2354,74 @@ func dialogWarnings(a core.AreaDefinition) []string {
 		}
 	}
 	for _, t := range a.Triggers {
-		if t.DialogID == "" {
-			out = append(out, fmt.Sprintf("trigger %q has no target dialog", t.ID))
-		} else if _, ok := core.DialogDefByID(a, t.DialogID); !ok {
-			out = append(out, fmt.Sprintf("trigger %q → dialog %q not found", t.ID, t.DialogID))
+		if len(t.Actions) == 0 {
+			out = append(out, fmt.Sprintf("trigger %q has no actions", t.ID))
 		}
-		switch t.Kind {
-		case core.DialogTriggerEnterTile:
-			if !a.InBounds(t.TileX, t.TileZ) {
-				out = append(out, fmt.Sprintf("trigger %q enter-tile (%d,%d) is out of bounds", t.ID, t.TileX, t.TileZ))
+		for _, c := range t.Conditions {
+			if msg := triggerCondWarning(a, c); msg != "" {
+				out = append(out, fmt.Sprintf("trigger %q: %s", t.ID, msg))
 			}
-		case core.DialogTriggerFoeKilled:
-			if _, ok := core.EnemyInfoOk(t.FoeKind); !ok {
-				out = append(out, fmt.Sprintf("trigger %q references an unregistered foe kind", t.ID))
-			}
-		case core.DialogTriggerEnterLocation:
-			if t.LocationID == "" {
-				out = append(out, fmt.Sprintf("trigger %q enter-location has no target region", t.ID))
-			} else if _, ok := core.LocationByID(a.Locations, t.LocationID); !ok {
-				out = append(out, fmt.Sprintf("trigger %q → location %q not found", t.ID, t.LocationID))
+		}
+		for _, act := range t.Actions {
+			if msg := triggerActionWarning(a, act); msg != "" {
+				out = append(out, fmt.Sprintf("trigger %q: %s", t.ID, msg))
 			}
 		}
 	}
 	return out
+}
+
+// triggerCondWarning returns a static problem with one trigger condition, or "".
+func triggerCondWarning(a core.AreaDefinition, c core.Condition) string {
+	switch c.Kind {
+	case core.CondEnterTile, core.CondTileVisited:
+		if !a.InBounds(c.TileX, c.TileZ) {
+			return fmt.Sprintf("condition tile (%d,%d) is out of bounds", c.TileX, c.TileZ)
+		}
+	case core.CondFoeKilled:
+		if _, ok := core.EnemyInfoOk(c.FoeKind); !ok {
+			return "foe-killed condition references an unregistered foe kind"
+		}
+	case core.CondAtLocation:
+		if c.LocationID == "" {
+			return "at-location condition has no target region"
+		} else if _, ok := core.LocationByID(a.Locations, c.LocationID); !ok {
+			return fmt.Sprintf("at-location → region %q not found", c.LocationID)
+		}
+	case core.CondSwitch:
+		if c.Switch == "" {
+			return "switch condition has no switch name"
+		}
+	}
+	return ""
+}
+
+// triggerActionWarning returns a static problem with one trigger action, or "".
+func triggerActionWarning(a core.AreaDefinition, act core.Action) string {
+	switch act.Kind {
+	case core.ActionDialog:
+		if act.DialogID == "" {
+			return "dialog action has no target dialog"
+		} else if _, ok := core.DialogDefByID(a, act.DialogID); !ok {
+			return fmt.Sprintf("dialog action → dialog %q not found", act.DialogID)
+		}
+	case core.ActionSpawnFoe:
+		if _, ok := core.EnemyInfoOk(act.FoeKind); !ok {
+			return "spawn-foe action references an unregistered foe kind"
+		}
+		if !a.InBounds(act.TileX, act.TileZ) {
+			return fmt.Sprintf("spawn-foe tile (%d,%d) is out of bounds", act.TileX, act.TileZ)
+		}
+	case core.ActionSpawnChest, core.ActionOpenWall, core.ActionTeleport:
+		if !a.InBounds(act.TileX, act.TileZ) {
+			return fmt.Sprintf("%s tile (%d,%d) is out of bounds", act.Kind, act.TileX, act.TileZ)
+		}
+	case core.ActionSetSwitch:
+		if act.Switch == "" {
+			return "set-switch action has no switch name"
+		}
+	}
+	return ""
 }
 
 // dialogCondWarning returns a problem with one choice condition, or "". Only
@@ -2409,7 +2464,7 @@ func performNewMap(s *State, w, h int, floor byte) {
 	s.dirty = false
 	s.autosaveTimer = 0
 	s.bookmarks = nil // view bookmarks are map-specific
-	clearRecovery() // fresh map — discard any stale recovery snapshot
+	clearRecovery()   // fresh map — discard any stale recovery snapshot
 	clearSelection(s) // new map — old selection coords no longer apply
 	// Reset Levels-panel / active-floor state (shared with openSelectedMap) so a stale
 	// editLevel can't lift the first paint onto a nonexistent floor.

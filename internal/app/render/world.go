@@ -648,10 +648,10 @@ func drawAreaWorld(camera rl.Camera3D, m *core.AreaDefinition, assets Resources,
 				// Voxel path (gapped maps only): floors per standable surface, side
 				// faces per solid run, floating-cube undersides. Per-level hiding is
 				// resolved inside, cube by cube (a column spans many levels).
-				n := drawVoxelColumn(camPos, material, assets, m, x, z, cx, cz, levelVisible)
+				nf, nw := drawVoxelColumn(camPos, material, assets, m, x, z, cx, cz, levelVisible)
 				if logActive {
-					stats.FloorsDrawn++
-					stats.WallsDrawn += n
+					stats.FloorsDrawn += nf
+					stats.WallsDrawn += nw
 				}
 			} else if terrainVisible {
 				drawFloorTile(material, assets, m.Floor[z][x], x, z, cx, cz, elevY)

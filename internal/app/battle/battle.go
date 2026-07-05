@@ -1201,9 +1201,12 @@ func resolveEnemySpell(g *core.GameState, slot int, skill core.SkillID) {
 	cast := handler(ctx)
 	// Re-fetch the LIVE caster by slot AFTER dispatch: Raise Bones reallocates
 	// pack.Members, dangling ctx.enemy, so the pre-dispatch pointer can't carry
-	// post-cast writes. nil = the caster died mid-cast (e.g. a reflect).
+	// post-cast writes. Guard nil (out-of-range slot) AND !Alive: a caster killed
+	// mid-cast by a reflect (Retribution / Ice Armor) is still in-range, so
+	// BattleMemberAt returns a live pointer to the corpse — don't stamp a bump or
+	// charge a cast on a dead foe.
 	caster := core.BattleMemberAt(g, slot)
-	if caster == nil {
+	if caster == nil || !caster.Alive {
 		return
 	}
 	// AttackBump (the cast-lunge offset) on the live caster — every handler ends
@@ -1322,7 +1325,7 @@ func updateVictorySpoils(g *core.GameState, dt float32) {
 			leaveBattle(g, g.Area.QuietMessage)
 			// Foe-killed triggers fire after teardown so the dialog overlays
 			// explore, not the battle scene.
-			core.FireFoeKilledTriggers(g)
+			core.EvaluateTriggers(g)
 		}
 		return
 	}
@@ -1358,7 +1361,7 @@ func updateVictorySpoils(g *core.GameState, dt float32) {
 			return
 		}
 		leaveBattle(g, g.Area.QuietMessage)
-		core.FireFoeKilledTriggers(g)
+		core.EvaluateTriggers(g)
 	}
 }
 
@@ -1412,7 +1415,7 @@ func DebugSkipWin(g *core.GameState, packIndex int) {
 	// clearBattleResidual drops the pack (Phase==BattleWon) and resets transients.
 	leaveBattle(g, g.Area.QuietMessage)
 	// Same foe-killed triggers as the fought-win path, so Skip behaves identically.
-	core.FireFoeKilledTriggers(g)
+	core.EvaluateTriggers(g)
 }
 
 func loseBattle(g *core.GameState, message string) {

@@ -69,6 +69,9 @@ func (s State) ChosenMapPath() string { return s.chosenMapPath }
 func (s *State) SetLoadError(msg string) {
 	s.loadError = msg
 	s.mode = modeMain
+	// Reset the cursor: it may hold a map-picker index past the main-menu row count,
+	// which would leave no row highlighted for the frame before updateMain re-clamps.
+	s.cursor = 0
 }
 
 func Update(s *State) Action {

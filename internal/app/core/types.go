@@ -343,12 +343,16 @@ type AreaDefinition struct {
 	// Dialogs are the area's authored branching conversations (see dialog.go),
 	// started by StartDialog (by id).
 	Dialogs []DialogDefinition
-	// Triggers auto-start a dialog on a world event (step / foe killed / region
-	// entered) — see dialogtrigger.go.
-	Triggers []DialogTrigger
-	// Locations are named, elevation-specific rectangular regions a
-	// DialogTriggerEnterLocation can fire on — see location.go.
+	// Triggers are the StarEdit-style event rules: each fires its Actions when its
+	// Conditions all hold (polled on world beats via EvaluateTriggers) — see trigger.go.
+	Triggers []Trigger
+	// Locations are named, elevation-specific rectangular regions an atLocation
+	// condition can test — see location.go.
 	Locations []Location
+	// WallFeatures are interactive wall fixtures (switches / bombable / secret walls),
+	// each mounted on a tile face; activating one sets a Switch + re-evaluates triggers
+	// — see wallfeature.go.
+	WallFeatures []WallFeature
 }
 
 type Player struct {
@@ -601,10 +605,15 @@ type GameState struct {
 	// dismissed by CloseDialog. Transient (not in SaveData).
 	DialogOpen bool
 	Dialog     DialogState
-	// TriggersFired records fired Once dialog triggers (keyed by DialogTrigger.ID)
-	// so they don't repeat. Resets per area visit, but IS persisted
-	// (SaveData.TriggersFired) so a saved-past Once cutscene doesn't replay on reload.
+	// TriggersFired records fired non-Preserve triggers (keyed by Trigger.ID) so
+	// they don't repeat. IS persisted (SaveData.TriggersFired) so a saved-past
+	// fire-once trigger doesn't replay on reload. See trigger.go.
 	TriggersFired map[string]bool
+	// Switches / Counters are the trigger system's shared state (StarEdit-style):
+	// named boolean flags and integer variables that Conditions read and Actions
+	// write. Both persist in SaveData so switch-gated world state survives reload.
+	Switches map[string]bool
+	Counters map[string]int
 	// InsideLocations tracks which regions the player currently stands in, for
 	// rising-edge enter-location detection (see location.go). Transient: reseeded
 	// from the spawn tile on every area entry, never saved.

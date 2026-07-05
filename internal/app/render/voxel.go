@@ -47,7 +47,10 @@ func voxelNeighborSolid(m *core.AreaDefinition, nx, nz, L int) bool {
 var voxelSolidScratch []bool
 
 // drawVoxelColumn renders column (x,z): a floor on each standable surface, one face quad per exposed level on each visible edge, and a downward face under each floating run. Returns the face count.
-func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets Resources, m *core.AreaDefinition, x, z int, cx, cz float32, levelVisible func(int) bool) int {
+// drawVoxelColumn draws a gapped column's floors, side faces, and undersides.
+// Returns (floors, walls): floor slabs drawn (one per visible standable surface —
+// a stacked column draws several) and side-face quads drawn, for the render-log stats.
+func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets Resources, m *core.AreaDefinition, x, z int, cx, cz float32, levelVisible func(int) bool) (floors, walls int) {
 	h := m.SolidStackHeight()
 
 	// Resolve each level's solidity ONCE into scratch; the passes below would otherwise re-read SolidAt per level (~5×h redundant self-column reads/frame). standable(L) = cube L solid AND L+1 air.
@@ -77,6 +80,7 @@ func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets 
 			// Raised decks are generic material floor (upper surfaces have no authored floor type).
 			drawTileCube(material.floorModel, cx, -0.03+topY, cz, tileYawDeg(x, z))
 		}
+		floors++
 	}
 
 	drawn := 0
@@ -125,5 +129,5 @@ func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets 
 		}
 		drawTileCube(assets.underModel, cx, core.ElevationWorldY(L-1), cz, 0)
 	}
-	return drawn
+	return floors, drawn
 }

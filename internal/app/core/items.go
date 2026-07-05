@@ -412,8 +412,11 @@ func ItemHelpsTarget(def ItemDefinition, m PartyMember) bool {
 	// A starving member can't gain HP by any means but food, so a pure HP-heal does
 	// NOT help them — but food still does (satietyUseful), and feeding lifts Starving
 	// so the same item's heal lands afterward.
-	hpUseful := def.HealAmount > 0 && m.HP < m.MaxHP && !MemberStarving(m)
-	mpUseful := def.MPAmount > 0 && m.MP < m.MaxMP
+	// HP/MP restore require partyAvailable (mirrors restorativeDeltas' gates), so the
+	// "helps" verdict matches what ApplyRestorative can actually deliver — a downed /
+	// ingested member gains nothing from a heal. Feeding has no availability gate.
+	hpUseful := def.HealAmount > 0 && m.HP < m.MaxHP && partyAvailable(m) && !MemberStarving(m)
+	mpUseful := def.MPAmount > 0 && m.MP < m.MaxMP && partyAvailable(m)
 	satietyUseful := def.SatietyGain > 0 && m.Hunger > 0
 	return hpUseful || mpUseful || satietyUseful
 }

@@ -17,11 +17,12 @@ func updateLevelUpModal(g *core.GameState) {
 	if !g.LevelUpOpen {
 		return
 	}
+	// The modal is scoped to a single member (opened from the Character tab for the
+	// cursored member). If it somehow opens on a member with nothing to spend, close
+	// rather than hopping to another member — allocation never jumps chars on its own.
 	if !core.PartyIndexInRange(g.Party, g.LevelUpMember) ||
 		g.Party[g.LevelUpMember].PendingLevelUps <= 0 {
-		advanceLevelUpMember(g)
-	}
-	if !g.LevelUpOpen {
+		closeLevelUp(g)
 		return
 	}
 
@@ -37,9 +38,11 @@ func updateLevelUpModal(g *core.GameState) {
 				audio.Play(audio.SoundInputHit)
 			}
 		case g.LevelUpRowCursor == core.LevelUpApplyRowIndex:
-			// Commit staged picks; advanceLevelUpMember resets the pendings.
+			// Commit staged picks, then close back to the Character tab. Allocation is
+			// per-char: we never auto-jump to the next member with unspent points — any
+			// remaining points stay banked and glow on that member's card.
 			core.CommitLevelUp(m, g.LevelUpPending)
-			advanceLevelUpMember(g)
+			closeLevelUp(g)
 		default:
 			// CursorUpDown clamps to LevelUpRowCount, so every row is a stat row or the
 			// apply row — fail loud if the row layout ever grows a third kind (matches the
@@ -76,15 +79,4 @@ func closeLevelUp(g *core.GameState) {
 func clearLevelUpStaging(g *core.GameState) {
 	g.LevelUpPending = [core.StatCount]int{}
 	g.LevelUpRowCursor = 0
-}
-
-// advanceLevelUpMember moves to the next member with unspent points, or closes
-// when none remain. Each transition clears the staged-pending state.
-func advanceLevelUpMember(g *core.GameState) {
-	next := core.FirstPendingLevelUp(g.Party)
-	if next < 0 {
-		closeLevelUp(g)
-		return
-	}
-	openLevelUpFor(g, next)
 }

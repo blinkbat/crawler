@@ -17,7 +17,7 @@ func sampleDialog() DialogDefinition {
 					{
 						ID:        "leave",
 						Label:     "Farewell",
-						EndAction: &DialogAction{Kind: DialogActionQuest, QuestOp: DialogQuestComplete, QuestID: "q1"},
+						EndAction: &Action{Kind: ActionQuest, QuestOp: DialogQuestComplete, QuestID: "q1"},
 					},
 				},
 			},
@@ -44,6 +44,24 @@ func TestStartDialogOpensAtStart(t *testing.T) {
 	node, ok := CurrentDialogNode(g)
 	if !ok || node.ID != "start" {
 		t.Fatalf("expected current node 'start', got %q ok=%v", node.ID, ok)
+	}
+}
+
+func TestStartDialogRefusesWhenOpen(t *testing.T) {
+	g := newDialogGame()
+	StartDialog(g, "d1")
+	node, _ := CurrentDialogNode(g)
+	if node.ID != "start" {
+		t.Fatalf("precondition: expected 'start' node, got %q", node.ID)
+	}
+	// A second StartDialog (e.g. a node/choice ActionDialog end-action) must NOT replace
+	// the live conversation — that would strand the caller's post-action navigation.
+	if StartDialog(g, "d1") {
+		t.Fatal("StartDialog must refuse when a dialog is already open")
+	}
+	node, _ = CurrentDialogNode(g)
+	if node.ID != "start" {
+		t.Fatalf("the open conversation must be untouched, got node %q", node.ID)
 	}
 }
 
@@ -116,7 +134,7 @@ func TestMenuNodeAutoAdvances(t *testing.T) {
 			Nodes: []DialogNode{{
 				ID:         "m",
 				IsMenuNode: true,
-				EndAction:  &DialogAction{Kind: DialogActionQuest, QuestOp: DialogQuestComplete, QuestID: "q"},
+				EndAction:  &Action{Kind: ActionQuest, QuestOp: DialogQuestComplete, QuestID: "q"},
 			}},
 		}}},
 	}
@@ -246,40 +264,57 @@ func TestTileVisitedCondition(t *testing.T) {
 	}
 }
 
+// enterTileTrigger builds a fire-once trigger: party on (x,z) → start dialog d1.
+func enterTileTrigger(id string, x, z int, preserve bool) Trigger {
+	return Trigger{
+		ID:         id,
+		Conditions: []Condition{{Kind: CondEnterTile, TileX: x, TileZ: z}},
+		Actions:    []Action{{Kind: ActionDialog, DialogID: "d1"}},
+		Preserve:   preserve,
+	}
+}
+
 func TestEnterTileTriggerFires(t *testing.T) {
 	g := &GameState{
 		Visited: [][]bool{{true, true}, {true, true}},
 		Area: AreaDefinition{
 			Dialogs:  []DialogDefinition{sampleDialog()},
-			Triggers: []DialogTrigger{{ID: "t1", Kind: DialogTriggerEnterTile, DialogID: "d1", TileX: 1, TileZ: 0, Once: true}},
+			Triggers: []Trigger{enterTileTrigger("t1", 1, 0, false)},
 		},
 	}
-	if FireEnterTileTriggers(g, 0, 0) {
+	g.Player.TileX, g.Player.TileZ = 0, 0
+	EvaluateTriggers(g)
+	if g.DialogOpen {
 		t.Fatal("a non-matching tile should not fire the trigger")
 	}
-	if !FireEnterTileTriggers(g, 1, 0) || !g.DialogOpen {
-		t.Fatal("entering the trigger tile should open the dialog")
+	g.Player.TileX, g.Player.TileZ = 1, 0
+	EvaluateTriggers(g)
+	if !g.DialogOpen {
+		t.Fatal("standing on the trigger tile should open the dialog")
 	}
-	// Once-trigger: re-entering must not re-fire.
+	// fire-once: re-evaluating on the same tile must not re-fire.
 	CloseDialog(g)
-	if FireEnterTileTriggers(g, 1, 0) {
-		t.Fatal("a Once enter-tile trigger should not fire a second time")
+	EvaluateTriggers(g)
+	if g.DialogOpen {
+		t.Fatal("a fire-once enter-tile trigger should not fire a second time")
 	}
 }
 
-func TestEnterTileTriggerNonOnceRepeats(t *testing.T) {
+func TestEnterTileTriggerPreserveRepeats(t *testing.T) {
 	g := &GameState{
 		Area: AreaDefinition{
 			Dialogs:  []DialogDefinition{sampleDialog()},
-			Triggers: []DialogTrigger{{ID: "t1", Kind: DialogTriggerEnterTile, DialogID: "d1", TileX: 0, TileZ: 0}},
+			Triggers: []Trigger{enterTileTrigger("t1", 0, 0, true)},
 		},
 	}
-	if !FireEnterTileTriggers(g, 0, 0) {
-		t.Fatal("non-Once trigger should fire")
+	EvaluateTriggers(g)
+	if !g.DialogOpen {
+		t.Fatal("preserve trigger should fire")
 	}
 	CloseDialog(g)
-	if !FireEnterTileTriggers(g, 0, 0) {
-		t.Fatal("a non-Once enter-tile trigger should fire again on re-entry")
+	EvaluateTriggers(g)
+	if !g.DialogOpen {
+		t.Fatal("a preserve enter-tile trigger should fire again on re-evaluation")
 	}
 }
 
@@ -288,20 +323,45 @@ func TestFoeKilledTriggerFires(t *testing.T) {
 	g := &GameState{
 		Bestiary: make(Bestiary),
 		Area: AreaDefinition{
-			Dialogs:  []DialogDefinition{sampleDialog()},
-			Triggers: []DialogTrigger{{ID: "t1", Kind: DialogTriggerFoeKilled, DialogID: "d1", FoeKind: kind, FoeKills: 1, Once: true}},
+			Dialogs: []DialogDefinition{sampleDialog()},
+			Triggers: []Trigger{{
+				ID:         "t1",
+				Conditions: []Condition{{Kind: CondFoeKilled, FoeKind: kind, Count: 1}},
+				Actions:    []Action{{Kind: ActionDialog, DialogID: "d1"}},
+			}},
 		},
 	}
-	if FireFoeKilledTriggers(g) {
+	EvaluateTriggers(g)
+	if g.DialogOpen {
 		t.Fatal("foe-killed trigger should not fire before the kill threshold")
 	}
 	g.Bestiary.RecordKill(kind)
-	if !FireFoeKilledTriggers(g) || !g.DialogOpen {
+	EvaluateTriggers(g)
+	if !g.DialogOpen {
 		t.Fatal("foe-killed trigger should fire once the threshold is met")
 	}
 	CloseDialog(g)
-	if FireFoeKilledTriggers(g) {
-		t.Fatal("a Once foe-killed trigger should not re-fire")
+	EvaluateTriggers(g)
+	if g.DialogOpen {
+		t.Fatal("a fire-once foe-killed trigger should not re-fire")
+	}
+}
+
+func TestSwitchActionAndCondition(t *testing.T) {
+	// Trigger A (always) sets switch S; trigger B (switch S set) opens a passage by
+	// setting a counter we can assert on. Cascades within one EvaluateTriggers call.
+	g := &GameState{
+		Area: AreaDefinition{Triggers: []Trigger{
+			{ID: "a", Actions: []Action{{Kind: ActionSetSwitch, Switch: "S", SwitchOp: SwitchSet}}},
+			{ID: "b", Conditions: []Condition{{Kind: CondSwitch, Switch: "S"}}, Actions: []Action{{Kind: ActionSetCounter, Counter: "C", CounterOp: CounterSet, Count: 7}}},
+		}},
+	}
+	EvaluateTriggers(g)
+	if !g.Switches["S"] {
+		t.Fatal("trigger A should have set switch S")
+	}
+	if g.Counters["C"] != 7 {
+		t.Fatalf("trigger B should have fired off switch S and set C=7, got %d", g.Counters["C"])
 	}
 }
 
@@ -309,19 +369,23 @@ func TestTriggerNoFireWhileDialogOpen(t *testing.T) {
 	g := &GameState{
 		Area: AreaDefinition{
 			Dialogs:  []DialogDefinition{sampleDialog()},
-			Triggers: []DialogTrigger{{ID: "t1", Kind: DialogTriggerEnterTile, DialogID: "d1", TileX: 0, TileZ: 0}},
+			Triggers: []Trigger{enterTileTrigger("t1", 0, 0, false)},
 		},
 	}
 	g.DialogOpen = true
-	if FireEnterTileTriggers(g, 0, 0) {
+	EvaluateTriggers(g)
+	// The dialog action would call StartDialog; with a dialog already open it can't
+	// stomp it (StartDialog no-ops), and evaluation halts on the open dialog.
+	node, _ := CurrentDialogNode(g)
+	if node.ID != "" {
 		t.Fatal("a trigger must not stomp an already-open dialog")
 	}
 }
 
 func TestTriggersJSONRoundTrip(t *testing.T) {
-	in := []DialogTrigger{
-		{ID: "t1", Kind: DialogTriggerEnterTile, DialogID: "d1", TileX: 3, TileZ: 4, Once: true},
-		{ID: "t2", Kind: DialogTriggerFoeKilled, DialogID: "d2", FoeKind: EnemyKinds()[1].Kind, FoeKills: 5},
+	in := []Trigger{
+		{ID: "t1", Conditions: []Condition{{Kind: CondEnterTile, TileX: 3, TileZ: 4}}, Actions: []Action{{Kind: ActionDialog, DialogID: "d1"}}},
+		{ID: "t2", Conditions: []Condition{{Kind: CondFoeKilled, FoeKind: EnemyKinds()[1].Kind, Count: 5}}, Actions: []Action{{Kind: ActionSpawnChest, TileX: 2, TileZ: 2, Items: []ItemKind{AllItems()[0].Kind}}}, Preserve: true},
 	}
 	lines, err := TriggersToLines(in)
 	if err != nil {
@@ -331,21 +395,9 @@ func TestTriggersJSONRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TriggersFromLines: %v", err)
 	}
-	if !slicesEqualTriggers(in, out) {
+	if len(in) != len(out) || !triggersEqual(in, out) {
 		t.Fatalf("round-trip mismatch:\n in=%+v\nout=%+v", in, out)
 	}
-}
-
-func slicesEqualTriggers(a, b []DialogTrigger) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func TestStartDialogClonesDefinition(t *testing.T) {
@@ -385,8 +437,8 @@ func TestDialogKindListsCoverEval(t *testing.T) {
 			t.Errorf("condition kind %q is advertised by DialogCondKinds but unhandled by evalDialogCondition", k)
 		}
 	}
-	if len(DialogTriggerKinds()) == 0 {
-		t.Fatal("DialogTriggerKinds must not be empty")
+	if len(ConditionKinds()) == 0 || len(ActionKinds()) == 0 {
+		t.Fatal("ConditionKinds / ActionKinds must not be empty")
 	}
 }
 

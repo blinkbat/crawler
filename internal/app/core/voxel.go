@@ -447,11 +447,15 @@ func CloneSolids(in [][]string) [][]string {
 }
 
 // columnGapless reports whether column (x,z) is solid 0..top with no air gap
-// (encodable as a single elevation char). Empty column is trivially gapless.
+// (encodable as a single elevation char).
 func (a *AreaDefinition) columnGapless(x, z int) bool {
 	top := a.TopSolidLevel(x, z)
 	if top < 0 {
-		return true
+		// Wholly-air (void) column: the heightfield elevation format can't express it —
+		// ElevationRowsFromSolids projects it to '0' (solid floor at level 0), so a
+		// void→heightfield round-trip would silently become solid ground. Report NOT
+		// gapless so AllColumnsGapless forces the lossless solids: section to be kept.
+		return false
 	}
 	for L := 0; L <= top; L++ {
 		if _, solid := a.SolidAt(x, L, z); !solid {

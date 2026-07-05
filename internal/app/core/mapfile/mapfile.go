@@ -129,6 +129,10 @@ type MapFile struct {
 	// Locations is the authored named-region list — opaque JSON per line, same
 	// verbatim handling as Dialogs (core marshals Location).
 	Locations []string
+	// WallFeatures is the authored wall-fixture list (switches / bombable / secret
+	// walls) — opaque JSON per line, same verbatim handling as Dialogs (core marshals
+	// WallFeature).
+	WallFeatures []string
 }
 
 // MapPack is one authored pack at a tile. Members is a non-empty enemy-kind
@@ -395,6 +399,7 @@ const (
 	slotPropStack
 	slotDecorStack
 	slotPropYaw
+	slotWallFeatures
 	// slotCount is the sentinel one past the last real slot, so the init coverage
 	// assertion covers every appended slot automatically (a new slot before it is
 	// checked without editing the loop bound).
@@ -421,9 +426,10 @@ const (
 	SectionPropLevels  = "prop_levels"
 	SectionDecorLevels = "decor_levels"
 	SectionFaces       = "faces"
-	SectionPropStack   = "propstack"
-	SectionDecorStack  = "decorstack"
-	SectionPropYaw     = "prop_yaw"
+	SectionPropStack    = "propstack"
+	SectionDecorStack   = "decorstack"
+	SectionPropYaw      = "prop_yaw"
+	SectionWallFeatures = "wallfeatures"
 )
 
 // Header-line keys — the preamble's "key: value" lines. parseHeaderLine reads,
@@ -477,6 +483,9 @@ var layerSections = []layerSection{
 	// prop_yaw: OPTIONAL single grid of per-tile prop facings; nil field + bespoke
 	// encode keeps it off byte-stable maps (like prop_levels:).
 	{SectionPropYaw, slotPropYaw, nil},
+	// wallfeatures: sparse opaque-JSON section (one line per wall fixture), same
+	// verbatim handling as triggers:/dialogs: (core marshals WallFeature).
+	{SectionWallFeatures, slotWallFeatures, nil},
 }
 
 // GridLayerCount is the number of grid layers (layerSections rows with a field
@@ -717,6 +726,12 @@ func Parse(r io.Reader) (MapFile, error) {
 		if state == slotLocations {
 			// Opaque JSON-per-line, same handling as dialogs (core marshals Location).
 			mf.Locations = append(mf.Locations, line)
+			continue
+		}
+
+		if state == slotWallFeatures {
+			// Opaque JSON-per-line, same handling as dialogs (core marshals WallFeature).
+			mf.WallFeatures = append(mf.WallFeatures, line)
 			continue
 		}
 
@@ -1549,6 +1564,7 @@ func (mf MapFile) Encode(w io.Writer) error {
 	writeVerbatimSection(bw, SectionDialogs, mf.Dialogs)
 	writeVerbatimSection(bw, SectionTriggers, mf.Triggers)
 	writeVerbatimSection(bw, SectionLocations, mf.Locations)
+	writeVerbatimSection(bw, SectionWallFeatures, mf.WallFeatures)
 	return bw.Flush()
 }
 

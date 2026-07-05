@@ -768,6 +768,13 @@ func RestorePackFull(pack *Pack) {
 		// the live (possibly Corrosive-Vial-stripped) value through, so it would be a
 		// no-op here and leave a debuffed foe stripped after a "full" restore.
 		m.Armor = def.Armor
+		// Reset every survivor to the back row so the shunt below re-packs from a clean
+		// state. Combat promotes back→front on deaths but never demotes, so reviving the
+		// downed here (front members who died, plus back members promoted to cover them)
+		// would otherwise leave >EnemyFrontRowCap living in the front row on a flee+re-engage.
+		// Resetting to back then re-shunting reproduces the fresh battle-start formation
+		// (the member slice is front-first ordered, so the first cap members re-promote).
+		m.Row = RowBack
 		ClearEnemyCombatTransients(m)
 		m.SkillCastCount = nil
 		clearEnemyAnimTimers(m)

@@ -51,7 +51,10 @@ func dialogModalContent(g *core.GameState, font rl.Font, node core.DialogNode, i
 			const ellipsis = " …"
 			spacing := canonicalSpacing(FontBody)
 			last := bodyLines[dialogMaxBodyLines-1]
-			for last != "" && rl.MeasureTextEx(font, last+ellipsis, FontBody, spacing).X > innerW {
+			// measureRichText, not rl.MeasureTextEx: the '…' is dropped by the UI font and
+			// drawn procedurally (wide) at draw time, so the raw measure under-counts it and
+			// the trimmed line could still spill past the card edge.
+			for last != "" && measureRichText(font, last+ellipsis, FontBody, spacing).X > innerW {
 				r := []rune(last)
 				last = strings.TrimRight(string(r[:len(r)-1]), " ")
 			}

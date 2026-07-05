@@ -271,9 +271,11 @@ func resolveAssignedFile(assigns map[string]string, canonical string) (name stri
 	return name, assigned
 }
 
-// Play fires the named sound; no-op if not ready or out of range (fire-and-forget).
+// Play fires the named sound; no-op if not ready, out of range, or the slot's sound
+// never loaded (fire-and-forget). The soundLoaded guard matches every other play/
+// reload path — never hand raylib a zero (nil-buffer) sound.
 func Play(id Sound) {
-	if !ready || !id.valid() {
+	if !ready || !id.valid() || !soundLoaded(bank[id]) {
 		return
 	}
 	rl.PlaySound(bank[id])

@@ -30,32 +30,14 @@ const (
 
 // DialogQuestOps returns the quest operations in canonical (editor display) order —
 // the single source the editor's quest-op picker reads and asserts coverage against,
-// mirroring DialogActionKinds / DialogCondKinds.
+// mirroring ActionKinds / DialogCondKinds.
 func DialogQuestOps() []DialogQuestOp {
 	return []DialogQuestOp{DialogQuestStart, DialogQuestComplete}
 }
 
-// DialogActionKind tags the DialogAction union; empty means "no action".
-type DialogActionKind string
-
-const (
-	DialogActionQuest DialogActionKind = "quest"
-	DialogActionEvent DialogActionKind = "event"
-)
-
-// DialogActionKinds returns the non-empty end-action kinds in canonical order — the
-// source the editor's action picker asserts coverage against.
-func DialogActionKinds() []DialogActionKind {
-	return []DialogActionKind{DialogActionQuest, DialogActionEvent}
-}
-
-// DialogAction is the optional effect a node/choice fires on resolve (quest add/complete, or event seam).
-type DialogAction struct {
-	Kind    DialogActionKind `json:"kind,omitempty"`
-	QuestID string           `json:"questId,omitempty"`
-	QuestOp DialogQuestOp    `json:"questOp,omitempty"`
-	EventID string           `json:"eventId,omitempty"`
-}
+// A dialog node/choice end-action is a core.Action (see trigger.go) — the same
+// union triggers fire, so a conversation outcome can start a quest, set a switch,
+// spawn a foe, open a wall, etc., not just the old quest/event pair.
 
 // DialogCondKind tags a choice condition.
 type DialogCondKind string
@@ -100,7 +82,7 @@ type DialogChoice struct {
 	Label      string                  `json:"label"`
 	NextNodeID string                  `json:"next,omitempty"`
 	Conditions []DialogChoiceCondition `json:"conditions,omitempty"`
-	EndAction  *DialogAction           `json:"endAction,omitempty"`
+	EndAction  *Action                 `json:"endAction,omitempty"`
 }
 
 // DialogNode is one line: Choices present a pick list, else Continue advances
@@ -112,7 +94,7 @@ type DialogNode struct {
 	Choices       []DialogChoice  `json:"choices,omitempty"`
 	NextNodeID    string          `json:"next,omitempty"`
 	ContinueLabel string          `json:"continueLabel,omitempty"`
-	EndAction     *DialogAction   `json:"endAction,omitempty"`
+	EndAction     *Action         `json:"endAction,omitempty"`
 	IsMenuNode    bool            `json:"menu,omitempty"`
 }
 
@@ -200,6 +182,14 @@ func DialogDefByID(a AreaDefinition, id string) (DialogDefinition, bool) {
 // unknown / no start node). A menu start node may close immediately, so a true
 // return does NOT guarantee DialogOpen — re-check if you care.
 func StartDialog(g *GameState, dialogID string) bool {
+	if g.DialogOpen {
+		// A conversation already owns the screen. Refuse rather than REPLACE it: an
+		// ActionDialog fired as a node/choice end-action would otherwise swap g.Dialog
+		// mid-flow, and the caller's post-action goToDialogNode would then navigate the
+		// new dialog with the old node's next-id and mis-close it. (Chain conversations
+		// via a trigger between them, not a dialog-in-dialog action.)
+		return false
+	}
 	def, ok := DialogDefByID(g.Area, dialogID)
 	if !ok || len(def.Nodes) == 0 {
 		return false
@@ -305,7 +295,7 @@ func SelectDialogChoice(g *GameState, index int) {
 		return
 	}
 	choice := views[index].Choice
-	applyDialogAction(g, choice.EndAction)
+	ApplyAction(g, choice.EndAction)
 	if !g.DialogOpen {
 		return // defensive: action closed the dialog (none do today)
 	}
@@ -323,7 +313,7 @@ func ContinueDialog(g *GameState) {
 	if len(node.Choices) > 0 {
 		return
 	}
-	applyDialogAction(g, node.EndAction)
+	ApplyAction(g, node.EndAction)
 	if !g.DialogOpen {
 		return
 	}
@@ -357,7 +347,7 @@ func goToDialogNode(g *GameState, nodeID string) {
 			return
 		}
 		// Menu node: fire its action and hand off to NextNodeID (or close).
-		applyDialogAction(g, node.EndAction)
+		ApplyAction(g, node.EndAction)
 		if !g.DialogOpen {
 			return
 		}
@@ -378,39 +368,6 @@ func ClampDialogCursor(g *GameState) {
 		return
 	}
 	g.Dialog.ChoiceCursor = Clamp(g.Dialog.ChoiceCursor, 0, n-1)
-}
-
-// applyDialogAction performs a node/choice end action (nil is a no-op).
-// Quest actions seed/complete a journal quest; event actions are a future seam.
-func applyDialogAction(g *GameState, action *DialogAction) {
-	if action == nil {
-		return
-	}
-	switch action.Kind {
-	case DialogActionQuest:
-		if action.QuestID == "" {
-			// Blank id would seed a junk entry or no-op a complete — drop it.
-			return
-		}
-		switch action.QuestOp {
-		case DialogQuestStart:
-			g.Quests = AddQuest(g.Quests, Quest{
-				ID:     action.QuestID,
-				Title:  QuestTitleFromID(action.QuestID),
-				Status: QuestActive,
-			})
-		case DialogQuestComplete:
-			CompleteQuest(g, action.QuestID)
-		default:
-			// Unknown op (authoring typo) — do nothing rather than guess.
-		}
-	case DialogActionEvent:
-		// No event registry yet; seam for a future switch on action.EventID.
-	default:
-		// Unknown action kind (authoring typo / unhandled new kind) — do nothing
-		// rather than guess, mirroring the QuestOp default above. Data-driven, so
-		// no panic.
-	}
 }
 
 // MoveDialogCursor steps the cursor by delta's sign, wrapping and SKIPPING

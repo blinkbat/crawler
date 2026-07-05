@@ -198,10 +198,19 @@ func neutralShape() ShapeParams {
 // adsrEnv computes the ADSR level at elapsed time secs. Decay 0 + Sustain 1
 // reduces to SynthSweep's attack/sustain/release shape (byte-identical).
 func adsrEnv(secs, duration, attack, decay, sustain, release, releaseStart float64) float64 {
+	// Never let the decay window eat into the release: with a long attack+decay it
+	// could otherwise preempt the release branch, so the fade wouldn't span `release`
+	// seconds and the level would jump discontinuously (a click). Clamping the decay
+	// end to releaseStart keeps the release tail intact. (Decay==0 skips this branch
+	// entirely, so the neutral SynthSweep shape stays byte-identical.)
+	decayEnd := attack + decay
+	if decayEnd > releaseStart {
+		decayEnd = releaseStart
+	}
 	switch {
 	case attack > 0 && secs < attack:
 		return secs / attack
-	case decay > 0 && secs < attack+decay:
+	case decay > 0 && secs < decayEnd:
 		return 1 - (1-sustain)*((secs-attack)/decay)
 	case secs < releaseStart:
 		return sustain

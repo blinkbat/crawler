@@ -449,10 +449,20 @@ const (
 	focusDialogCondFoeKills
 	focusDialogCondTileX
 	focusDialogCondTileZ
-	// Trigger-editor numeric foci (modalDialogTriggerEdit) — share dialogNumBuf.
+	// Trigger-editor CONDITION numeric foci (modalDialogTriggerEdit) — share dialogNumBuf.
 	focusDialogTrigTileX
 	focusDialogTrigTileZ
 	focusDialogTrigFoeKills
+	// Trigger-editor ACTION numeric foci.
+	focusTrigActTileX
+	focusTrigActTileZ
+	focusTrigActCount
+	// Trigger-editor text foci (routed via dialogTrigTextTarget, pumped with pumpFocusField):
+	// the condition's switch/counter/quest-id name, and the action's switch/counter/text/quest-id.
+	focusTrigCondText
+	focusTrigActText
+	// focusWallFeatureSwitch edits a wall fixture's target switch name.
+	focusWallFeatureSwitch
 )
 
 type modalKind int
@@ -503,10 +513,13 @@ const (
 	modalDialogActionEdit
 	// modalDialogCondEdit edits one choice selectability condition.
 	modalDialogCondEdit
-	// modalDialogTriggerList lists the area's dialog triggers.
+	// modalDialogTriggerList lists the area's triggers (StarEdit-style condition→action).
 	modalDialogTriggerList
-	// modalDialogTriggerEdit edits one trigger (kind / dialog / Once / params).
+	// modalDialogTriggerEdit edits one trigger (primary condition + action + preserve).
 	modalDialogTriggerEdit
+	// modalWallFeatureEdit edits one wall fixture (switch/bombable/secret): kind, face
+	// direction, target switch, once, delete. modalWallFeatureIdx indexes area.WallFeatures.
+	modalWallFeatureEdit
 	// modalLocationEdit edits one named region (name / bounds / level / delete).
 	// modalLocationIdx indexes area.Locations; closes if dropped.
 	modalLocationEdit
@@ -565,25 +578,25 @@ const (
 type toolMode int
 
 const (
-	toolBrush  toolMode = iota // freehand paint stroke (default)
-	toolLine                   // straight line, click anchor → release endpoint
-	toolRect                   // filled rectangle
-	toolBox                    // hollow rectangle outline (handy for room walls)
-	toolFlood                  // flood-fill the connected region
-	toolPick                   // eyedropper: sample the cell's char into the brush
-	toolSelect                 // marquee: drag a region to copy (Ctrl+C) / paste (Ctrl+V)
-	toolMeasure                // ruler: drag to read the spanned tile W×H + distance (no edit)
+	toolBrush   toolMode = iota // freehand paint stroke (default)
+	toolLine                    // straight line, click anchor → release endpoint
+	toolRect                    // filled rectangle
+	toolBox                     // hollow rectangle outline (handy for room walls)
+	toolFlood                   // flood-fill the connected region
+	toolPick                    // eyedropper: sample the cell's char into the brush
+	toolSelect                  // marquee: drag a region to copy (Ctrl+C) / paste (Ctrl+V)
+	toolMeasure                 // ruler: drag to read the spanned tile W×H + distance (no edit)
 	// toolModeCount sizes the label/help tables (init-asserted below); keep last.
 	toolModeCount
 )
 
 // toolModeLabels are the toolbar button captions, indexed by toolMode.
 var toolModeLabels = [toolModeCount]string{
-	toolBrush:  "Brush",
-	toolLine:   "Line",
-	toolRect:   "Rect",
-	toolBox:    "Box",
-	toolFlood:  "Flood",
+	toolBrush:   "Brush",
+	toolLine:    "Line",
+	toolRect:    "Rect",
+	toolBox:     "Box",
+	toolFlood:   "Flood",
 	toolPick:    "Pick",
 	toolSelect:  "Select",
 	toolMeasure: "Measure",
@@ -591,11 +604,11 @@ var toolModeLabels = [toolModeCount]string{
 
 // toolModeHelp is the hover-tooltip text per tool, indexed by toolMode.
 var toolModeHelp = [toolModeCount]string{
-	toolBrush:  "Paint freehand with the selected brush.",
-	toolLine:   "Drag a straight line of tiles.",
-	toolRect:   "Drag a filled rectangle.",
-	toolBox:    "Drag a hollow rectangle — handy for room walls.",
-	toolFlood:  "Flood-fill the connected same-tile region.",
+	toolBrush:   "Paint freehand with the selected brush.",
+	toolLine:    "Drag a straight line of tiles.",
+	toolRect:    "Drag a filled rectangle.",
+	toolBox:     "Drag a hollow rectangle — handy for room walls.",
+	toolFlood:   "Flood-fill the connected same-tile region.",
 	toolPick:    "Eyedropper — sample the clicked tile into the brush.",
 	toolSelect:  "Marquee — drag a region, then Ctrl+C to copy, Ctrl+V to paste.",
 	toolMeasure: "Ruler — drag to read the spanned tile size + distance (doesn't edit).",
@@ -680,7 +693,7 @@ type State struct {
 	modalFilename string
 	// openFilter is the Open-modal's live type-to-filter query (case-insensitive map-id
 	// substring); empty = show all. modalCursor indexes the FILTERED view, not modalPaths.
-	openFilter string
+	openFilter    string
 	modalRenaming string
 	// modalRenamingActive is the Open-modal rename sub-mode flag. Separate from the
 	// modalRenaming text so backspacing the field to empty doesn't silently exit rename
@@ -692,6 +705,11 @@ type State struct {
 	modalPackIdx  int
 	modalChestIdx int
 	modalDoorIdx  int
+	// doorPickMaps / doorPickDoors cache the door editor's target-map / target-door
+	// picker rows, built from disk when each dropdown opens (not per frame). Cleared
+	// when the door modal closes.
+	doorPickMaps  []string
+	doorPickDoors []string
 	// Dialog-editor indices select the active Dialogs entry / node / choice; all
 	// -1 outside their flows (reset by closeModal).
 	modalDialogIdx       int
@@ -701,6 +719,8 @@ type State struct {
 	// Triggers entry; -1 outside their flows.
 	modalDialogCondIdx    int
 	modalDialogTriggerIdx int
+	// modalWallFeatureIdx indexes the WallFeatures entry being edited; -1 outside the flow.
+	modalWallFeatureIdx int
 	// modalLocationIdx indexes the Locations entry being edited; -1 outside the flow.
 	modalLocationIdx int
 	// modalCrystalIdx indexes the CrystalSpawns entry being edited; -1 outside the flow.
@@ -1117,6 +1137,7 @@ func freshState(a core.AreaDefinition) State {
 		modalDialogChoiceIdx:  -1,
 		modalDialogCondIdx:    -1,
 		modalDialogTriggerIdx: -1,
+		modalWallFeatureIdx:   -1,
 		modalLocationIdx:      -1,
 		modalCrystalIdx:       -1,
 	}

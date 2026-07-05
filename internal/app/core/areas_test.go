@@ -276,9 +276,12 @@ func TestDialogsAndTriggersDiskRoundTrip(t *testing.T) {
 				}},
 			}}},
 		}},
-		Triggers: []DialogTrigger{
-			{ID: "t1", Kind: DialogTriggerEnterTile, DialogID: "d1", TileX: 2, TileZ: 0, Once: true},
-			{ID: "t2", Kind: DialogTriggerFoeKilled, DialogID: "d1", FoeKind: foe, FoeKills: 2},
+		Triggers: []Trigger{
+			{ID: "t1", Conditions: []Condition{{Kind: CondEnterTile, TileX: 2, TileZ: 0}}, Actions: []Action{{Kind: ActionDialog, DialogID: "d1"}}},
+			{ID: "t2", Conditions: []Condition{{Kind: CondFoeKilled, FoeKind: foe, Count: 2}}, Actions: []Action{{Kind: ActionDialog, DialogID: "d1"}}, Preserve: true},
+		},
+		WallFeatures: []WallFeature{
+			{ID: "wf1", Kind: WallSwitch, X: 1, Z: 1, Dir: East, Switch: "gate"},
 		},
 	}
 
@@ -307,8 +310,11 @@ func TestDialogsAndTriggersDiskRoundTrip(t *testing.T) {
 		conds[1].Kind != DialogCondFoeKilled || conds[1].FoeKind != foe || conds[1].FoeKills != 3 {
 		t.Fatalf("choice conditions mangled in round-trip: %+v", conds)
 	}
-	if !slicesEqualTriggers(area.Triggers, got.Triggers) {
+	if !triggersEqual(area.Triggers, got.Triggers) {
 		t.Fatalf("triggers mangled in round-trip:\n in=%+v\nout=%+v", area.Triggers, got.Triggers)
+	}
+	if len(got.WallFeatures) != 1 || got.WallFeatures[0] != area.WallFeatures[0] {
+		t.Fatalf("wall features mangled in round-trip:\n in=%+v\nout=%+v", area.WallFeatures, got.WallFeatures)
 	}
 }
 

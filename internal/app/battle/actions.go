@@ -1643,7 +1643,9 @@ func applyGuardCover(g *core.GameState, skill core.SkillID,
 // applyGuard has the Warrior cover the chosen ally via the shared cover mechanic.
 func applyGuard(g *core.GameState, quality int) bool {
 	return applyGuardCover(g, core.SkillGuard,
-		func(a *core.PartyMember) string { return fmt.Sprintf("%s raises a guard — but stands alone.", a.Name) },
+		func(a *core.PartyMember) string {
+			return fmt.Sprintf("%s raises a guard — but stands alone.", a.Name)
+		},
 		func(a, t *core.PartyMember) string {
 			return fmt.Sprintf("%s guards %s — incoming blows fall on them instead.", a.Name, t.Name)
 		})

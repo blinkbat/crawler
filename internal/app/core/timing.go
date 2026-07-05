@@ -500,10 +500,13 @@ func (t *TimingState) resolveReels() {
 		t.Quality = TimingQualityMiss
 		return
 	}
+	// Grade proportionally to ReelCount (not a hardcoded 3): all reels match →
+	// Excellent, one short → Good, else Miss. Keeps 3→Excellent / 2→Good today and
+	// survives a ReelCount change (a full jackpot wouldn't fall through to Miss).
 	switch largestReelMatch(stopped) {
-	case 3:
+	case ReelCount:
 		t.Quality = TimingQualityExcellent
-	case 2:
+	case ReelCount - 1:
 		t.Quality = TimingQualityGood
 	default:
 		t.Quality = TimingQualityMiss

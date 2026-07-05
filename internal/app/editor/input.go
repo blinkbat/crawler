@@ -308,7 +308,7 @@ func nudgeSelectionOrStart(s *State, dx, dz int) {
 	case s.selActive:
 		moveSelectionBy(s, dx, dz)
 	case s.layer == LayerEntities && s.activeBrush().Entity == entityPlayerStart:
-		moveStartTo(s, s.area.StartTileX+dx, s.area.StartTileZ+dz)
+		commitPaintIfChanged(s, func() { moveStartTo(s, s.area.StartTileX+dx, s.area.StartTileZ+dz) })
 	}
 }
 
@@ -961,7 +961,8 @@ func finishDrag(s *State) {
 	switch s.drag {
 	case dragStart:
 		if s.hoverX >= 0 && (s.hoverX != s.area.StartTileX || s.hoverZ != s.area.StartTileZ) {
-			moveStartTo(s, s.hoverX, s.hoverZ) // shared with the entity-brush / right-click paths
+			// moveStartTo no longer self-banks — wrap the drag release in the lazy seam.
+			commitPaintIfChanged(s, func() { moveStartTo(s, s.hoverX, s.hoverZ) })
 		}
 	case dragPack:
 		sp := core.PackSpawn{}
@@ -1665,6 +1666,10 @@ func validateModalState(s *State) {
 		if !dialogTriggerInRange(s) {
 			closeModal(s)
 		}
+	case modalWallFeatureEdit:
+		if currentWallFeature(s) == nil {
+			closeModal(s)
+		}
 	case modalLocationEdit:
 		if s.modalLocationIdx < 0 || s.modalLocationIdx >= len(s.area.Locations) {
 			closeModal(s)
@@ -1714,11 +1719,14 @@ func closeModal(s *State) {
 	s.modalPackIdx = -1
 	s.modalChestIdx = -1
 	s.modalDoorIdx = -1
+	s.doorPickMaps = nil
+	s.doorPickDoors = nil
 	s.modalDialogIdx = -1
 	s.modalDialogNodeIdx = -1
 	s.modalDialogChoiceIdx = -1
 	s.modalDialogCondIdx = -1
 	s.modalDialogTriggerIdx = -1
+	s.modalWallFeatureIdx = -1
 	s.modalCrystalIdx = -1
 	s.modalDialogActionOnChoice = false
 	clearDialogFocus(s)
@@ -1793,8 +1801,14 @@ func updateDoorEditModal(s *State) Action {
 		case doorHitTargetMap:
 			s.focus = focusDoorTargetMap
 			return ActionNone
+		case doorHitTargetMapPick:
+			openDoorTargetMapPicker(s, doorEditLayoutFor().mapPickBtn)
+			return ActionNone
 		case doorHitTargetDoor:
 			s.focus = focusDoorTargetDoor
+			return ActionNone
+		case doorHitTargetDoorPick:
+			openDoorTargetDoorPicker(s, doorEditLayoutFor().doorPickBtn)
 			return ActionNone
 		case doorHitFacing:
 			openFieldDropdown(s, ddDoorFacing, doorEditLayoutFor().facingBtn)

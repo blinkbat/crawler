@@ -75,7 +75,8 @@ func contextItemsAt(s *State, x, z int) []dropdownEntry {
 		}
 	} else {
 		items = append(items, dropdownEntry{label: "Move start here", apply: func(s *State) {
-			moveStartTo(s, x, z) // shared with the entity-brush / start-drag paths
+			// moveStartTo no longer banks its own undo — wrap so this direct path gets one.
+			commitPaintIfChanged(s, func() { moveStartTo(s, x, z) })
 		}})
 	}
 	// Regions: edit/delete the one under the cursor (on the active level), and
@@ -106,6 +107,25 @@ func contextItemsAt(s *State, x, z int) []dropdownEntry {
 	// rule the renderer uses), so a flat tile doesn't offer a no-op row.
 	if core.TileExposesFace(&s.area, x, z) {
 		items = append(items, dropdownEntry{label: "Set wall faces…", apply: func(s *State) { openWallFacesModal(s, x, z) }})
+	}
+	// Wall feature (switch / bombable / secret): edit the one here, else place a new one.
+	if idx := core.WallFeatureAnyAt(s.area.WallFeatures, x, z); idx >= 0 {
+		items = append(items,
+			dropdownEntry{label: "Edit wall feature…", apply: func(s *State) {
+				if idx := core.WallFeatureAnyAt(s.area.WallFeatures, x, z); idx >= 0 {
+					openWallFeatureEditModal(s, idx)
+				}
+			}},
+			dropdownEntry{label: "Delete wall feature", danger: true, apply: func(s *State) {
+				if idx := core.WallFeatureAnyAt(s.area.WallFeatures, x, z); idx >= 0 {
+					pushUndo(s)
+					s.area.WallFeatures = removeModalListItem(s.area.WallFeatures, idx)
+					s.dirty = true
+				}
+			}},
+		)
+	} else {
+		items = append(items, dropdownEntry{label: "Add wall feature…", apply: func(s *State) { addWallFeatureAt(s, x, z) }})
 	}
 	items = append(items, dropdownEntry{label: "Erase " + layerName(s.layer) + " here", apply: func(s *State) {
 		// Commit only if changed — a no-op erase banks no undo (shared lazy-commit tail).

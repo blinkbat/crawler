@@ -16,8 +16,8 @@ func TestLocationEditorWiring(t *testing.T) {
 	if _, ok := dropdownEntryBuilders[ddDialogTriggerLocation]; !ok {
 		t.Error("ddDialogTriggerLocation has no dropdownEntryBuilders entry")
 	}
-	if triggerKindLabel(core.DialogTriggerEnterLocation) == string(core.DialogTriggerEnterLocation) {
-		t.Error("triggerKindLabel missing a case for enterLocation")
+	if conditionKindLabel(core.CondAtLocation) == string(core.CondAtLocation) {
+		t.Error("conditionKindLabel missing a case for atLocation")
 	}
 }
 
