@@ -66,6 +66,7 @@ var helpColumns = [2][]helpRow{
 		{"Ctrl+V", "Paste at the cursor"},
 		{"Ctrl+D", "Duplicate the selection"},
 		{"drag inside", "Move the selection's contents"},
+		{"Shift+arrows", "Nudge selection / player start"},
 		{"Esc", "Clear the selection"},
 	},
 	{

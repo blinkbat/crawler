@@ -19,10 +19,11 @@ type menuGroup struct {
 // editorMenus is the menu-bar model (left-to-right); hotkey strings mirror updateHotkeys.
 var editorMenus = []menuGroup{
 	{label: "File", items: []dropdownEntry{
-		{label: "New Map", apply: newMap, desc: "Start a fresh blank map (prompts for size)."},
+		{label: "New Map", apply: newMap, hotkey: "Ctrl+N", desc: "Start a fresh blank map (prompts for size)."},
 		{label: "Open…", apply: requestOpen, hotkey: "Ctrl+O", desc: "Load a map from disk."},
 		{label: "Save", apply: saveCurrent, hotkey: "Ctrl+S", desc: "Save to the current file."},
 		{label: "Save As…", apply: openSaveAsModal, desc: "Save under a new file name."},
+		{label: "Revert", apply: revertToSaved, desc: "Discard unsaved edits, restoring the last saved version.", enabled: func(s *State) bool { return s.dirty }},
 		{label: "Exit Editor", apply: func(s *State) { s.exitRequested = true }, desc: "Leave the editor (asks first if there are unsaved changes)."},
 	}},
 	{label: "Edit", items: []dropdownEntry{
@@ -34,15 +35,20 @@ var editorMenus = []menuGroup{
 		{label: "Cut Region", apply: cutSelection, hotkey: "Ctrl+X", desc: "Copy the selected region, then clear it.", enabled: hasSelection},
 		{label: "Paste Region", apply: menuPaste, hotkey: "Ctrl+V", desc: "Paste the clipboard at the cursor (or map center).", enabled: hasClipboard},
 		{label: "Duplicate", apply: duplicateSelection, hotkey: "Ctrl+D", desc: "Copy the selection and paste it one tile down-right.", enabled: hasSelection},
+		{label: "Flip Clipboard ↔", apply: flipClipboardH, desc: "Mirror the copied region left-right (remaps facings).", enabled: hasClipboard},
+		{label: "Flip Clipboard ↕", apply: flipClipboardV, desc: "Mirror the copied region top-bottom (remaps facings).", enabled: hasClipboard},
+		{label: "Rotate Clipboard 90°", apply: rotateClipboardCW, desc: "Rotate the copied region 90° clockwise (remaps facings).", enabled: hasClipboard},
 	}},
 	{label: "View", items: []dropdownEntry{
-		{label: "Center on Start", apply: func(s *State) { centerViewOnTile(s, s.area.StartTileX, s.area.StartTileZ) }, desc: "Scroll the canvas to the player start tile."},
-		{label: "Reset View", apply: resetView, desc: "Reset zoom to 100% and re-center the canvas."},
+		{label: "Center on Start", apply: func(s *State) { centerViewOnTile(s, s.area.StartTileX, s.area.StartTileZ) }, hotkey: "G", desc: "Scroll the canvas to the player start tile."},
+		{label: "Go to Tile…", apply: openGotoModal, desc: "Jump the view to a typed X,Z or a saved bookmark."},
+		{label: "Reset View", apply: resetView, hotkey: "Home", desc: "Reset zoom to 100% and re-center the canvas."},
 		{label: "Isometric View", apply: func(s *State) { setIsoView(s, true) }, hotkey: "I", desc: "3D block view showing elevation (default). I toggles.", active: func(s *State) bool { return s.isoView }},
 		{label: "Top Down View", apply: func(s *State) { setIsoView(s, false) }, desc: "Flat top-down grid view.", active: func(s *State) bool { return !s.isoView }},
 		{label: "Object Animation", apply: func(s *State) { s.animateObjects = !s.animateObjects }, desc: "Animate foliage sway & torch flicker in 3D (off = still, faster).", active: func(s *State) bool { return s.animateObjects }},
 		{label: "Tile Glyphs", apply: toggleTileGlyphs, desc: "Overlay each tile's letter code on the canvas.", active: func(s *State) bool { return s.showTileGlyphs }},
 		{label: "Door Links", apply: func(s *State) { s.showDoorLinks = !s.showDoorLinks }, desc: "Draw lines connecting linked doors.", active: func(s *State) bool { return s.showDoorLinks }},
+		{label: "Coverage Heatmap", apply: func(s *State) { s.showHeatmap = !s.showHeatmap }, desc: "Top-down: tint tiles by distance from start; flag unreachable pockets.", active: func(s *State) bool { return s.showHeatmap }},
 		{label: "Cycle Day Phase", apply: cyclePreviewPhase, hotkey: "T", desc: "Preview the map lit at the next time of day."},
 	}},
 	{label: "Assets", items: []dropdownEntry{
@@ -52,11 +58,13 @@ var editorMenus = []menuGroup{
 		{label: "Hit Glyphs…", apply: openHitGlyphsModal, desc: "Preview the combat hit symbols (slash, impact, frost, …)."},
 		{label: "Object Browser…", apply: openObjectViewModal, desc: "Spot-check every decor & prop as live 3D thumbnails."},
 		{label: "Object List…", apply: openEntityListModal, desc: "Jump to any pack, chest, or door on the map."},
+		{label: "Prefabs…", apply: openPrefabsModal, desc: "Save the copied region to a reusable stamp, or load one onto the clipboard."},
 	}},
 	{label: "Map", items: []dropdownEntry{
 		{label: "Dialogs…", apply: openDialogListModal, desc: "Author the area's branching conversations."},
+		{label: "Map Stats…", apply: openStatsModal, desc: "Tile mix, content counts, and a rough encounter budget."},
 		{label: "Validate", apply: openValidateModal, desc: "Check the map for reachability and setup problems."},
-		{label: "Playtest", apply: func(s *State) { s.testRequested = true }, desc: "Launch the map in-game from its start tile."},
+		{label: "Playtest", apply: func(s *State) { s.testRequested = true }, hotkey: "F5", desc: "Launch the map in-game from its start tile."},
 	}},
 	{label: "Help", items: []dropdownEntry{
 		{label: "Keyboard Shortcuts…", apply: openHelpModal, hotkey: "?", desc: "Show the full list of editor shortcuts."},

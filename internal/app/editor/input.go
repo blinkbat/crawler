@@ -5,8 +5,11 @@ import (
 	"crawler/internal/app/core/mapfile"
 	"crawler/internal/app/input"
 	"crawler/internal/app/render"
+	"fmt"
+	"math/rand"
 	"os"
 	"strconv"
+	"strings"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -267,7 +270,46 @@ func updateHotkeys(s *State) {
 		openHelpModal(s)
 	}
 
+	// Shift+Arrows nudge the active selection's contents (or, with the Player Start
+	// brush, the start tile) one tile per press — the desktop-editor twin of dragging.
+	// Plain arrows still pan (updateArrowPan skips itself while Shift is held).
+	if shift && !ctrl && !alt {
+		if dx, dz := arrowPressedDelta(); dx != 0 || dz != 0 {
+			nudgeSelectionOrStart(s, dx, dz)
+		}
+	}
+
 	updateArrowPan(s)
+}
+
+// arrowPressedDelta returns the one-tile step from arrow keys pressed THIS frame
+// (discrete, unlike updateArrowPan's held-pan). (0,0) when none pressed.
+func arrowPressedDelta() (dx, dz int) {
+	if rl.IsKeyPressed(rl.KeyRight) {
+		dx++
+	}
+	if rl.IsKeyPressed(rl.KeyLeft) {
+		dx--
+	}
+	if rl.IsKeyPressed(rl.KeyDown) {
+		dz++
+	}
+	if rl.IsKeyPressed(rl.KeyUp) {
+		dz--
+	}
+	return dx, dz
+}
+
+// nudgeSelectionOrStart shifts the committed marquee by (dx,dz), or moves the player
+// start when the Player Start entity brush is active and no marquee is up. No-op
+// otherwise (so Shift+Arrow with nothing to move is silently inert, not a pan).
+func nudgeSelectionOrStart(s *State, dx, dz int) {
+	switch {
+	case s.selActive:
+		moveSelectionBy(s, dx, dz)
+	case s.layer == LayerEntities && s.activeBrush().Entity == entityPlayerStart:
+		moveStartTo(s, s.area.StartTileX+dx, s.area.StartTileZ+dz)
+	}
 }
 
 // brushSizeSteps are the brush widths cycled with [ / ]. Keep odd —
@@ -462,6 +504,10 @@ const (
 // inverts vertical (arrows push the camera, not grab the world — see below).
 // Replaces the retired arrow→grid-cursor keyboard-paint nav.
 func updateArrowPan(s *State) {
+	// Shift+Arrows nudge the selection/start (updateHotkeys) — don't also pan.
+	if _, shift, _ := modifiers(); shift {
+		return
+	}
 	left, right := rl.IsKeyDown(rl.KeyLeft), rl.IsKeyDown(rl.KeyRight)
 	up, down := rl.IsKeyDown(rl.KeyUp), rl.IsKeyDown(rl.KeyDown)
 	if !(left || right || up || down) {
@@ -554,10 +600,14 @@ func updateMouse(s *State) {
 		s.panning = false
 		if clicked && inGrid && hx >= 0 {
 			// Ramp mode: a click clears a ramp (floor → auto), keeping the elevation
-			// digit so the cliff stays. Else open the context menu.
-			if s.rampMode {
+			// digit so the cliff stays. Sculpt mode: a click lowers the column −1.
+			// Else open the context menu.
+			switch {
+			case s.rampMode:
 				isoClearRamp(s, hx, hz)
-			} else {
+			case s.sculptMode && s.layer == LayerElevation:
+				sculptLowerAt(s, hx, hz)
+			default:
 				openContextMenu(s, mp.X, mp.Y, hx, hz)
 			}
 		}
@@ -692,6 +742,21 @@ func startDrag(s *State, x, z int, ctrl, shift bool) {
 	if s.rampMode {
 		placeRamp(s, x, z)
 		s.drag = dragNone
+		return
+	}
+	// Measure tool: a non-editing ruler drag, available on any layer (checked before
+	// the entity-layer branch so it works there too).
+	if s.tool == toolMeasure {
+		s.drag = dragMeasure
+		s.rectAnchorX, s.rectAnchorZ = x, z
+		return
+	}
+	// Sculpt mode (Elevation): a freehand stroke that raises columns +1, regardless of
+	// the selected tool. applyTool routes the per-cell raise; lowering is right-click.
+	if s.sculptMode && s.layer == LayerElevation {
+		beginPaintStroke(s)
+		strokePaint(s, x, z)
+		s.lastPaintX, s.lastPaintZ = x, z
 		return
 	}
 	// Entity layer: grab an existing entity for drag-move, or place a fresh one.
@@ -975,6 +1040,11 @@ func finishDrag(s *State) {
 		if s.hoverX >= 0 {
 			moveSelectionBy(s, s.hoverX-s.rectAnchorX, s.hoverZ-s.rectAnchorZ)
 		}
+	case dragMeasure:
+		// Ruler: commit nothing; flash the final reading so it survives the mouse-up.
+		if s.hoverX >= 0 {
+			s.flash("Measured " + measureLabel(s.rectAnchorX, s.rectAnchorZ, s.hoverX, s.hoverZ))
+		}
 	}
 	s.drag = dragNone
 	s.rectHollow = false
@@ -984,9 +1054,37 @@ func finishDrag(s *State) {
 }
 
 // applyToolBrushed runs the brush over the brush-size square at (x,z). Entity
-// brushes collapse to a single cell.
+// brushes collapse to a single cell. In scatter mode (Decor/Props, size > 1, simple
+// brush) each covered cell stamps only with probability scatterDensity, laying an
+// organic field instead of a solid block.
 func applyToolBrushed(s *State, x, z int) {
-	forEachBrushCell(s, x, z, func(x, z int) { applyTool(s, x, z) })
+	scatter := s.scatterDensity > 0 && onScatterLayer(s) && s.brushSize > 1 && !brushHasMultiTileFootprint(s)
+	forEachBrushCell(s, x, z, func(cx, cz int) {
+		if scatter && rand.Float32() >= s.scatterDensity {
+			return
+		}
+		applyTool(s, cx, cz)
+	})
+}
+
+// scatterDensitySteps cycles the scatter probability (0 = off) via the toolbar button.
+var scatterDensitySteps = []float32{0, 0.25, 0.5, 0.75}
+
+// cycleScatterDensity advances the scatter density one step (wrapping) and flashes it.
+func cycleScatterDensity(s *State) {
+	idx := 0
+	for i, v := range scatterDensitySteps {
+		if v == s.scatterDensity {
+			idx = i
+			break
+		}
+	}
+	s.scatterDensity = scatterDensitySteps[(idx+1)%len(scatterDensitySteps)]
+	if s.scatterDensity == 0 {
+		s.flash("Scatter off")
+	} else {
+		s.flash(fmt.Sprintf("Scatter %d%% (size>1 brush)", int(s.scatterDensity*100)))
+	}
 }
 
 // forEachBrushCell invokes fn for each cell the current brush covers when stamped
@@ -1246,10 +1344,53 @@ func configForFocus(f focusField) textFieldConfig {
 	return textFieldConfig{MaxLen: defaultTextFieldMaxLen, Accept: acceptPrintable}
 }
 
-// pumpFocusField pumps printable runes into `target` using s.focus's config.
+// pumpFocusField pumps printable runes into `target` using s.focus's config. Arms
+// the prose-text-field lazy undo first (a no-op for non-area fields).
 func pumpFocusField(s *State, target *string) {
+	s.armTextUndo()
 	cfg := configForFocus(s.focus)
-	pumpPrintableASCII(target, cfg.MaxLen, cfg.Accept, s.markDirty)
+	pumpPrintableASCII(target, cfg.MaxLen, cfg.Accept, s.onFocusedTextEdit)
+}
+
+// focusIsAreaText reports whether f is a PROSE field whose keystrokes mutate the
+// area directly (so it wants lazy undo). Excludes the filename field (doesn't touch
+// the map) and every numeric field (map dims + dialog numerics carry their own undo
+// via commitNumericInput / pumpDialogNumeric).
+func focusIsAreaText(f focusField) bool {
+	switch f {
+	case focusName, focusQuiet, focusLocationName,
+		focusDoorName, focusDoorTargetMap, focusDoorTargetDoor,
+		focusDialogNodeText, focusDialogNodeNext, focusDialogNodeContinue,
+		focusDialogChoiceLabel, focusDialogChoiceNext,
+		focusDialogActionID, focusDialogCondQuestID, focusDialogCondMessage:
+		return true
+	}
+	return false
+}
+
+// armTextUndo snapshots the pre-edit area the frame a prose text field gains focus,
+// so onFocusedTextEdit can bank one lazy undo step per focus session. Keyed on focus
+// identity (disarmed to focusNone in Update when the field defocuses). No-op for
+// non-area fields.
+func (s *State) armTextUndo() {
+	if !focusIsAreaText(s.focus) {
+		return
+	}
+	if s.textUndoFocus != s.focus {
+		s.textUndoBefore = core.CloneArea(s.area)
+		s.textUndoFocus = s.focus
+		s.textUndoSnapped = false
+	}
+}
+
+// onFocusedTextEdit is pumpFocusField's per-keystroke onChange: dirty + cache
+// invalidation (markDirty), plus ONE lazy undo step for area-mutating prose fields.
+func (s *State) onFocusedTextEdit() {
+	if focusIsAreaText(s.focus) && !s.textUndoSnapped {
+		commitUndoSnapshot(s, s.textUndoBefore)
+		s.textUndoSnapped = true
+	}
+	s.markDirty()
 }
 
 // pumpFocusedTextField runs the shared focused-text-field control loop used by
@@ -1528,6 +1669,10 @@ func validateModalState(s *State) {
 		if s.modalLocationIdx < 0 || s.modalLocationIdx >= len(s.area.Locations) {
 			closeModal(s)
 		}
+	case modalCrystalEdit:
+		if s.modalCrystalIdx < 0 || s.modalCrystalIdx >= len(s.area.CrystalSpawns) {
+			closeModal(s)
+		}
 	default:
 		// Intentionally no arm: the remaining modals (foe/party/object views, new-map,
 		// save, confirm-dirty) reference no spawn index, so there's nothing to invalidate.
@@ -1574,6 +1719,7 @@ func closeModal(s *State) {
 	s.modalDialogChoiceIdx = -1
 	s.modalDialogCondIdx = -1
 	s.modalDialogTriggerIdx = -1
+	s.modalCrystalIdx = -1
 	s.modalDialogActionOnChoice = false
 	clearDialogFocus(s)
 	closeDropdown(s) // picker must not survive its parent modal
@@ -1581,6 +1727,8 @@ func closeModal(s *State) {
 	s.modalConfirmDelete = false
 	s.modalRenaming = ""
 	s.modalRenamingActive = false
+	s.openFilter = ""
+	s.prefabNameFocus = false
 	s.deleteArmed = ""
 	soundDrag = noSliderDrag
 	// Drop modal-scoped focus (door fields, new-map numeric) so it can't carry over.
@@ -1629,11 +1777,14 @@ func updateDoorEditModal(s *State) Action {
 		closeModal(s)
 		return ActionNone
 	}
-	door := &s.area.DoorSpawns[s.modalDoorIdx]
 
-	// Mouse: click focuses a field, sets a facing/style, or deletes.
+	// Mouse: click focuses a field, opens the facing/style picker, or deletes.
 	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
 		mp := rl.GetMousePosition()
+		// Floor stepper (top-right, multi-level maps): re-assign this door's voxel floor.
+		if handleSpawnLevelClick(s, doorEditLayoutFor().card, &s.area.DoorSpawns[s.modalDoorIdx].Level, mp) {
+			return ActionNone
+		}
 		hit := doorEditHitTest(s, mp)
 		switch hit.kind {
 		case doorHitName:
@@ -1646,12 +1797,10 @@ func updateDoorEditModal(s *State) Action {
 			s.focus = focusDoorTargetDoor
 			return ActionNone
 		case doorHitFacing:
-			setIfChanged(s, &door.Facing, hit.facing) // re-picking the current facing shouldn't bank undo/dirty
-			s.focus = focusNone
+			openFieldDropdown(s, ddDoorFacing, doorEditLayoutFor().facingBtn)
 			return ActionNone
 		case doorHitStyle:
-			setIfChanged(s, &door.Style, hit.style)
-			s.focus = focusNone
+			openFieldDropdown(s, ddDoorStyle, doorEditLayoutFor().styleBtn)
 			return ActionNone
 		case doorHitDelete:
 			deleteDoorAt(s, s.modalDoorIdx)
@@ -1668,13 +1817,14 @@ func updateDoorEditModal(s *State) Action {
 	// confirms, Esc closes.
 	switch s.focus {
 	case focusDoorName, focusDoorTargetMap, focusDoorTargetDoor:
-		// pumpFocusField (inside the helper) reads the cap from textFieldConfigs and
-		// its onChange is s.markDirty, so no second dirty guard is needed.
+		// pumpFocusField (inside the helper) arms the lazy undo + marks dirty, so no
+		// second guard is needed.
 		pumpFocusedTextField(s, doorEditTextTarget(s), func() { cycleDoorFocus(s) }, func() { closeModal(s) })
 		return ActionNone
 	}
 
-	// No field focused — facing + delete shortcuts.
+	// No field focused — Esc/Enter close, Tab focuses the first field, X deletes.
+	// Facing + style are dropdown pickers (generic Up/Down/Enter/Esc), not hotkeys.
 	if editorCancelPressed() || editorCommitPressed() {
 		closeModal(s)
 		return ActionNone
@@ -1687,53 +1837,7 @@ func updateDoorEditModal(s *State) Action {
 		deleteDoorAt(s, s.modalDoorIdx)
 		return ActionNone
 	}
-	// N/E/S/W set facing ('S' is free here — Ctrl+S Save doesn't fire in modals).
-	for _, fk := range doorFacingKeys {
-		if rl.IsKeyPressed(fk.key) {
-			setIfChanged(s, &door.Facing, fk.facing) // no undo/dirty churn when re-setting the current facing
-			return ActionNone
-		}
-	}
-	// 1/2/3 set the door style (building / cave / field).
-	for _, sk := range doorStyleKeys {
-		if rl.IsKeyPressed(sk.key) {
-			setIfChanged(s, &door.Style, sk.style)
-			return ActionNone
-		}
-	}
 	return ActionNone
-}
-
-// doorFacingKeys / doorStyleKeys are the door modal's direct-set hotkey tables.
-// Package-level so the per-frame updater doesn't rebuild them.
-var doorFacingKeys = []struct {
-	key    int32
-	facing int
-}{
-	{rl.KeyN, core.North},
-	{rl.KeyE, core.East},
-	{rl.KeyS, core.South},
-	{rl.KeyW, core.West},
-}
-
-// Keys source from numberRowKeys so "key 1/2/3" stays in lockstep with the number row.
-var doorStyleKeys = []struct {
-	key   int32
-	style core.DoorStyle
-}{
-	{numberRowKeys[0], core.DoorStyleBuilding},
-	{numberRowKeys[1], core.DoorStyleCave},
-	{numberRowKeys[2], core.DoorStyleField},
-}
-
-// init panics if the door-modal hotkey tables drift from the core enums they bind.
-func init() {
-	if len(doorFacingKeys) != core.FacingCount {
-		panic("editor: doorFacingKeys length must match core.FacingCount — add a row when extending the facing enum")
-	}
-	if len(doorStyleKeys) != int(core.DoorStyleCount) {
-		panic("editor: doorStyleKeys length must match core.DoorStyleCount — add a row when extending DoorStyle")
-	}
 }
 
 // deleteDoorAt removes the door at idx (undo, dirty, close). Shared by the Delete
@@ -1778,6 +1882,61 @@ func cycleDoorFocus(s *State) {
 	case focusDoorTargetDoor:
 		s.focus = focusDoorName
 	}
+}
+
+// openCrystalEditModal opens the per-crystal editor for spawn index idx.
+func openCrystalEditModal(s *State, idx int) {
+	if idx < 0 || idx >= len(s.area.CrystalSpawns) {
+		return
+	}
+	s.modal = modalCrystalEdit
+	s.modalCrystalIdx = idx
+	s.modalCursor = 0
+}
+
+// updateCrystalEditModal drives the crystal editor: the floor stepper + delete/close.
+func updateCrystalEditModal(s *State) Action {
+	if s.modalCrystalIdx < 0 || s.modalCrystalIdx >= len(s.area.CrystalSpawns) {
+		closeModal(s)
+		return ActionNone
+	}
+	card := centeredCardRect(crystalEditModalW, crystalEditModalH)
+	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
+		mp := rl.GetMousePosition()
+		if handleSpawnLevelClick(s, card, &s.area.CrystalSpawns[s.modalCrystalIdx].Level, mp) {
+			return ActionNone
+		}
+		if pointIn(mp, bottomLeftBtn(card)) {
+			deleteCrystalAt(s, s.modalCrystalIdx)
+			return ActionNone
+		}
+		if pointIn(mp, bottomRightBtn(card)) {
+			closeModal(s)
+			return ActionNone
+		}
+		// Click inside the card but on no control: no-op (don't dismiss).
+	}
+	if editorCancelPressed() || editorCommitPressed() {
+		closeModal(s)
+		return ActionNone
+	}
+	if editorDeletePressed() {
+		deleteCrystalAt(s, s.modalCrystalIdx)
+		return ActionNone
+	}
+	return ActionNone
+}
+
+// deleteCrystalAt removes the crystal at idx (undo, dirty, close). Crystals carry no
+// hand-authored links, so a single press deletes (undo restores it).
+func deleteCrystalAt(s *State, idx int) {
+	if idx < 0 || idx >= len(s.area.CrystalSpawns) {
+		return
+	}
+	pushUndo(s)
+	s.area.CrystalSpawns = removeModalListItem(s.area.CrystalSpawns, idx)
+	s.dirty = true
+	closeModal(s)
 }
 
 // openEntityListModal opens the Objects index (packs / chests / doors + start).
@@ -1828,6 +1987,8 @@ func activateEntityRow(s *State, row entityListRow) {
 		openChestEditModal(s, row.idx)
 	case elDoor:
 		openDoorEditModal(s, row.idx)
+	case elCrystal:
+		openCrystalEditModal(s, row.idx)
 	default:
 		closeModal(s)
 	}
@@ -1852,6 +2013,12 @@ func updatePackEditModal(s *State) Action {
 	pack := &s.area.PackSpawns[s.modalPackIdx]
 	memberCount := len(pack.Members)
 	if !updateEntityListCursor(s, memberCount) {
+		return ActionNone
+	}
+
+	// Floor stepper (top-right, multi-level maps): re-assign this pack's voxel floor.
+	if rl.IsMouseButtonPressed(rl.MouseLeftButton) &&
+		handleSpawnLevelClick(s, centeredCardRect(entityEditModalW, entityEditModalH), &pack.Level, rl.GetMousePosition()) {
 		return ActionNone
 	}
 
@@ -2083,6 +2250,12 @@ func updateChestEditModal(s *State) Action {
 		return ActionNone
 	}
 
+	// Floor stepper (top-right, multi-level maps): re-assign this chest's voxel floor.
+	if rl.IsMouseButtonPressed(rl.MouseLeftButton) &&
+		handleSpawnLevelClick(s, centeredCardRect(entityEditModalW, entityEditModalH), &chest.Level, rl.GetMousePosition()) {
+		return ActionNone
+	}
+
 	// Mouse: click an item row to select, or a button to add / remove.
 	if handleEntityModalClick(s, itemCount, chestEditCmds) {
 		return ActionNone
@@ -2144,14 +2317,26 @@ func updateOpenModal(s *State) Action {
 		return updateOpenConfirmDelete(s)
 	}
 
+	// Type-to-filter (dropdown-style): printable keys narrow the list, Backspace
+	// deletes. Runs before the action cmds so the letter keys type instead of firing
+	// the (now click-only) Rename/Delete/Duplicate buttons.
+	pumpPrintableASCII(&s.openFilter, defaultTextFieldMaxLen, acceptPrintable, func() { s.modalCursor = 0 })
+
 	if editorCancelPressed() {
+		// Esc clears a live filter first, then closes on a second press.
+		if s.openFilter != "" {
+			s.openFilter = ""
+			s.modalCursor = 0
+			return ActionNone
+		}
 		closeModal(s)
 		return ActionNone
 	}
-	if len(s.modalPaths) == 0 {
+	vis := openVisiblePaths(s)
+	if len(vis) == 0 {
 		return ActionNone
 	}
-	s.modalCursor = input.CursorUpDown(s.modalCursor, len(s.modalPaths))
+	s.modalCursor = input.CursorUpDown(s.modalCursor, len(vis))
 
 	// Mouse: click a list row to select it (buttons handled below).
 	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
@@ -2167,25 +2352,76 @@ func updateOpenModal(s *State) Action {
 	return ActionNone
 }
 
-// openModalActionCmds: 0=Open (Enter), 1=Rename (R), 2=Delete (D),
-// 3=Duplicate (C). The row-click selection is handled separately in
-// updateOpenModal (it isn't a button).
+// openVisiblePaths returns modalPaths filtered by the live openFilter query
+// (case-insensitive map-id substring); the full list when the query is empty.
+// The single seam both the updater and draw read so the cursor can't drift from
+// what's shown.
+func openVisiblePaths(s *State) []string {
+	q := strings.TrimSpace(s.openFilter)
+	if q == "" {
+		return s.modalPaths
+	}
+	lq := strings.ToLower(q)
+	out := make([]string, 0, len(s.modalPaths))
+	for _, p := range s.modalPaths {
+		if strings.Contains(strings.ToLower(core.MapIDFromPath(p)), lq) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// selectedOpenPath returns the cursored path in the filtered view, or "" when the
+// view is empty (e.g. a query matching nothing).
+func selectedOpenPath(s *State) string {
+	vis := openVisiblePaths(s)
+	if s.modalCursor < 0 || s.modalCursor >= len(vis) {
+		return ""
+	}
+	return vis[s.modalCursor]
+}
+
+// selectOpenPath moves the cursor to path in the filtered view (clamped if it's
+// filtered out). Used after rename / duplicate so the cursor follows the result.
+func selectOpenPath(s *State, path string) {
+	vis := openVisiblePaths(s)
+	for i, p := range vis {
+		if p == path {
+			s.modalCursor = i
+			return
+		}
+	}
+	clampModalCursor(s, len(vis))
+}
+
+// openModalActionCmds: 0=Open (Enter), then click-only Rename / Delete / Duplicate.
+// The letter accelerators were dropped so the list supports type-to-filter; the
+// buttons stay clickable. Row-click selection is handled separately in updateOpenModal.
 func openModalActionCmds(s *State) []modalCmd {
 	return []modalCmd{
 		{label: "Open", hot: editorCommitPressed, run: func() Action { return openSelectedMap(s) }},
-		{label: "Rename", hot: keyHot(rl.KeyR), run: func() Action {
-			s.modalRenaming = core.MapIDFromPath(s.modalPaths[s.modalCursor])
-			s.modalRenamingActive = true
+		{label: "Rename", run: func() Action {
+			if p := selectedOpenPath(s); p != "" {
+				s.modalRenaming = core.MapIDFromPath(p)
+				s.modalRenamingActive = true
+			}
 			return ActionNone
 		}},
-		{label: "Delete", hot: keyHot(rl.KeyD), run: func() Action { s.modalConfirmDelete = true; return ActionNone }},
-		{label: "Duplicate", hot: keyHot(rl.KeyC), run: func() Action { openDuplicateSelected(s); return ActionNone }},
+		{label: "Delete", run: func() Action {
+			if selectedOpenPath(s) != "" {
+				s.modalConfirmDelete = true
+			}
+			return ActionNone
+		}},
+		{label: "Duplicate", run: func() Action { openDuplicateSelected(s); return ActionNone }},
 	}
 }
 
 // openSelectedMap loads the cursored map. Shared by the Open button and Enter.
 func openSelectedMap(s *State) Action {
-	loadAreaFromPath(s, s.modalPaths[s.modalCursor])
+	if p := selectedOpenPath(s); p != "" {
+		loadAreaFromPath(s, p)
+	}
 	closeModal(s)
 	return ActionNone
 }
@@ -2210,6 +2446,9 @@ func loadAreaFromPath(s *State, path string) {
 	s.undo = nil
 	s.redo = nil
 	s.dirty = false
+	s.autosaveTimer = 0
+	s.bookmarks = nil // view bookmarks are map-specific
+	clearRecovery() // loaded a clean map — discard any stale recovery snapshot
 	clearSelection(s) // different map — old selection coords no longer apply
 	surfaceAreaLevels(s)
 	// Area replaced wholesale — invalidate content-derived caches (like
@@ -2231,20 +2470,17 @@ func openRecentPath(s *State, path string) {
 
 // openDuplicateSelected copies the cursored map on disk and selects the copy.
 func openDuplicateSelected(s *State) {
-	newPath, err := duplicateMapFile(s.modalPaths[s.modalCursor])
+	src := selectedOpenPath(s)
+	if src == "" {
+		return
+	}
+	newPath, err := duplicateMapFile(src)
 	if err != nil {
 		s.flash("Duplicate failed: " + err.Error())
 		return
 	}
 	refreshOpenList(s)
-	for i, p := range s.modalPaths {
-		if p == newPath {
-			s.modalCursor = i
-			break
-		}
-	}
-	// Defensive clamp if the copy isn't in the refreshed list.
-	clampModalCursor(s, len(s.modalPaths))
+	selectOpenPath(s, newPath) // follow the copy (clamps if the filter hides it)
 	s.flash("Duplicated to " + core.MapIDFromPath(newPath))
 }
 
@@ -2266,7 +2502,12 @@ func openRenameCmds(s *State) []modalCmd {
 }
 
 func openRenameCommit(s *State) {
-	oldPath := s.modalPaths[s.modalCursor]
+	oldPath := selectedOpenPath(s)
+	if oldPath == "" {
+		s.modalRenaming = ""
+		s.modalRenamingActive = false
+		return
+	}
 	newPath, err := renameMapFile(oldPath, s.modalRenaming)
 	s.modalRenaming = ""
 	s.modalRenamingActive = false
@@ -2278,12 +2519,7 @@ func openRenameCommit(s *State) {
 		s.area.Path = newPath
 	}
 	refreshOpenList(s)
-	for i, p := range s.modalPaths {
-		if p == newPath {
-			s.modalCursor = i
-			break
-		}
-	}
+	selectOpenPath(s, newPath)
 	s.flash("Renamed to " + core.MapIDFromPath(newPath))
 }
 
@@ -2305,7 +2541,11 @@ func openDeleteConfirmCmds(s *State) []modalCmd {
 }
 
 func openDeleteSelected(s *State) {
-	path := s.modalPaths[s.modalCursor]
+	path := selectedOpenPath(s)
+	if path == "" {
+		s.modalConfirmDelete = false
+		return
+	}
 	if err := os.Remove(path); err != nil {
 		s.flash("Delete failed: " + err.Error())
 		s.modalConfirmDelete = false
@@ -2316,7 +2556,7 @@ func openDeleteSelected(s *State) {
 	}
 	s.flash("Deleted " + core.MapIDFromPath(path))
 	refreshOpenList(s)
-	clampModalCursor(s, len(s.modalPaths))
+	clampModalCursor(s, len(openVisiblePaths(s)))
 	s.modalConfirmDelete = false
 }
 
@@ -2446,6 +2686,7 @@ func runPendingAction(s *State) Action {
 	s.pending = pendingNone
 	switch p {
 	case pendingExitToTitle:
+		clearRecovery() // leaving with edits saved or discarded — no recovery to keep
 		return ActionExitToTitle
 	case pendingNew:
 		openNewMapModal(s)

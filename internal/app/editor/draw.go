@@ -183,6 +183,8 @@ func Draw(s *State, assets render.Resources) {
 	drawPalette(s, font, theme)
 	drawMetadata(s, font, theme)
 	drawGrid(s, font)
+	// Coverage heatmap: distance-from-start tint over the top-down grid.
+	drawHeatmapOverlay(s, font, theme)
 	// Overview minimap: grid bottom-right, below scrollbars/status/modals.
 	drawMinimap(s)
 	drawMinimapLegend(s, font, theme)
@@ -196,6 +198,8 @@ func Draw(s *State, assets render.Resources) {
 	if s.showStatusLog {
 		drawStatusHistory(s, font, theme)
 	}
+	// Ruler readout floats at the cursor while measuring (both views).
+	drawMeasureReadout(s, font, theme)
 	// Toolbar hover tooltip: late (over the canvas), not inside drawToolbar.
 	drawToolbarTooltip(s, font, theme)
 	drawPaletteTooltip(s, font, theme)
@@ -240,6 +244,10 @@ var modalHandlers = map[modalKind]modalHandler{
 	modalDialogTriggerEdit: {draw: drawDialogTriggerEditModal, update: updateDialogTriggerEditModal},
 	modalLocationEdit:      {draw: drawLocationEditModal, update: updateLocationEditModal},
 	modalHelp:              {draw: drawHelpModal, update: updateHelpModal},
+	modalCrystalEdit:       {draw: drawCrystalEditModal, update: updateCrystalEditModal},
+	modalGoto:              {draw: drawGotoModal, update: updateGotoModal},
+	modalStats:             {draw: drawStatsModal, update: updateStatsModal},
+	modalPrefabs:           {draw: drawPrefabsModal, update: updatePrefabsModal},
 }
 
 // init asserts every dispatchable modalKind (excluding modalNone/modalCount) has
@@ -274,22 +282,22 @@ const (
 	doorHitClose
 )
 
-// doorEditHit pairs the hit kind with optional payload (facing/style value).
+// doorEditHit pairs the hit kind with optional payload (unused now that facing +
+// style are dropdown pickers; kept for the target enum).
 type doorEditHit struct {
-	kind   doorEditHitTarget
-	facing int
-	style  core.DoorStyle
+	kind doorEditHitTarget
 }
 
 // doorEditLayout holds the rects for the door edit modal's clickable regions
-// so update and draw stay in sync.
+// so update and draw stay in sync. Facing + style are single picker buttons
+// (each opens a dropdown), not per-value button rows.
 type doorEditLayout struct {
 	card      rl.Rectangle
 	nameField rl.Rectangle
 	mapField  rl.Rectangle
 	doorField rl.Rectangle
-	facing    [core.FacingCount]rl.Rectangle
-	style     [core.DoorStyleCount]rl.Rectangle
+	facingBtn rl.Rectangle
+	styleBtn  rl.Rectangle
 	deleteBtn rl.Rectangle
 	closeBtn  rl.Rectangle
 }
@@ -307,13 +315,10 @@ func doorEditLayoutFor() doorEditLayout {
 	mapField := fields[1]
 	doorField := fields[2]
 	y += 3*rowGap + dialogStackTailGap
-	// Facing row: one equal-width button per Facing.
-	var facing [core.FacingCount]rl.Rectangle
-	copy(facing[:], equalButtonRow(x, y, fw, fieldH, int(core.FacingCount)))
+	// Facing + style picker buttons (full-width, one per row) — each opens a dropdown.
+	facingBtn := rl.NewRectangle(x, y, fw, fieldH)
 	y += rowGap
-	// Style row: one button per DoorStyle.
-	var style [core.DoorStyleCount]rl.Rectangle
-	copy(style[:], equalButtonRow(x, y, fw, fieldH, int(core.DoorStyleCount)))
+	styleBtn := rl.NewRectangle(x, y, fw, fieldH)
 	deleteBtn := bottomLeftBtn(r)
 	closeBtn := bottomRightBtn(r)
 	return doorEditLayout{
@@ -321,8 +326,8 @@ func doorEditLayoutFor() doorEditLayout {
 		nameField: nameField,
 		mapField:  mapField,
 		doorField: doorField,
-		facing:    facing,
-		style:     style,
+		facingBtn: facingBtn,
+		styleBtn:  styleBtn,
 		deleteBtn: deleteBtn,
 		closeBtn:  closeBtn,
 	}
@@ -334,29 +339,20 @@ func doorEditHitTest(s *State, p rl.Vector2) doorEditHit {
 	if !pointIn(p, l.card) {
 		return doorEditHit{kind: doorHitOutside}
 	}
-	if pointIn(p, l.nameField) {
+	switch {
+	case pointIn(p, l.nameField):
 		return doorEditHit{kind: doorHitName}
-	}
-	if pointIn(p, l.mapField) {
+	case pointIn(p, l.mapField):
 		return doorEditHit{kind: doorHitTargetMap}
-	}
-	if pointIn(p, l.doorField) {
+	case pointIn(p, l.doorField):
 		return doorEditHit{kind: doorHitTargetDoor}
-	}
-	for i, fr := range l.facing {
-		if pointIn(p, fr) {
-			return doorEditHit{kind: doorHitFacing, facing: i}
-		}
-	}
-	for i, sr := range l.style {
-		if pointIn(p, sr) {
-			return doorEditHit{kind: doorHitStyle, style: core.DoorStyle(i)}
-		}
-	}
-	if pointIn(p, l.deleteBtn) {
+	case pointIn(p, l.facingBtn):
+		return doorEditHit{kind: doorHitFacing}
+	case pointIn(p, l.styleBtn):
+		return doorEditHit{kind: doorHitStyle}
+	case pointIn(p, l.deleteBtn):
 		return doorEditHit{kind: doorHitDelete}
-	}
-	if pointIn(p, l.closeBtn) {
+	case pointIn(p, l.closeBtn):
 		return doorEditHit{kind: doorHitClose}
 	}
 	// Click inside the card but on no region: no-op (don't dismiss).
@@ -389,6 +385,9 @@ type topbarBtn struct {
 func onGridLayer(s *State) bool      { return s.layer != LayerEntities }
 func onElevationLayer(s *State) bool { return s.layer == LayerElevation }
 
+// onScatterLayer gates the Scatter toolbar button to the cosmetic-scatter layers.
+func onScatterLayer(s *State) bool { return s.layer == LayerDecor || s.layer == LayerProps }
+
 // canFillLayer gates the Edit ▸ Fill Layer command: a grid layer that isn't a
 // per-floor prop/decor stack (which floodFill/fillEntireLayer refuse — see
 // layerBlocksBulkFill). Keeps the menu row from showing enabled then no-op-flashing.
@@ -405,10 +404,30 @@ var toolbarActionBtns = []topbarBtn{
 	{label: "Lvl -", action: func(s *State) { stepEditLevel(s, -1) }, help: "Lower the active level (the floor paints build onto). Also PgDn / the Levels panel."},
 	{label: "Lvl +", action: func(s *State) { stepEditLevel(s, +1) }, help: "Raise the active level (the floor paints build onto). Also PgUp / the Levels panel."},
 	{label: "Ramp",
-		action:  func(s *State) { s.rampMode = !s.rampMode },
+		action:  func(s *State) { s.rampMode = !s.rampMode; s.sculptMode = false },
 		active:  func(s *State) bool { return s.rampMode },
 		enabled: onElevationLayer,
 		help:    "Ramp mode: paint sloped transitions between elevation levels."},
+	{label: "Sculpt",
+		action:  func(s *State) { s.sculptMode = !s.sculptMode; s.rampMode = false },
+		active:  func(s *State) bool { return s.sculptMode },
+		enabled: onElevationLayer,
+		help:    "Sculpt mode: left-drag raises columns +1, right-click lowers −1 (relative terracing)."},
+	{label: "Scatter",
+		action:  cycleScatterDensity,
+		active:  func(s *State) bool { return s.scatterDensity > 0 },
+		enabled: onScatterLayer,
+		help:    "Scatter mode: a size>1 brush stamps decor/props at random density (click cycles Off/25/50/75%)."},
+	{label: "Mirror ↔",
+		action:  func(s *State) { s.mirrorX = !s.mirrorX },
+		active:  func(s *State) bool { return s.mirrorX },
+		enabled: onGridLayer,
+		help:    "Mirror every stroke across the map's vertical center axis (live symmetry)."},
+	{label: "Mirror ↕",
+		action:  func(s *State) { s.mirrorZ = !s.mirrorZ },
+		active:  func(s *State) bool { return s.mirrorZ },
+		enabled: onGridLayer,
+		help:    "Mirror every stroke across the map's horizontal center axis (live symmetry)."},
 }
 
 // toolbarBtns is the full action row: the tool-select group then the editing
@@ -814,6 +833,17 @@ func cardContentBox(card rl.Rectangle) (x, fw float32) {
 	return card.X + modalContentInset, modalContentWidth(card)
 }
 
+// List-modal chrome shared by the goto / prefab layouts: modalBodyTop is the first
+// content baseline below the header; listModalHeight sizes a card whose only
+// variable is a fixed-pitch row list (rows × rowH atop the fixed chrome budget).
+const (
+	modalBodyTopDY   = float32(44)
+	modalListChromeH = float32(150) // header + input/button row + footer reserve
+)
+
+func modalBodyTop(card rl.Rectangle) float32       { return card.Y + modalBodyTopDY }
+func listModalHeight(rows int, rowH float32) float32 { return modalListChromeH + float32(rows)*rowH }
+
 // drawSelectedListRow fills a list row's cursor plate with the editor's shared
 // bgActive tone. One home for the selected-row look so every editor list highlights
 // the cursor identically (the sound modal used the game-panel gilt style before).
@@ -1096,6 +1126,57 @@ func drawButtonDisabled(font rl.Font, r rl.Rectangle, label string) {
 func drawStepperButtons(font rl.Font, minus, plus rl.Rectangle) {
 	drawButton(font, minus, "-", false)
 	drawButton(font, plus, "+", false)
+}
+
+// spawnLevelStepW / spawnLevelStepH size the entity editors' Floor [-]/[+] buttons.
+const (
+	spawnLevelStepW = float32(26)
+	spawnLevelStepH = float32(22)
+)
+
+// spawnLevelStepperRects returns the Floor [-]/[+] rects at a modal card's top-right,
+// and whether to show them. Shown only on multi-level maps — on a flat map every
+// spawn sits on floor 0 and the control would be noise.
+func spawnLevelStepperRects(s *State, card rl.Rectangle) (minus, plus rl.Rectangle, show bool) {
+	lo, hi, found := areaLevelSpan(&s.area)
+	if !found || hi == lo {
+		return rl.Rectangle{}, rl.Rectangle{}, false
+	}
+	y := card.Y + float32(modalHeadingInsetY) - 2
+	plus = rl.NewRectangle(card.X+card.Width-modalContentInset-spawnLevelStepW, y, spawnLevelStepW, spawnLevelStepH)
+	minus = rl.NewRectangle(plus.X-spawnLevelStepW-4, y, spawnLevelStepW, spawnLevelStepH)
+	return minus, plus, true
+}
+
+// drawSpawnLevelStepper paints "Floor <signed>  [-] [+]" at the card's top-right for
+// a placed spawn's Level (multi-level maps only).
+func drawSpawnLevelStepper(s *State, font rl.Font, theme render.Theme, card rl.Rectangle, level int) {
+	minus, plus, show := spawnLevelStepperRects(s, card)
+	if !show {
+		return
+	}
+	label := "Floor " + signedLevelLabel(clampLevel(level))
+	lw := render.MeasureRichText(font, label, editorFontHint, 1).X
+	render.DrawRichText(font, label, rl.NewVector2(minus.X-lw-8, minus.Y+4), editorFontHint, 1, theme.TextMuted)
+	drawStepperButtons(font, minus, plus)
+}
+
+// handleSpawnLevelClick runs the Floor [-]/[+] steppers for *level, returning true
+// when it consumed the click (multi-level maps only).
+func handleSpawnLevelClick(s *State, card rl.Rectangle, level *int, mp rl.Vector2) bool {
+	minus, plus, show := spawnLevelStepperRects(s, card)
+	if !show {
+		return false
+	}
+	switch {
+	case pointIn(mp, minus):
+		adjustSpawnLevel(s, level, -1)
+		return true
+	case pointIn(mp, plus):
+		adjustSpawnLevel(s, level, +1)
+		return true
+	}
+	return false
 }
 
 // stepperButtonPair lays out the "−"/"+" square button pair (each btnW×btnH,
@@ -2124,6 +2205,21 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 	}
 }
 
+// drawMeasureReadout floats the ruler readout beside the cursor while a Measure
+// drag is active (view-independent — the box outline is top-down only).
+func drawMeasureReadout(s *State, font rl.Font, theme render.Theme) {
+	if s.drag != dragMeasure || s.hoverX < 0 {
+		return
+	}
+	txt := measureLabel(s.rectAnchorX, s.rectAnchorZ, s.hoverX, s.hoverZ)
+	mp := rl.GetMousePosition()
+	tw := render.MeasureRichText(font, txt, editorFontBody, 1).X
+	pad := float32(6)
+	box := rl.NewRectangle(mp.X+14, mp.Y+14, tw+2*pad, bodyLineH+2*pad)
+	render.DrawCard(int32(box.X), int32(box.Y), int32(box.Width), int32(box.Height), theme.SurfacePrimary, theme.BorderSoft, theme.BorderActive)
+	render.DrawRichText(font, txt, rl.NewVector2(box.X+pad, box.Y+pad), editorFontBody, 1, theme.TextPrimary)
+}
+
 func drawLabel(font rl.Font, text string, r rl.Rectangle) {
 	render.DrawRichText(font, text, rl.NewVector2(r.X, r.Y), editorFontLabel, 1, editorLabelColor)
 }
@@ -2144,12 +2240,42 @@ func drawTextField(font rl.Font, r rl.Rectangle, text string, focused bool) {
 			display += " "
 		}
 	}
+	// Fit the string to the field's interior so a long value can't overrun the box
+	// (modal cards carry no panel scissor). Focused fields keep the tail + caret
+	// visible; unfocused ones show the head with an ellipsis.
+	display = fitTextFieldText(font, display, r.Width-2*fieldTextInsetX, focused)
 	render.DrawRichText(font, display, rl.NewVector2(r.X+fieldTextInsetX, r.Y+(r.Height-bodyLineH)/2), editorFontBody, 1, textEntry)
+}
+
+// fitTextFieldText trims s to fit innerW px in the body font. Focused: drop leading
+// runes so the caret/tail stays on screen. Unfocused: keep the head, append "…".
+func fitTextFieldText(font rl.Font, s string, innerW float32, focused bool) string {
+	if innerW <= 0 || render.MeasureRichText(font, s, editorFontBody, 1).X <= innerW {
+		return s
+	}
+	r := []rune(s)
+	if focused {
+		for len(r) > 1 {
+			r = r[1:]
+			if render.MeasureRichText(font, string(r), editorFontBody, 1).X <= innerW {
+				break
+			}
+		}
+		return string(r)
+	}
+	for len(r) > 0 {
+		r = r[:len(r)-1]
+		if render.MeasureRichText(font, string(r)+"…", editorFontBody, 1).X <= innerW {
+			return string(r) + "…"
+		}
+	}
+	return "…"
 }
 
 func drawReadonlyValue(font rl.Font, r rl.Rectangle, text string) {
 	rl.DrawRectangleRec(r, bgFieldInset)
 	rl.DrawRectangleLinesEx(r, 1, editorBorderInactive)
+	text = fitTextFieldText(font, text, r.Width-2*fieldTextInsetX, false)
 	render.DrawRichText(font, text, rl.NewVector2(r.X+fieldTextInsetX, r.Y+(r.Height-bodyLineH)/2), editorFontBody, 1, textReadonly)
 }
 
@@ -2530,6 +2656,15 @@ func drawGrid(s *State, font rl.Font) {
 		if !s.rectHollow {
 			rl.DrawRectangleRec(r, withAlpha(brushPreviewColor(s), 110))
 		}
+		rl.DrawRectangleLinesEx(r, 2, selectionOutline)
+	}
+
+	// Ruler drag (Measure tool): outline the spanned box + a readout at the cursor.
+	if s.drag == dragMeasure && s.hoverX >= 0 {
+		x0, x1 := min(s.rectAnchorX, s.hoverX), max(s.rectAnchorX, s.hoverX)
+		z0, z1 := min(s.rectAnchorZ, s.hoverZ), max(s.rectAnchorZ, s.hoverZ)
+		cx, cy := s.rect.tileCorner(x0, z0)
+		r := rl.NewRectangle(cx, cy, float32(x1-x0+1)*cell, float32(z1-z0+1)*cell)
 		rl.DrawRectangleLinesEx(r, 2, selectionOutline)
 	}
 
@@ -3131,7 +3266,7 @@ func openModalListGeom(s *State) (card rl.Rectangle, listTop, rowH float32, topR
 	if rowsVisible < 1 {
 		rowsVisible = 1
 	}
-	topRow, end = scrollWindow(s.modalCursor, len(s.modalPaths), rowsVisible)
+	topRow, end = scrollWindow(s.modalCursor, len(openVisiblePaths(s)), rowsVisible)
 	return
 }
 
@@ -3162,9 +3297,25 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 		return
 	}
 
+	// Live filter caption (main view only), so type-to-filter is discoverable.
+	if !s.modalRenamingActive && !s.modalConfirmDelete {
+		cap := "Type to filter…"
+		if s.openFilter != "" {
+			cap = "Filter: " + s.openFilter
+		}
+		render.DrawRichText(font, cap, rl.NewVector2(r.X+modalContentInset, r.Y+30), editorFontHint, 1, theme.TextHint)
+	}
+
+	vis := openVisiblePaths(s)
+	if len(vis) == 0 {
+		render.DrawRichText(font, "(no matches)", rl.NewVector2(r.X+modalContentInset, r.Y+50), editorFontLabel, 1, theme.TextMuted)
+		drawModalFooterHint(font, r, "Backspace to edit filter   Esc to clear", theme)
+		return
+	}
+
 	_, listTop, rowH, topRow, end := openModalListGeom(s)
 	for i := topRow; i < end; i++ {
-		path := s.modalPaths[i]
+		path := vis[i]
 		text := core.MapIDFromPath(path)
 		col := theme.TextMuted
 		if i == s.modalCursor {
@@ -3174,8 +3325,8 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 		render.DrawTextWithShadow(font, text, r.X+18, listTop+float32(i-topRow)*rowH, editorFontBody, col)
 	}
 	// Scroll hint when the list overflows.
-	if topRow > 0 || end < len(s.modalPaths) {
-		more := fmt.Sprintf("(%d / %d)", s.modalCursor+1, len(s.modalPaths))
+	if topRow > 0 || end < len(vis) {
+		more := fmt.Sprintf("(%d / %d)", s.modalCursor+1, len(vis))
 		measure := render.MeasureRichText(font, more, editorFontHint, 1)
 		render.DrawRichText(font, more,
 			rl.NewVector2(r.X+r.Width-measure.X-16, r.Y+30),
@@ -3190,7 +3341,7 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 		return
 	}
 	if s.modalConfirmDelete {
-		path := s.modalPaths[s.modalCursor]
+		path := selectedOpenPath(s)
 		render.DrawRichText(font, fmt.Sprintf("Delete %s? This is permanent.", core.MapIDFromPath(path)),
 			rl.NewVector2(r.X+modalContentInset, r.Y+r.Height-openModalPromptDY), editorFontLabel, 1, theme.BorderDanger)
 		labels := cmdLabels(openDeleteConfirmCmds(s))
@@ -3290,6 +3441,7 @@ func drawPackEditModal(s *State, font rl.Font, theme render.Theme) {
 	render.DrawTextWithShadow(font, leaderText, r.X+modalContentInset, r.Y+38, editorFontHint, theme.TextMuted)
 	render.DrawTextWithShadow(font, "Up/Down select · Enter add · X remove · K/J reorder · R row · A cycle AI · Esc close",
 		r.X+modalContentInset, r.Y+54, editorFontTiny, theme.TextHint)
+	drawSpawnLevelStepper(s, font, theme, r, pack.Level)
 
 	adds, actions := packEditCmds(s)
 	lay := entityModalLayoutFor(s.modalCursor, len(pack.Members), cmdLabels(adds), cmdLabels(actions))
@@ -3313,6 +3465,7 @@ func drawChestEditModal(s *State, font rl.Font, theme render.Theme) {
 		theme.BorderActive)
 	render.DrawTextWithShadow(font, "Up/Down select · Enter add · X remove · Esc close",
 		r.X+modalContentInset, r.Y+modalSubheadingDY, editorFontTiny, theme.TextHint)
+	drawSpawnLevelStepper(s, font, theme, r, chest.Level)
 
 	adds, actions := chestEditCmds(s)
 	lay := entityModalLayoutFor(s.modalCursor, len(chest.Items), cmdLabels(adds), cmdLabels(actions))
@@ -3333,6 +3486,7 @@ func drawDoorEditModal(s *State, font rl.Font, theme render.Theme) {
 	l := doorEditLayoutFor()
 	header := "DOOR AT " + core.TileCoord(door.TileX, door.TileZ)
 	drawModalHeaderAt(font, theme, l.card, header, theme.BorderActive)
+	drawSpawnLevelStepper(s, font, theme, l.card, door.Level)
 
 	drawLabel(font, "Name (unique on this map)", labelAbove(l.nameField))
 	drawTextField(font, l.nameField, door.Name, s.focus == focusDoorName)
@@ -3343,30 +3497,45 @@ func drawDoorEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawLabel(font, "Target door (Name on destination map)", labelAbove(l.doorField))
 	drawTextField(font, l.doorField, door.TargetDoor, s.focus == focusDoorTargetDoor)
 
-	// Facing row.
-	lastFacing := l.facing[core.FacingCount-1]
-	drawLabel(font, "Facing / wall to affix to (player walks out this way)",
-		rl.NewRectangle(l.facing[0].X, l.facing[0].Y-labelCaptionGap, lastFacing.X+lastFacing.Width-l.facing[0].X, labelCaptionH))
-	for i, fr := range l.facing {
-		drawButton(font, fr, core.FacingShortLabels[i], door.Facing == i)
-	}
+	// Facing picker (opens ddDoorFacing).
+	facingName, _ := core.FacingName(door.Facing)
+	drawLabel(font, "Facing / wall to affix to (player walks out this way)", labelAbove(l.facingBtn))
+	drawButton(font, l.facingBtn, facingName+dropdownArrowSuffix, s.dropdown.owner == ddDoorFacing)
 
-	// Style row.
-	lastStyle := l.style[core.DoorStyleCount-1]
-	drawLabel(font, "Style (visual fixture)",
-		rl.NewRectangle(l.style[0].X, l.style[0].Y-labelCaptionGap, lastStyle.X+lastStyle.Width-l.style[0].X, labelCaptionH))
-	for i, sr := range l.style {
-		drawButton(font, sr, core.DoorStyleLabel(core.DoorStyle(i)), door.Style == core.DoorStyle(i))
-	}
+	// Style picker (opens ddDoorStyle).
+	drawLabel(font, "Style (visual fixture)", labelAbove(l.styleBtn))
+	drawButton(font, l.styleBtn, core.DoorStyleLabel(door.Style)+dropdownArrowSuffix, s.dropdown.owner == ddDoorStyle)
 
 	// Delete highlights while armed (first of the two-press confirm).
 	drawButton(font, l.deleteBtn, "Delete door (X)", s.deleteArmed == "door")
 	drawButton(font, l.closeBtn, "Done (Esc)", false)
 
-	hint := "Tab cycle fields   N/E/S/W facing   1/2/3 style   X delete   Esc done"
+	hint := "Tab cycle fields   X delete   Esc done"
 	render.DrawRichText(font, hint,
 		rl.NewVector2(l.card.X+modalContentInset, l.card.Y+l.card.Height-72),
 		editorFontTiny, 1, theme.TextHint)
+}
+
+// crystalEditModal card dimensions (small — crystals carry only a floor + delete).
+const (
+	crystalEditModalW = float32(400)
+	crystalEditModalH = float32(180)
+)
+
+// drawCrystalEditModal renders the per-crystal editor: a floor stepper (multi-level
+// maps) plus delete / done buttons.
+func drawCrystalEditModal(s *State, font rl.Font, theme render.Theme) {
+	if s.modalCrystalIdx < 0 || s.modalCrystalIdx >= len(s.area.CrystalSpawns) {
+		return
+	}
+	cr := s.area.CrystalSpawns[s.modalCrystalIdx]
+	card := drawModalHeader(font, theme, crystalEditModalW, crystalEditModalH,
+		"CRYSTAL AT "+core.TileCoord(cr.TileX, cr.TileZ), theme.BorderActive)
+	drawSpawnLevelStepper(s, font, theme, card, cr.Level)
+	render.DrawRichText(font, "Healing crystal — restores the party. Floor is its only per-instance setting.",
+		rl.NewVector2(card.X+modalContentInset, card.Y+56), editorFontHint, 1, theme.TextMuted)
+	drawButton(font, bottomLeftBtn(card), "Delete crystal (X)", false)
+	drawButton(font, bottomRightBtn(card), "Done (Esc)", false)
 }
 
 // drawValidateModal renders the reachability + cross-map warning list (read-only).
@@ -3585,4 +3754,101 @@ func hintForPending(saveLabel, discardLabel string) string {
 		return s
 	}
 	return trim(saveLabel) + " · " + trim(discardLabel)
+}
+
+// --- Coverage heatmap (View ▸ Coverage Heatmap) --------------------------------
+//
+// Distance-from-start field, cached on contentEpoch + start tile so the BFS runs
+// once per edit, not per frame. dist < 0 = unreachable walkable tile (a pocket).
+var (
+	heatDist              []int
+	heatEpoch             uint64
+	heatStartX, heatStartZ int
+	heatW, heatH          int
+	heatMax               int
+	heatReady             bool
+)
+
+func refreshHeatField(s *State) {
+	a := &s.area
+	w, h := a.Width, a.Height
+	if heatReady && heatEpoch == s.contentEpoch && heatStartX == a.StartTileX && heatStartZ == a.StartTileZ && heatW == w && heatH == h {
+		return
+	}
+	dist := make([]int, w*h)
+	for i := range dist {
+		dist[i] = -1
+	}
+	max := 0
+	if a.InBounds(a.StartTileX, a.StartTileZ) && !a.BlockedAt(a.StartTileX, a.StartTileZ) {
+		start := a.StartTileZ*w + a.StartTileX
+		dist[start] = 0
+		queue := [][2]int{{a.StartTileX, a.StartTileZ}}
+		for len(queue) > 0 {
+			p := queue[0]
+			queue = queue[1:]
+			px, pz := p[0], p[1]
+			d := dist[pz*w+px]
+			for _, dir := range [4]int{core.East, core.West, core.South, core.North} {
+				if !a.StepElevationOK(px, pz, dir) {
+					continue
+				}
+				dx, dz := core.FacingVector(dir)
+				nx, nz := px+dx, pz+dz
+				if nx < 0 || nx >= w || nz < 0 || nz >= h {
+					continue
+				}
+				ni := nz*w + nx
+				if dist[ni] != -1 || a.BlockedAt(nx, nz) {
+					continue
+				}
+				dist[ni] = d + 1
+				if d+1 > max {
+					max = d + 1
+				}
+				queue = append(queue, [2]int{nx, nz})
+			}
+		}
+	}
+	heatDist, heatMax = dist, max
+	heatEpoch, heatStartX, heatStartZ, heatW, heatH = s.contentEpoch, a.StartTileX, a.StartTileZ, w, h
+	heatReady = true
+}
+
+// drawHeatmapOverlay tints each top-down tile by its distance from the start (green
+// near → red far); walkable-but-unreachable pockets flag magenta. No-op in 3D.
+func drawHeatmapOverlay(s *State, font rl.Font, theme render.Theme) {
+	if !s.showHeatmap || s.isoView || s.rect.cellPx <= 0 {
+		return
+	}
+	refreshHeatField(s)
+	g := s.rect.grid
+	rl.BeginScissorMode(int32(g.X), int32(g.Y), int32(g.Width), int32(g.Height))
+	for z := 0; z < s.area.Height; z++ {
+		for x := 0; x < s.area.Width; x++ {
+			if s.area.WallAt(x, z) {
+				continue // walls carry no coverage meaning
+			}
+			var tint rl.Color
+			d := heatDist[z*s.area.Width+x]
+			if d < 0 {
+				if s.area.BlockedAt(x, z) {
+					continue // deep water etc. — not a walkable pocket
+				}
+				tint = rl.NewColor(220, 40, 220, 120) // unreachable pocket
+			} else {
+				t := float32(0)
+				if heatMax > 0 {
+					t = float32(d) / float32(heatMax)
+				}
+				tint = rl.NewColor(uint8(60+195*t), uint8(200-150*t), 70, 105)
+			}
+			r := s.rect.tileRect(x, z)
+			rl.DrawRectangleRec(r, tint)
+		}
+	}
+	rl.EndScissorMode()
+	// Legend caption at the grid's top-left.
+	render.DrawRichText(font, "Coverage: green=near · red=far · magenta=unreachable",
+		rl.NewVector2(g.X+8, g.Y+8), editorFontHint, 1, theme.TextPrimary)
 }

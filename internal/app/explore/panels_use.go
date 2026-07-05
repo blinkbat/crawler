@@ -195,7 +195,9 @@ func applyUseToMember(g *core.GameState, member int) {
 		res := core.ApplyRestorative(m, def)
 		// Consuming an item out of combat is a real action — log it like the battle path.
 		g.LogMessageCat(core.ItemUseMessage(m.Name, def, res), core.RestorativeUseCategory(res))
-		audio.Play(audio.SoundHeal)
+		if res.HP > 0 {
+			audio.Play(audio.SoundHeal) // cue only on a real HP heal, matching the battle applyItem path
+		}
 	case g.UsePendingSkill != core.SkillNone:
 		skill := g.UsePendingSkill
 		c, ok := validMember(g, g.UsePendingCaster)

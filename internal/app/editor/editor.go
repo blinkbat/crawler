@@ -519,6 +519,17 @@ const (
 	modalWallFaces
 	// modalHelp is the read-only keyboard-shortcut reference (? key). See help.go.
 	modalHelp
+	// modalCrystalEdit is the per-crystal editor: floor (Level) stepper + delete.
+	// modalCrystalIdx indexes area.CrystalSpawns; closes if dropped.
+	modalCrystalEdit
+	// modalGoto is the jump-to-tile dialog: type an X,Z to recenter, or pick/save a
+	// view bookmark. See gotoedit.go.
+	modalGoto
+	// modalStats is the read-only Map Stats report (tile mix, counts, encounter
+	// budget). See statsview.go.
+	modalStats
+	// modalPrefabs is the persistent stamp library (save/load/delete). See prefab.go.
+	modalPrefabs
 	// modalCount is the enum count sentinel (modalHandlers coverage assert in
 	// draw.go). Must stay last; not a dispatchable modal.
 	modalCount
@@ -546,6 +557,7 @@ const (
 	dragDoor
 	dragSelect     // marquee region drag (toolSelect): sets the copy/paste selection on release
 	dragSelectMove // drag INSIDE a committed marquee (toolSelect): moves its contents on release
+	dragMeasure    // ruler drag (toolMeasure): live tile-span readout, commits nothing
 )
 
 // toolMode is the active grid-paint tool. While Brush is active, modifiers
@@ -560,6 +572,7 @@ const (
 	toolFlood                  // flood-fill the connected region
 	toolPick                   // eyedropper: sample the cell's char into the brush
 	toolSelect                 // marquee: drag a region to copy (Ctrl+C) / paste (Ctrl+V)
+	toolMeasure                // ruler: drag to read the spanned tile W×H + distance (no edit)
 	// toolModeCount sizes the label/help tables (init-asserted below); keep last.
 	toolModeCount
 )
@@ -571,8 +584,9 @@ var toolModeLabels = [toolModeCount]string{
 	toolRect:   "Rect",
 	toolBox:    "Box",
 	toolFlood:  "Flood",
-	toolPick:   "Pick",
-	toolSelect: "Select",
+	toolPick:    "Pick",
+	toolSelect:  "Select",
+	toolMeasure: "Measure",
 }
 
 // toolModeHelp is the hover-tooltip text per tool, indexed by toolMode.
@@ -582,8 +596,9 @@ var toolModeHelp = [toolModeCount]string{
 	toolRect:   "Drag a filled rectangle.",
 	toolBox:    "Drag a hollow rectangle — handy for room walls.",
 	toolFlood:  "Flood-fill the connected same-tile region.",
-	toolPick:   "Eyedropper — sample the clicked tile into the brush.",
-	toolSelect: "Marquee — drag a region, then Ctrl+C to copy, Ctrl+V to paste.",
+	toolPick:    "Eyedropper — sample the clicked tile into the brush.",
+	toolSelect:  "Marquee — drag a region, then Ctrl+C to copy, Ctrl+V to paste.",
+	toolMeasure: "Ruler — drag to read the spanned tile size + distance (doesn't edit).",
 }
 
 // init trips at startup if a toolMode lacks a toolbar caption or hover help — the
@@ -639,6 +654,10 @@ type State struct {
 	// ramp tool (left-click places, right-click clears).
 	editLevel int
 	rampMode  bool
+	// sculptMode (Elevation layer): left-drag raises each brushed column +1 relative to
+	// its current top, right-click lowers −1 — the terracing gesture, vs the "Set Height"
+	// brush's absolute stamp. Mutually exclusive with rampMode.
+	sculptMode bool
 	// levelHidden[L] hides every tile on level L (per-level eye), except a ramp
 	// connecting to the active level. Always-on Photoshop-style levels model.
 	levelHidden [maxEditLevel + 1]bool
@@ -659,6 +678,9 @@ type State struct {
 	modalPaths    []string
 	modalCursor   int
 	modalFilename string
+	// openFilter is the Open-modal's live type-to-filter query (case-insensitive map-id
+	// substring); empty = show all. modalCursor indexes the FILTERED view, not modalPaths.
+	openFilter string
 	modalRenaming string
 	// modalRenamingActive is the Open-modal rename sub-mode flag. Separate from the
 	// modalRenaming text so backspacing the field to empty doesn't silently exit rename
@@ -681,6 +703,20 @@ type State struct {
 	modalDialogTriggerIdx int
 	// modalLocationIdx indexes the Locations entry being edited; -1 outside the flow.
 	modalLocationIdx int
+	// modalCrystalIdx indexes the CrystalSpawns entry being edited; -1 outside the flow.
+	modalCrystalIdx int
+	// Jump-to-tile modal (modalGoto): gotoX/gotoZ are the edit buffers, gotoField picks
+	// the focused one (0=X,1=Z). bookmarks are session view marks (click to recenter).
+	gotoX, gotoZ   string
+	gotoField      int
+	bookmarks      []gotoBookmark
+	bookmarkCursor int // scroll anchor for the bookmark list (mouse-wheel scrolled)
+	// Prefab library modal (modalPrefabs): prefabName is the save-name buffer,
+	// prefabNameFocus routes typing to it, prefabPaths caches the on-disk listing.
+	prefabName      string
+	prefabNameFocus bool
+	prefabPaths     []string
+	prefabCursor    int
 	// modalDialogActionOnChoice: action editor targets the choice's EndAction when
 	// true, else the node's. See currentDialogActionHolder.
 	modalDialogActionOnChoice bool
@@ -692,6 +728,14 @@ type State struct {
 	// bank ONE step on the first real edit (focusDialogNumeric / pumpDialogNumeric).
 	dialogNumUndoBefore core.AreaDefinition
 	dialogNumSnapDone   bool
+	// textUndoBefore / textUndoFocus / textUndoSnapped give focused PROSE text fields
+	// (map Name/Quiet, door + location names/targets, dialog text/labels) the same
+	// lazy single-step undo: armTextUndo snapshots the area when the field gains focus,
+	// onFocusedTextEdit banks ONE step on the first keystroke. textUndoFocus is the
+	// focus the snapshot belongs to (focusNone = disarmed).
+	textUndoBefore  core.AreaDefinition
+	textUndoFocus   focusField
+	textUndoSnapped bool
 	// New-map dialog state (in-progress dims + default floor char), committed by
 	// blankArea on confirm — not the area until then.
 	modalNewWidth  int
@@ -757,6 +801,10 @@ type State struct {
 	// dirty when the working state matches disk again.
 	baseline core.AreaDefinition
 
+	// autosaveTimer accumulates edited-but-unsaved seconds; at autosaveInterval it
+	// writes a crash-recovery snapshot (tickAutosave). Reset on save / clean state.
+	autosaveTimer float32
+
 	statusLog []statusEntry
 	// statusHistory is the rolling recall buffer (newest last, capped) so a message
 	// that auto-expired can still be read; showStatusLog toggles its panel (L key).
@@ -764,10 +812,20 @@ type State struct {
 	showStatusLog bool
 
 	brushSize int
+	// scatterDensity (Decor/Props layers, brush size > 1): 0 = off, else the per-cell
+	// stamp probability so a big brush lays organic foliage fields instead of a solid
+	// block. Cycled by the toolbar Scatter button.
+	scatterDensity float32
 	// brushYaw is the pending prop facing new Props paints inherit: -1 = auto
 	// (procedural yaw), else a step in [0, core.PropYawSteps). Cycled with R on the
 	// Props layer; R over an existing prop rotates that tile instead.
 	brushYaw int
+
+	// mirrorX / mirrorZ mirror every grid-layer stamp across the map's vertical /
+	// horizontal center axis (live symmetry paint). mirroring guards applyTool against
+	// re-entering itself while stamping the mirrored partners.
+	mirrorX, mirrorZ bool
+	mirroring        bool
 
 	// tool is the active grid-paint tool. Zero value toolBrush = freehand paint.
 	tool toolMode
@@ -833,6 +891,10 @@ type State struct {
 	// showDoorLinks toggles the door-link diagnostic overlay (connectors +
 	// warning rings on unresolved targets).
 	showDoorLinks bool
+	// showHeatmap toggles the coverage heatmap (top-down): tiles tinted by walking
+	// distance from the start, with unreachable pockets flagged. Reveals dead
+	// stretches + pacing a binary reachability check can't.
+	showHeatmap bool
 
 	// isoView swaps to a rotatable 3D block view; suppresses the top-down
 	// screen→tile path (cellAt early-returns). See iso.go.
@@ -972,6 +1034,24 @@ func New() State {
 // NewDefault is the title-screen entry: reopen the last map worked on (per
 // editorprefs), falling back to a blank map when there's no valid last map.
 func NewDefault() State {
+	// A leftover recovery snapshot (crash / abrupt quit before the last save) takes
+	// priority — reopen it with dirty set so the edits aren't lost.
+	if area, ok := loadRecovery(); ok {
+		s := NewFromArea(area)
+		if area.Path != "" {
+			if disk, err := core.LoadArea(area.Path); err == nil {
+				s.baseline = core.CloneArea(disk) // revert/dirty compare against real disk state
+			}
+		}
+		surfaceAreaLevels(&s)
+		if core.AreaContentEqual(s.area, s.baseline) {
+			clearRecovery() // stale snapshot equals disk — drop it and open normally
+		} else {
+			s.dirty = true
+			s.flash("Recovered unsaved changes — Save to keep them")
+			return s
+		}
+	}
 	if path := LastMapPath(); path != "" {
 		if area, err := core.LoadArea(path); err == nil {
 			s := NewFromArea(area)
@@ -1031,6 +1111,7 @@ func freshState(a core.AreaDefinition) State {
 		modalDialogCondIdx:    -1,
 		modalDialogTriggerIdx: -1,
 		modalLocationIdx:      -1,
+		modalCrystalIdx:       -1,
 	}
 }
 
@@ -1124,6 +1205,14 @@ func Update(s *State, dt float32) Action {
 	s.layout()
 
 	tickStatusLog(s, dt)
+	tickAutosave(s, dt)
+
+	// Disarm the prose-text-field undo session once its field loses focus, so
+	// re-entering the SAME field later arms a fresh snapshot (armTextUndo keys on
+	// focus identity). Runs before input so a same-frame refocus re-arms cleanly.
+	if s.focus == focusNone && s.textUndoFocus != focusNone {
+		s.textUndoFocus = focusNone
+	}
 
 	if s.modal != modalNone {
 		return updateModal(s)
@@ -1239,6 +1328,21 @@ func (s *State) pushStatus(msg string, warn bool) {
 	s.statusLog = append(s.statusLog, statusEntry{msg: msg, timer: statusLogLifetime, warn: warn})
 	if len(s.statusLog) > statusLogMaxEntries {
 		s.statusLog = s.statusLog[len(s.statusLog)-statusLogMaxEntries:]
+	}
+}
+
+// tickAutosave writes a crash-recovery snapshot once the map has been dirty for
+// autosaveInterval seconds, then re-arms. A clean map clears the timer (a manual
+// save already dropped the recovery file via writeAreaTo).
+func tickAutosave(s *State, dt float32) {
+	if !s.dirty {
+		s.autosaveTimer = 0
+		return
+	}
+	s.autosaveTimer += dt
+	if s.autosaveTimer >= autosaveInterval {
+		s.autosaveTimer = 0
+		writeRecovery(s.area)
 	}
 }
 

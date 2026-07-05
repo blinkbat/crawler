@@ -189,12 +189,19 @@ func removeDialogChoice(s *State, idx int) {
 }
 
 func clampModalCursor(s *State, count int) {
-	if s.modalCursor >= count {
-		s.modalCursor = count - 1
+	s.modalCursor = clampCursor(s.modalCursor, count)
+}
+
+// clampCursor pins a list cursor to [0,count-1] (0 for an empty list). Shared by
+// every modal that tracks its own cursor field (modalCursor, prefabCursor, …).
+func clampCursor(cur, count int) int {
+	if cur >= count {
+		cur = count - 1
 	}
-	if s.modalCursor < 0 {
-		s.modalCursor = 0
+	if cur < 0 {
+		cur = 0
 	}
+	return cur
 }
 
 // restoreModalCursor points the cursor at idx when in [0,count), else 0.

@@ -213,9 +213,9 @@ const (
 	soundColHeightInset  = float32(110) // total height removed from the card for columns
 	// Per-row action-button widths, shared by the saved-sounds list and the
 	// assignments column so the two right-anchored button groups size identically.
-	soundRowEditBtnW  = float32(38) // wider "Edit" label button
-	soundRowCueBtnW   = float32(32) // square Play / Delete cue button
-	soundRowCycleBtnW = float32(24) // narrow cycle-left/right arrow button
+	soundRowEditBtnW   = float32(38) // wider "Edit" label button
+	soundRowCueBtnW    = float32(32) // square Play / Delete cue button
+	soundRowAssignBtnW = float32(70) // "Assign ▼" cue-assignment picker button
 )
 
 // soundSliderMetrics is the sound creator's slider-row geometry — an implicit layout↔draw
@@ -273,10 +273,9 @@ type soundListRowRect struct {
 
 // soundAssignRowRect bundles the row + per-row buttons for one cue assignment.
 type soundAssignRowRect struct {
-	Row        rl.Rectangle
-	Play       rl.Rectangle
-	CycleLeft  rl.Rectangle
-	CycleRight rl.Rectangle
+	Row    rl.Rectangle
+	Play   rl.Rectangle
+	Assign rl.Rectangle // opens the assignment dropdown (ddSoundAssign)
 }
 
 // soundLayout caches the per-frame rects for every clickable element. Rebuilt
@@ -419,15 +418,13 @@ func computeSoundLayout(savedSounds []string, listCursor, assignCursor int, para
 	for i := l.assignTopRow; i < l.assignEnd; i++ {
 		row := assignBaseRows[i]
 		btns := rightButtonRow(row, 12, 24, 34,
-			rowButtonSpec{soundRowCueBtnW, 4},   // Play
-			rowButtonSpec{soundRowCycleBtnW, 8}, // CycleLeft
-			rowButtonSpec{soundRowCycleBtnW, 0}, // CycleRight
+			rowButtonSpec{soundRowCueBtnW, 6},    // Play
+			rowButtonSpec{soundRowAssignBtnW, 0}, // Assign ▼ (opens the dropdown)
 		)
 		l.assignRows[i] = soundAssignRowRect{
-			Row:        row,
-			Play:       btns[0],
-			CycleLeft:  btns[1],
-			CycleRight: btns[2],
+			Row:    row,
+			Play:   btns[0],
+			Assign: btns[1],
 		}
 	}
 
@@ -584,12 +581,9 @@ func handleSoundMouseClick(s *State, mp rl.Vector2, l *soundLayout, savedSounds 
 			audio.Play(assignableCueList[i])
 			return soundPanelAssign, i
 		}
-		if pointIn(mp, r.CycleLeft) {
-			cycleCueAssignment(s, assignableCueList[i], -1)
-			return soundPanelAssign, i
-		}
-		if pointIn(mp, r.CycleRight) {
-			cycleCueAssignment(s, assignableCueList[i], +1)
+		if pointIn(mp, r.Assign) {
+			s.soundCursor = i // the builder reads the cue from soundCursor
+			openDropdownBelow(s, ddSoundAssign, r.Assign)
 			return soundPanelAssign, i
 		}
 		if pointIn(mp, r.Row) {
@@ -698,38 +692,54 @@ func updateSoundsAssignKeys(s *State) {
 	}
 	s.soundCursor = input.CursorUpDown(s.soundCursor, len(cues))
 	cue := cues[s.soundCursor]
-	if delta := input.CursorLeftRight(); delta != 0 {
-		cycleCueAssignment(s, cue, delta)
-	}
-	if editorCommitPressed() || rl.IsKeyPressed(rl.KeySpace) {
+	if rl.IsKeyPressed(rl.KeySpace) {
 		audio.Play(cue)
+	}
+	if editorCommitPressed() {
+		openSoundAssignDropdown(s) // Enter opens the assignment picker (generic Up/Down/Enter/Esc)
 	}
 }
 
-// cycleCueAssignment advances the cue's assignment through "(default)" →
-// user_sound_1 → … → "(default)" in sorted order.
-func cycleCueAssignment(s *State, cue audio.Sound, delta int) {
-	options := []string{""} // first slot = revert-to-default
-	// Read the State caches (refreshed by refreshSoundCaches), not disk — draw/update
-	// already source from these, and a keystroke shouldn't re-read assignments.txt.
-	options = append(options, s.soundSavedCache...)
+// openSoundAssignDropdown arms the cue-assignment picker anchored on the current
+// row's Assign button (falls back to the column when scrolled off-window).
+func openSoundAssignDropdown(s *State) {
+	l := computeSoundLayout(s.soundSavedCache, soundListCursor(s), soundAssignCursor(s), s.soundParamScroll)
+	if s.soundCursor >= l.assignTopRow && s.soundCursor < l.assignEnd {
+		openDropdownBelow(s, ddSoundAssign, l.assignRows[s.soundCursor].Assign)
+		return
+	}
+	openDropdownBelow(s, ddSoundAssign, l.assignCol)
+}
+
+// soundAssignEntries builds the cue-assignment picker: "(default)" then every saved
+// user sound, choosing binds it to the cue at soundCursor. Marks the current pick.
+func soundAssignEntries(s *State) []dropdownEntry {
+	cues := assignableCueList
+	if s.soundCursor < 0 || s.soundCursor >= len(cues) {
+		return nil
+	}
+	cue := cues[s.soundCursor]
 	current := s.soundAssignCache[audio.SoundCanonicalName(cue)]
-	idx, found := 0, false
-	for i, opt := range options {
-		if opt == current {
-			idx, found = i, true
-			break
-		}
+	out := []dropdownEntry{{
+		label:  "(default)",
+		active: func(*State) bool { return current == "" },
+		apply:  func(s *State) { setCueAssignment(s, cue, "") },
+	}}
+	for _, name := range s.soundSavedCache {
+		name := name
+		out = append(out, dropdownEntry{
+			label:  name,
+			active: func(*State) bool { return current == name },
+			apply:  func(s *State) { setCueAssignment(s, cue, name) },
+		})
 	}
-	// A still-assigned sound deleted off disk won't appear in soundSavedCache; add it
-	// as its own slot so the cycle steps OFF its real value rather than off the
-	// "(default)" slot (which would silently discard the assignment on the first keypress).
-	if !found && current != "" {
-		options = append(options, current)
-		idx = len(options) - 1
-	}
-	idx = core.WrapIndex(idx+delta, len(options))
-	failed, err := audio.AssignUserSound(cue, options[idx])
+	return out
+}
+
+// setCueAssignment binds cue to the named user sound ("" = revert to default),
+// surfacing errors and refreshing the caches.
+func setCueAssignment(s *State, cue audio.Sound, name string) {
+	failed, err := audio.AssignUserSound(cue, name)
 	if err != nil {
 		s.flash("Assign failed: " + err.Error())
 		return
@@ -915,8 +925,7 @@ func drawSoundsAssignCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 			rl.NewVector2(r.Row.X+8, r.Row.Y+24),
 			soundFontHint, 1, theme.TextHint)
 		drawButton(font, r.Play, ">", false)
-		drawButton(font, r.CycleLeft, "<", false)
-		drawButton(font, r.CycleRight, ">", false)
+		drawButton(font, r.Assign, "Assign"+dropdownArrowSuffix, s.dropdown.owner == ddSoundAssign && s.soundCursor == i)
 	}
 	drawSoundColumnScrollHints(font, theme, l.assignCol, l.assignTopRow, len(assignableCueList)-l.assignEnd)
 }

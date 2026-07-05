@@ -643,11 +643,14 @@ func updateIsoCanvas(s *State, mp rl.Vector2) {
 		startDrag(s, hx, hz, ctrl, shift) // block starting a paint/place on a wrong-level column
 	}
 	if rl.IsMouseButtonReleased(rl.MouseRightButton) && !s.rightDragMoved {
-		if s.rampMode {
+		switch {
+		case s.rampMode:
 			isoClearRamp(s, hx, hz)
-			return
+		case s.sculptMode && s.layer == LayerElevation:
+			sculptLowerAt(s, hx, hz)
+		default:
+			openContextMenu(s, mp.X, mp.Y, hx, hz)
 		}
-		openContextMenu(s, mp.X, mp.Y, hx, hz)
 	}
 }
 

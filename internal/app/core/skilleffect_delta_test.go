@@ -35,7 +35,7 @@ func TestSkillEffectDeltaFieldsAreCarried(t *testing.T) {
 			setSentinel(dv)
 
 			skillTierTable[probeSkill] = []SkillTierUpgrade{
-				{Tier: 1, Label: "probe", Cost: 1, Effect: delta},
+				{Tier: 1, Label: "probe", Effect: delta},
 			}
 
 			if tierModOnly[field.Name] {

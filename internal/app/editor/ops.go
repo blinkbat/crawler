@@ -51,14 +51,35 @@ func footprintPlaceable(s *State, x, z int, footprint []core.MultiTileOffset) bo
 	return footprintBlocker(s, x, z, footprint, s.layer == LayerDecor) == ""
 }
 
-// applyTool runs the active layer's selected brush at (x,z): grid layers set the
-// char, the entity layer fires the placement tool.
+// applyTool runs the active layer's selected brush at (x,z), then mirrors the stamp
+// across the active symmetry axes (grid layers only). Shared by brush/rect/line.
 func applyTool(s *State, x, z int) {
+	applyToolCell(s, x, z)
+	// Live mirror paint: replay the stamp at the mirrored partner cells. Guarded so
+	// applyToolCell's own callees can't recurse, and skipped for entities.
+	if s.mirroring || !isGridLayer(s.layer) || (!s.mirrorX && !s.mirrorZ) {
+		return
+	}
+	s.mirroring = true
+	for _, p := range mirrorPartners(s, x, z) {
+		applyToolCell(s, p[0], p[1])
+	}
+	s.mirroring = false
+}
+
+// applyToolCell stamps the active layer's selected brush at a single (x,z): grid
+// layers set the char, the entity layer fires the placement tool.
+func applyToolCell(s *State, x, z int) {
 	if !s.area.InBounds(x, z) {
 		return
 	}
 	// Reveal the layer so a stroke on a hidden layer isn't invisible.
 	revealActiveLayer(s)
+	// Sculpt mode raises the column instead of stamping the brush's absolute level.
+	if s.sculptMode && s.layer == LayerElevation {
+		sculptColumn(s, x, z, +1)
+		return
+	}
 	brush := s.activeBrush()
 	if brush.Erase {
 		eraseAt(s, x, z)
@@ -69,11 +90,61 @@ func applyTool(s *State, x, z int) {
 	layerDefs[s.layer].apply(s, x, z, brush)
 }
 
+// mirrorPartners returns the distinct mirrored coordinates of (x,z) across the active
+// symmetry axes (excluding the original and any center-axis duplicate).
+func mirrorPartners(s *State, x, z int) [][2]int {
+	mx, mz := s.area.Width-1-x, s.area.Height-1-z
+	seen := map[[2]int]bool{{x, z}: true}
+	var out [][2]int
+	add := func(px, pz int) {
+		k := [2]int{px, pz}
+		if !seen[k] {
+			seen[k] = true
+			out = append(out, k)
+		}
+	}
+	if s.mirrorX {
+		add(mx, z)
+	}
+	if s.mirrorZ {
+		add(x, mz)
+	}
+	if s.mirrorX && s.mirrorZ {
+		add(mx, mz)
+	}
+	return out
+}
+
 // layerStampsActiveLevel reports whether painting on layer lifts the tile to the
 // active level. Floor/decor/props/ceiling define a floor's level; walls/elevation/
 // entities do not (see the stampsLevel field of layerDefs in layerdef.go).
 func layerStampsActiveLevel(layer Layer) bool {
 	return layerDefs[layer].stampsLevel
+}
+
+// sculptLowerAt lowers the brush footprint at (x,z) by one level (sculpt right-click),
+// banking one undo only on a real change (shared lazy-commit tail).
+func sculptLowerAt(s *State, x, z int) {
+	commitPaintIfChanged(s, func() {
+		revealActiveLayer(s)
+		forEachBrushCell(s, x, z, func(cx, cz int) { sculptColumn(s, cx, cz, -1) })
+	})
+}
+
+// sculptColumn bumps column (x,z)'s ground by dir levels relative to its current top
+// (clamped), honoring voxel vs heightfield via setTileGroundLevel. Sets dirty on a
+// real change; undo is banked lazily by the caller (strokePaint / commitPaintIfChanged).
+func sculptColumn(s *State, x, z, dir int) {
+	if !s.area.InBounds(x, z) {
+		return
+	}
+	cur := s.area.ElevationLevelAt(x, z)
+	nl := clampLevel(cur + dir)
+	if nl == cur {
+		return
+	}
+	setTileGroundLevel(s, x, z, nl)
+	s.dirty = true
 }
 
 // stampActiveLevel lifts tile (x,z) to the active level — shared by applyTool,
@@ -1026,6 +1097,102 @@ func cutSelection(s *State) {
 	s.flash(copiedRegionFlash("Cut", s.clipboard, s.clipEntities))
 }
 
+// flipClipboardH / flipClipboardV / rotateClipboardCW transform the copied region
+// (tiles + captured entities) in place so the next paste places it mirrored/rotated —
+// the fast path for symmetric rooms, mirrored corridors, and rotated wings. Facings
+// (ramps, prop yaw, cliff faces, door orientation) are remapped by the region + entity
+// transforms so a flipped door still opens outward, etc.
+// clipboardReady guards the clipboard-transform ops, flashing the shared prompt when
+// nothing has been copied yet.
+func clipboardReady(s *State) bool {
+	if s.clipboard.Empty() {
+		s.flash("Copy a region first (Select tool + Ctrl+C)")
+		return false
+	}
+	return true
+}
+
+func flipClipboardH(s *State) {
+	if !clipboardReady(s) {
+		return
+	}
+	w := s.clipboard.W
+	s.clipboard = s.clipboard.FlipHorizontal()
+	flipEntitiesH(&s.clipEntities, w)
+	s.flash("Flipped clipboard ↔ — Ctrl+V to paste")
+}
+
+func flipClipboardV(s *State) {
+	if !clipboardReady(s) {
+		return
+	}
+	h := s.clipboard.H
+	s.clipboard = s.clipboard.FlipVertical()
+	flipEntitiesV(&s.clipEntities, h)
+	s.flash("Flipped clipboard ↕ — Ctrl+V to paste")
+}
+
+func rotateClipboardCW(s *State) {
+	if !clipboardReady(s) {
+		return
+	}
+	oldH := s.clipboard.H
+	s.clipboard = s.clipboard.Rotate90CW()
+	rotateEntitiesCW(&s.clipEntities, oldH)
+	s.flash("Rotated clipboard 90° — Ctrl+V to paste")
+}
+
+// flipEntitiesH / flipEntitiesV / rotateEntitiesCW remap the captured region-local
+// spawns to match a clipboard transform (door facings turn with the geometry).
+func flipEntitiesH(e *regionEntities, w int) {
+	for i := range e.packs {
+		e.packs[i].TileX = w - 1 - e.packs[i].TileX
+	}
+	for i := range e.chests {
+		e.chests[i].TileX = w - 1 - e.chests[i].TileX
+	}
+	for i := range e.crystals {
+		e.crystals[i].TileX = w - 1 - e.crystals[i].TileX
+	}
+	for i := range e.doors {
+		e.doors[i].TileX = w - 1 - e.doors[i].TileX
+		e.doors[i].Facing = core.FlipFacingH(e.doors[i].Facing)
+	}
+}
+
+func flipEntitiesV(e *regionEntities, h int) {
+	for i := range e.packs {
+		e.packs[i].TileZ = h - 1 - e.packs[i].TileZ
+	}
+	for i := range e.chests {
+		e.chests[i].TileZ = h - 1 - e.chests[i].TileZ
+	}
+	for i := range e.crystals {
+		e.crystals[i].TileZ = h - 1 - e.crystals[i].TileZ
+	}
+	for i := range e.doors {
+		e.doors[i].TileZ = h - 1 - e.doors[i].TileZ
+		e.doors[i].Facing = core.FlipFacingV(e.doors[i].Facing)
+	}
+}
+
+func rotateEntitiesCW(e *regionEntities, oldH int) {
+	rot := func(x, z int) (int, int) { return oldH - 1 - z, x }
+	for i := range e.packs {
+		e.packs[i].TileX, e.packs[i].TileZ = rot(e.packs[i].TileX, e.packs[i].TileZ)
+	}
+	for i := range e.chests {
+		e.chests[i].TileX, e.chests[i].TileZ = rot(e.chests[i].TileX, e.chests[i].TileZ)
+	}
+	for i := range e.crystals {
+		e.crystals[i].TileX, e.crystals[i].TileZ = rot(e.crystals[i].TileX, e.crystals[i].TileZ)
+	}
+	for i := range e.doors {
+		e.doors[i].TileX, e.doors[i].TileZ = rot(e.doors[i].TileX, e.doors[i].TileZ)
+		e.doors[i].Facing = core.RotateFacingCW(e.doors[i].Facing)
+	}
+}
+
 // hasSelection / hasClipboard back the Edit-menu enable predicates for the region
 // verbs so a greyed row can't be fired with nothing selected / nothing copied.
 func hasSelection(s *State) bool { return s.selActive }
@@ -1371,6 +1538,21 @@ func resizeLayer(old []string, oldW, oldH, newW, newH int, fill byte) []string {
 	return rows
 }
 
+// backupExt is the sibling suffix a map's prior on-disk version is copied to before
+// an overwrite (foo.map → foo.map.bak). Not .map, so it never shows in the Open list.
+const backupExt = ".bak"
+
+// backupBeforeOverwrite copies the file already at path to a sibling .bak before it's
+// overwritten, so a bad save (or regret) can be recovered by hand. Best-effort: a
+// missing prior file (first save) or copy failure is silently ignored.
+func backupBeforeOverwrite(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(path+backupExt, data, core.AssetFileMode)
+}
+
 // writeAreaTo serializes the area to path and resets the dirty-tracking baseline.
 // Shared serialize/write/baseline core of saveTo / saveCurrent / confirmDirtySave.
 func writeAreaTo(s *State, path string) error {
@@ -1378,14 +1560,47 @@ func writeAreaTo(s *State, path string) error {
 	if err != nil {
 		return err
 	}
+	backupBeforeOverwrite(path) // keep the prior version as .bak (no-op on first save)
 	if err := mapfile.Save(path, mf); err != nil {
 		return err
 	}
 	s.area.Path = path
 	s.baseline = core.CloneArea(s.area)
 	s.dirty = false
+	s.autosaveTimer = 0
+	clearRecovery() // persisted to disk — no pending crash-recovery snapshot
 	rememberLastMap(path) // reopen here next session (NewDefault)
 	return nil
+}
+
+// adjustSpawnLevel steps a placed spawn's floor (Level) by dir, clamped, banking one
+// undo + dirty + flash on a real change. Shared by the pack/chest/door/crystal editors
+// so a placed entity's voxel floor can be re-assigned after placement, not only at
+// drop time (via the active edit level).
+func adjustSpawnLevel(s *State, level *int, dir int) {
+	nv := clampLevel(*level + dir)
+	if nv == *level {
+		return
+	}
+	pushUndo(s)
+	*level = nv
+	s.dirty = true
+	s.flash("Floor " + signedLevelLabel(nv))
+}
+
+// revertToSaved discards unsaved edits, restoring the area to baseline (the last
+// loaded/saved state). Banks one undo step so the revert itself is reversible.
+func revertToSaved(s *State) {
+	if !s.dirty {
+		s.flash("No unsaved changes to revert")
+		return
+	}
+	pushUndo(s)
+	s.area = core.CloneArea(s.baseline)
+	invalidateContentCaches(s)
+	clearSelection(s) // edits reverted — a stale marquee could outline changed tiles
+	s.dirty = false
+	s.flash("Reverted to last saved")
 }
 
 // saveCurrent writes to the area's existing path. If the area has never been
@@ -1456,6 +1671,7 @@ func openModal(s *State, m modalKind) {
 		// Newest-first: the last-touched file is the likeliest Open target.
 		paths, _ := mapfile.ListByModTime(core.MapsDir())
 		s.modalPaths = paths
+		s.openFilter = ""
 	}
 }
 
@@ -1693,6 +1909,17 @@ func fillEntireLayer(s *State) {
 	guardStartTileAfterBulkFill(s)
 	s.dirty = true
 	s.flash("Filled " + layerName(s.layer))
+}
+
+// measureLabel formats the ruler readout between two tiles: the inclusive spanned
+// W×H, the signed deltas, and the Chebyshev (grid-step) distance.
+func measureLabel(x0, z0, x1, z1 int) string {
+	dx, dz := x1-x0, z1-z0
+	steps := core.AbsInt(dx)
+	if az := core.AbsInt(dz); az > steps {
+		steps = az
+	}
+	return fmt.Sprintf("%d×%d tiles · Δ(%+d,%+d) · %d steps", core.AbsInt(dx)+1, core.AbsInt(dz)+1, dx, dz, steps)
 }
 
 // centerViewOnTile recenters the view so (tx, tz) sits in the middle of the grid
@@ -2173,6 +2400,9 @@ func performNewMap(s *State, w, h int, floor byte) {
 	s.redo = nil
 	invalidateContentCaches(s) // fresh area — rebuild reachability + epoch caches lazily
 	s.dirty = false
+	s.autosaveTimer = 0
+	s.bookmarks = nil // view bookmarks are map-specific
+	clearRecovery() // fresh map — discard any stale recovery snapshot
 	clearSelection(s) // new map — old selection coords no longer apply
 	// Reset Levels-panel / active-floor state (shared with openSelectedMap) so a stale
 	// editLevel can't lift the first paint onto a nonexistent floor.

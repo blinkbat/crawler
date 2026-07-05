@@ -522,3 +522,237 @@ func (a *AreaDefinition) pasteRegionFaces(r TileRegion, atX, atZ int) {
 	a.FaceOverrides = kept
 	a.faceOverrideIdx = nil // invalidate the lazy (x,z)->index lookup
 }
+
+// --- Region transforms (editor flip / rotate) -----------------------------------
+//
+// FlipHorizontal / FlipVertical / Rotate90CW return a transformed copy of the region
+// for the editor's clipboard flip/rotate. Every parallel plane/grid moves in lockstep
+// and the direction-carrying data (Floor ramp arrows, prop-yaw steps, cliff-face
+// overrides) is remapped to the new orientation. Regions produced by CopyRegion are
+// rectangular (full-width rows), which these assume; ragged fixtures degrade gracefully.
+
+// regionFloorLayer is Floor's index in gridLayers() order (Walls, Floor, Decor,
+// Props, Ceiling, Elevation) — the only layer whose chars encode a direction (ramp
+// arrows). Init-asserted against gridLayers() so a reorder can't silently misroute
+// the ramp remap onto the wrong layer.
+const regionFloorLayer = 1
+
+func init() {
+	var a AreaDefinition
+	if a.gridLayerIndex(&a.Floor) != regionFloorLayer {
+		panic("core: regionFloorLayer must equal Floor's index in gridLayers() — the region ramp remap would target the wrong layer")
+	}
+}
+
+// FlipFacingH / FlipFacingV / RotateFacingCW map a cardinal facing under a left-right
+// mirror (E↔W), a top-bottom mirror (N↔S), and a 90° clockwise turn (N→E→S→W). Shared
+// by the region transforms and the editor's entity/door remap.
+func FlipFacingH(f int) int {
+	switch NormalizeFacing(f) {
+	case East:
+		return West
+	case West:
+		return East
+	}
+	return NormalizeFacing(f)
+}
+
+func FlipFacingV(f int) int {
+	switch NormalizeFacing(f) {
+	case North:
+		return South
+	case South:
+		return North
+	}
+	return NormalizeFacing(f)
+}
+
+func RotateFacingCW(f int) int { return (NormalizeFacing(f) + 1) % FacingCount }
+
+func reverseRow(s string) string {
+	b := []byte(s)
+	for i, j := 0, len(b)-1; i < j; i, j = i+1, j-1 {
+		b[i], b[j] = b[j], b[i]
+	}
+	return string(b)
+}
+
+// reverseEachRow reverses every row's bytes (a horizontal mirror of a grid).
+func reverseEachRow(rows []string) []string {
+	if rows == nil {
+		return nil
+	}
+	out := make([]string, len(rows))
+	for i, r := range rows {
+		out[i] = reverseRow(r)
+	}
+	return out
+}
+
+// reverseRowOrder reverses the order of rows (a vertical mirror of a grid).
+func reverseRowOrder(rows []string) []string {
+	if rows == nil {
+		return nil
+	}
+	out := make([]string, len(rows))
+	for i := range rows {
+		out[len(rows)-1-i] = rows[i]
+	}
+	return out
+}
+
+func mapPlanes(planes [][]string, fn func([]string) []string) [][]string {
+	if planes == nil {
+		return nil
+	}
+	out := make([][]string, len(planes))
+	for L := range planes {
+		out[L] = fn(planes[L])
+	}
+	return out
+}
+
+// remapRowChars rewrites every byte of every row through fn (in place on the slice).
+func remapRowChars(rows []string, fn func(byte) byte) {
+	for i, r := range rows {
+		b := []byte(r)
+		for j := range b {
+			b[j] = fn(b[j])
+		}
+		rows[i] = string(b)
+	}
+}
+
+// remapRampChar re-points a ramp arrow through facingMap; non-ramp chars pass through.
+func remapRampChar(c byte, facingMap func(int) int) byte {
+	if f, ok := RampAscentFacing(c); ok {
+		return RampCharForFacing(facingMap(f))
+	}
+	return c
+}
+
+// remapYawChar re-steps an authored prop-yaw char through stepMap (mod PropYawSteps);
+// auto/invalid chars pass through.
+func remapYawChar(c byte, stepMap func(int) int) byte {
+	if step, ok := propYawStepFromChar(c); ok {
+		s := ((stepMap(step) % PropYawSteps) + PropYawSteps) % PropYawSteps
+		return PropYawStepChar(s)
+	}
+	return c
+}
+
+// Yaw-step transforms for the region flip/rotate — expressed in PropYawSteps so
+// they track the authored-orientation resolution instead of hardcoding 30° math.
+// Horizontal mirror sends θ→180°-θ, vertical mirror θ→-θ, a 90° CW turn θ→θ+90°.
+func flipYawStepH(s int) int    { return PropYawSteps/2 - s }
+func flipYawStepV(s int) int    { return -s }
+func rotateYawStepCW(s int) int { return s + PropYawSteps/4 }
+
+// permuteSkins moves each face's skin to its transformed direction.
+func permuteSkins(s [FacingCount]byte, dirMap func(int) int) [FacingCount]byte {
+	var out [FacingCount]byte
+	for d := 0; d < FacingCount; d++ {
+		out[dirMap(d)] = s[d]
+	}
+	return out
+}
+
+// FlipHorizontal mirrors the region left↔right.
+func (r TileRegion) FlipHorizontal() TileRegion {
+	out := r
+	out.Layers = mapPlanes(r.Layers, reverseEachRow)
+	out.Solids = mapPlanes(r.Solids, reverseEachRow)
+	out.PropStack = mapPlanes(r.PropStack, reverseEachRow)
+	out.DecorStack = mapPlanes(r.DecorStack, reverseEachRow)
+	out.PropLevels = reverseEachRow(r.PropLevels)
+	out.DecorLevels = reverseEachRow(r.DecorLevels)
+	out.PropYaw = reverseEachRow(r.PropYaw)
+	if len(out.Layers) > regionFloorLayer {
+		remapRowChars(out.Layers[regionFloorLayer], func(c byte) byte { return remapRampChar(c, FlipFacingH) })
+	}
+	remapRowChars(out.PropYaw, func(c byte) byte { return remapYawChar(c, flipYawStepH) })
+	out.Faces = transformFaces(r.Faces, func(o FaceOverride) FaceOverride {
+		o.X = r.W - 1 - o.X
+		o.Skins = permuteSkins(o.Skins, FlipFacingH)
+		return o
+	})
+	return out
+}
+
+// FlipVertical mirrors the region top↔bottom.
+func (r TileRegion) FlipVertical() TileRegion {
+	out := r
+	out.Layers = mapPlanes(r.Layers, reverseRowOrder)
+	out.Solids = mapPlanes(r.Solids, reverseRowOrder)
+	out.PropStack = mapPlanes(r.PropStack, reverseRowOrder)
+	out.DecorStack = mapPlanes(r.DecorStack, reverseRowOrder)
+	out.PropLevels = reverseRowOrder(r.PropLevels)
+	out.DecorLevels = reverseRowOrder(r.DecorLevels)
+	out.PropYaw = reverseRowOrder(r.PropYaw)
+	if len(out.Layers) > regionFloorLayer {
+		remapRowChars(out.Layers[regionFloorLayer], func(c byte) byte { return remapRampChar(c, FlipFacingV) })
+	}
+	remapRowChars(out.PropYaw, func(c byte) byte { return remapYawChar(c, flipYawStepV) })
+	out.Faces = transformFaces(r.Faces, func(o FaceOverride) FaceOverride {
+		o.Z = r.H - 1 - o.Z
+		o.Skins = permuteSkins(o.Skins, FlipFacingV)
+		return o
+	})
+	return out
+}
+
+// Rotate90CW turns the region 90° clockwise (W and H swap).
+func (r TileRegion) Rotate90CW() TileRegion {
+	out := r
+	out.W, out.H = r.H, r.W
+	out.Layers = mapPlanes(r.Layers, func(rows []string) []string { return rotateGridCW(rows, r.W, r.H, TileOpen) })
+	out.Solids = mapPlanes(r.Solids, func(rows []string) []string { return rotateGridCW(rows, r.W, r.H, SolidAir) })
+	out.PropStack = mapPlanes(r.PropStack, func(rows []string) []string { return rotateGridCW(rows, r.W, r.H, TilePropEmpty) })
+	out.DecorStack = mapPlanes(r.DecorStack, func(rows []string) []string { return rotateGridCW(rows, r.W, r.H, DecorEmpty) })
+	out.PropLevels = rotateGridCW(r.PropLevels, r.W, r.H, PropLevelAuto)
+	out.DecorLevels = rotateGridCW(r.DecorLevels, r.W, r.H, PropLevelAuto)
+	out.PropYaw = rotateGridCW(r.PropYaw, r.W, r.H, PropYawAuto)
+	if len(out.Layers) > regionFloorLayer {
+		remapRowChars(out.Layers[regionFloorLayer], func(c byte) byte { return remapRampChar(c, RotateFacingCW) })
+	}
+	remapRowChars(out.PropYaw, func(c byte) byte { return remapYawChar(c, rotateYawStepCW) })
+	out.Faces = transformFaces(r.Faces, func(o FaceOverride) FaceOverride {
+		o.X, o.Z = r.H-1-o.Z, o.X
+		o.Skins = permuteSkins(o.Skins, RotateFacingCW)
+		return o
+	})
+	return out
+}
+
+// rotateGridCW rebuilds a w×h grid as an h-wide, w-tall grid rotated 90° clockwise:
+// new[x][h-1-z] = old[z][x]. Missing cells (ragged) pad with pad.
+func rotateGridCW(rows []string, w, h int, pad byte) []string {
+	if rows == nil {
+		return nil
+	}
+	out := make([]string, w)
+	for x := 0; x < w; x++ {
+		buf := make([]byte, h)
+		for z := 0; z < h; z++ {
+			c := pad
+			if z < len(rows) && x < len(rows[z]) {
+				c = rows[z][x]
+			}
+			buf[h-1-z] = c
+		}
+		out[x] = string(buf)
+	}
+	return out
+}
+
+// transformFaces applies fn to a copy of each face override (nil-safe).
+func transformFaces(faces []FaceOverride, fn func(FaceOverride) FaceOverride) []FaceOverride {
+	if faces == nil {
+		return nil
+	}
+	out := make([]FaceOverride, len(faces))
+	for i, o := range faces {
+		out[i] = fn(o)
+	}
+	return out
+}

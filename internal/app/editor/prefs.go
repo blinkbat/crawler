@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"crawler/internal/app/core"
+	"crawler/internal/app/core/mapfile"
 )
 
 // prefs.go is the editor's tiny cross-session persistence: the last-opened map
@@ -55,6 +56,57 @@ func writePrefs(lastMap string, recent []string) {
 		b.WriteString(recentPrefKey + p + "\n")
 	}
 	_ = os.WriteFile(editorPrefsPath(), []byte(b.String()), core.AssetFileMode)
+}
+
+// Crash-recovery autosave. While a map has unsaved edits the editor periodically
+// snapshots it to a recovery file (a non-.map extension so it never shows in the
+// Open list) plus a sidecar recording the real on-disk path. A manual save or clean
+// exit clears it; the next launch offers to reopen it. See tickAutosave / NewDefault.
+const (
+	recoveryFile     = ".recovery.autosave"
+	recoveryMetaFile = ".recovery.meta"
+	// autosaveInterval is the seconds of edited-but-unsaved time between recovery writes.
+	autosaveInterval = float32(20)
+)
+
+func recoveryPath() string     { return filepath.Join(core.MapsDir(), recoveryFile) }
+func recoveryMetaPath() string { return filepath.Join(core.MapsDir(), recoveryMetaFile) }
+
+// writeRecovery snapshots area to the recovery file (best-effort), recording its
+// real on-disk path so a later Save writes back to the right file.
+func writeRecovery(area core.AreaDefinition) {
+	mf, err := core.MapFileFromArea(area)
+	if err != nil {
+		return
+	}
+	if err := mapfile.Save(recoveryPath(), mf); err != nil {
+		return
+	}
+	_ = os.WriteFile(recoveryMetaPath(), []byte(area.Path), core.AssetFileMode)
+}
+
+// clearRecovery drops the recovery snapshot (manual save / clean exit / fresh load).
+func clearRecovery() {
+	_ = os.Remove(recoveryPath())
+	_ = os.Remove(recoveryMetaPath())
+}
+
+// loadRecovery reads a pending recovery snapshot, restoring its original path.
+// ok=false when none exists / unreadable.
+func loadRecovery() (core.AreaDefinition, bool) {
+	mf, err := mapfile.Load(recoveryPath())
+	if err != nil {
+		return core.AreaDefinition{}, false
+	}
+	origPath := ""
+	if b, rerr := os.ReadFile(recoveryMetaPath()); rerr == nil {
+		origPath = strings.TrimSpace(string(b))
+	}
+	area, err := core.AreaFromMapFile(mf, origPath)
+	if err != nil {
+		return core.AreaDefinition{}, false
+	}
+	return area, true
 }
 
 // LastMapPath returns the stored last-opened map path, or "" if none / unreadable.

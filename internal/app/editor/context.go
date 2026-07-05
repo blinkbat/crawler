@@ -16,6 +16,27 @@ import (
 // (dropdownRowH) for bigger click targets — passed to openDropdownAt at open time.
 const contextMenuRowH = float32(28)
 
+// contextSpawnKind is one deletable/editable tile occupant (pack/chest/door/crystal).
+// indexAt/openEdit/remove close over the kind's concrete spawn slice so a new spawn
+// kind is one table row, not another copy of the Edit/Delete block below.
+type contextSpawnKind struct {
+	noun     string
+	indexAt  func(s *State, x, z int) int
+	openEdit func(s *State, idx int)
+	remove   func(s *State, x, z int) bool
+}
+
+var contextSpawnKinds = []contextSpawnKind{
+	{"pack", func(s *State, x, z int) int { return core.PackSpawnIndexAt(s.area.PackSpawns, x, z) },
+		openPackEditModal, func(s *State, x, z int) bool { return deleteSpawnSlice(&s.area.PackSpawns, x, z) }},
+	{"chest", func(s *State, x, z int) int { return core.ChestSpawnIndexAt(s.area.ChestSpawns, x, z) },
+		openChestEditModal, func(s *State, x, z int) bool { return deleteSpawnSlice(&s.area.ChestSpawns, x, z) }},
+	{"door", func(s *State, x, z int) int { return core.DoorSpawnIndexAt(s.area.DoorSpawns, x, z) },
+		openDoorEditModal, func(s *State, x, z int) bool { return deleteSpawnSlice(&s.area.DoorSpawns, x, z) }},
+	{"crystal", func(s *State, x, z int) int { return core.CrystalSpawnIndexAt(s.area.CrystalSpawns, x, z) },
+		openCrystalEditModal, func(s *State, x, z int) bool { return deleteSpawnSlice(&s.area.CrystalSpawns, x, z) }},
+}
+
 // contextItemsAt builds the menu rows from what occupies (x,z) (pack/chest/door
 // are mutually exclusive in practice). danger rows draw red.
 func contextItemsAt(s *State, x, z int) []dropdownEntry {
@@ -23,47 +44,18 @@ func contextItemsAt(s *State, x, z int) []dropdownEntry {
 		return nil
 	}
 	items := []dropdownEntry{}
-	if core.PackSpawnIndexAt(s.area.PackSpawns, x, z) >= 0 {
+	for _, k := range contextSpawnKinds {
+		if k.indexAt(s, x, z) < 0 {
+			continue
+		}
 		items = append(items,
-			dropdownEntry{label: "Edit pack", apply: func(s *State) {
-				if idx := core.PackSpawnIndexAt(s.area.PackSpawns, x, z); idx >= 0 {
-					openPackEditModal(s, idx)
+			dropdownEntry{label: "Edit " + k.noun, apply: func(s *State) {
+				if idx := k.indexAt(s, x, z); idx >= 0 {
+					k.openEdit(s, idx)
 				}
 			}},
-			dropdownEntry{label: "Delete pack", danger: true, apply: func(s *State) {
-				deleteSpawnAt(s, x, z, "pack", func() bool { return deleteSpawnSlice(&s.area.PackSpawns, x, z) })
-			}},
-		)
-	}
-	if core.ChestSpawnIndexAt(s.area.ChestSpawns, x, z) >= 0 {
-		items = append(items,
-			dropdownEntry{label: "Edit chest", apply: func(s *State) {
-				if idx := core.ChestSpawnIndexAt(s.area.ChestSpawns, x, z); idx >= 0 {
-					openChestEditModal(s, idx)
-				}
-			}},
-			dropdownEntry{label: "Delete chest", danger: true, apply: func(s *State) {
-				deleteSpawnAt(s, x, z, "chest", func() bool { return deleteSpawnSlice(&s.area.ChestSpawns, x, z) })
-			}},
-		)
-	}
-	if core.DoorSpawnIndexAt(s.area.DoorSpawns, x, z) >= 0 {
-		items = append(items,
-			dropdownEntry{label: "Edit door", apply: func(s *State) {
-				if idx := core.DoorSpawnIndexAt(s.area.DoorSpawns, x, z); idx >= 0 {
-					openDoorEditModal(s, idx)
-				}
-			}},
-			dropdownEntry{label: "Delete door", danger: true, apply: func(s *State) {
-				deleteSpawnAt(s, x, z, "door", func() bool { return deleteSpawnSlice(&s.area.DoorSpawns, x, z) })
-			}},
-		)
-	}
-	if core.CrystalSpawnIndexAt(s.area.CrystalSpawns, x, z) >= 0 {
-		// No per-instance data, so Delete only.
-		items = append(items,
-			dropdownEntry{label: "Delete crystal", danger: true, apply: func(s *State) {
-				deleteSpawnAt(s, x, z, "crystal", func() bool { return deleteSpawnSlice(&s.area.CrystalSpawns, x, z) })
+			dropdownEntry{label: "Delete " + k.noun, danger: true, apply: func(s *State) {
+				deleteSpawnAt(s, x, z, k.noun, func() bool { return k.remove(s, x, z) })
 			}},
 		)
 	}

@@ -180,3 +180,58 @@ func TestCopyPasteRegion_Voxel(t *testing.T) {
 		t.Fatal("voxel paste filled air below the floating cube")
 	}
 }
+
+func TestRegionTransformRoundTrips(t *testing.T) {
+	a := testRegionArea()
+	// Author some direction-carrying content so the remaps are exercised.
+	a.Floor[1] = "e" + string(FloorRampEast) + "gh"
+	a.SetPropYawStep(2, 2, 3)
+	a.SetFaceDir(3, 1, East, TileWallRockCracked)
+	r := CopyRegion(&a, 0, 0, a.Width-1, a.Height-1)
+
+	if got := r.FlipHorizontal().FlipHorizontal(); !regionEqual(got, r) {
+		t.Errorf("FlipHorizontal twice != identity")
+	}
+	if got := r.FlipVertical().FlipVertical(); !regionEqual(got, r) {
+		t.Errorf("FlipVertical twice != identity")
+	}
+	rot := r.Rotate90CW().Rotate90CW().Rotate90CW().Rotate90CW()
+	if !regionEqual(rot, r) {
+		t.Errorf("Rotate90CW four times != identity")
+	}
+	if r90 := r.Rotate90CW(); r90.W != r.H || r90.H != r.W {
+		t.Errorf("Rotate90CW dims: got %dx%d want %dx%d", r90.W, r90.H, r.H, r.W)
+	}
+}
+
+func regionEqual(a, b TileRegion) bool {
+	if a.W != b.W || a.H != b.H {
+		return false
+	}
+	eqRows := func(x, y []string) bool {
+		if len(x) != len(y) {
+			return false
+		}
+		for i := range x {
+			if x[i] != y[i] {
+				return false
+			}
+		}
+		return true
+	}
+	eqPlanes := func(x, y [][]string) bool {
+		if len(x) != len(y) {
+			return false
+		}
+		for i := range x {
+			if !eqRows(x[i], y[i]) {
+				return false
+			}
+		}
+		return true
+	}
+	return eqPlanes(a.Layers, b.Layers) && eqPlanes(a.Solids, b.Solids) &&
+		eqPlanes(a.PropStack, b.PropStack) && eqPlanes(a.DecorStack, b.DecorStack) &&
+		eqRows(a.PropLevels, b.PropLevels) && eqRows(a.DecorLevels, b.DecorLevels) &&
+		eqRows(a.PropYaw, b.PropYaw) && len(a.Faces) == len(b.Faces)
+}

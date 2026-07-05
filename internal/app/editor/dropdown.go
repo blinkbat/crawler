@@ -37,6 +37,9 @@ const (
 	ddLayer                               // top-bar layer picker: pick the active layer; each row carries a hide/show eye
 	ddFaceSkin                            // tile right-click: pick a cliff-face skin for one face (or all) of the tile
 	ddContext                             // grid right-click menu: edit/delete spawns, start facing, regions, erase (see context.go)
+	ddDoorFacing                          // door editor: pick the door's facing (replaces the N/E/S/W button/key row)
+	ddDoorStyle                           // door editor: pick the door's style (replaces the 1/2/3 button/key row)
+	ddSoundAssign                         // sound editor: pick the user sound bound to a built-in cue (replaces the < > steppers)
 
 	dropdownOwnerCount // sentinel; keep last. Every owner above ddNone needs a dropdownEntryBuilders entry.
 )
@@ -63,7 +66,7 @@ type dropdownState struct {
 func filterableDropdown(o dropdownOwner) bool {
 	switch o {
 	case ddPackAdd, ddChestAdd, ddFoeKind, ddDialogCondFoe, ddDialogTriggerFoe,
-		ddDialogTriggerDialog, ddDialogSpeaker, ddDialogTriggerLocation:
+		ddDialogTriggerDialog, ddDialogSpeaker, ddDialogTriggerLocation, ddSoundAssign:
 		return true
 	}
 	return false
@@ -205,6 +208,51 @@ var dropdownEntryBuilders = map[dropdownOwner]func(*State) []dropdownEntry{
 	ddLayer:                 layerSelectEntries,
 	ddFaceSkin:              faceSkinEntries,
 	ddContext:               contextEntries,
+	ddDoorFacing:            doorFacingEntries,
+	ddDoorStyle:             doorStyleEntries,
+	ddSoundAssign:           soundAssignEntries,
+}
+
+// doorFacingEntries / doorStyleEntries build the door editor's facing / style
+// pickers (one row per core enum value; re-picking the current value is a no-op via
+// setIfChanged). Target door lives on State (modalDoorIdx).
+func doorFacingEntries(s *State) []dropdownEntry {
+	if s.modalDoorIdx < 0 || s.modalDoorIdx >= len(s.area.DoorSpawns) {
+		return nil
+	}
+	out := make([]dropdownEntry, 0, core.FacingCount)
+	for f := 0; f < core.FacingCount; f++ {
+		f := f
+		name, _ := core.FacingName(f)
+		out = append(out, dropdownEntry{
+			label: name,
+			apply: func(s *State) {
+				if s.modalDoorIdx >= 0 && s.modalDoorIdx < len(s.area.DoorSpawns) {
+					setIfChanged(s, &s.area.DoorSpawns[s.modalDoorIdx].Facing, f)
+				}
+			},
+		})
+	}
+	return out
+}
+
+func doorStyleEntries(s *State) []dropdownEntry {
+	if s.modalDoorIdx < 0 || s.modalDoorIdx >= len(s.area.DoorSpawns) {
+		return nil
+	}
+	out := make([]dropdownEntry, 0, core.DoorStyleCount)
+	for i := 0; i < int(core.DoorStyleCount); i++ {
+		style := core.DoorStyle(i)
+		out = append(out, dropdownEntry{
+			label: core.DoorStyleLabel(style),
+			apply: func(s *State) {
+				if s.modalDoorIdx >= 0 && s.modalDoorIdx < len(s.area.DoorSpawns) {
+					setIfChanged(s, &s.area.DoorSpawns[s.modalDoorIdx].Style, style)
+				}
+			},
+		})
+	}
+	return out
 }
 
 // faceSkinEntries builds the tile face-skin picker. Lists the FaceSkins roster;
