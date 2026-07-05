@@ -243,6 +243,13 @@ func projectNextRoundQueue(g *core.GameState) []core.ActorRef {
 	return simulateTurnQueue(g, false)
 }
 
+// refreshTurnForecast re-bakes NextRoundQueue after a mid-round readiness edit
+// (Sunder's push / Killing Spree's gain), so TurnForecast reflects the new tempo
+// instead of the projection frozen at beginNewRound. Side-effect-free (persist=false).
+func refreshTurnForecast(g *core.GameState) {
+	g.Battle.NextRoundQueue = projectNextRoundQueue(g)
+}
+
 func simulateTurnQueue(g *core.GameState, persist bool) []core.ActorRef {
 	members := core.BattleMembers(g)
 	type tickActor struct {
@@ -411,7 +418,11 @@ func pushEnemyReadiness(g *core.GameState, slot, amount int) bool {
 	// Honest move report: a target with no banked readiness (the common case
 	// right after it acts) is floored at 0 — the gauge didn't move, so the
 	// caller's "turn is shoved back" line must not fire.
-	return cur != before
+	moved := cur != before
+	if moved {
+		refreshTurnForecast(g) // readiness shifted — the frozen next-round projection is now stale
+	}
+	return moved
 }
 
 // actorAppearsBefore reports whether `ref` occupies any queue slot strictly

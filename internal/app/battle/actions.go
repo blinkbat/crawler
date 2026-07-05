@@ -1523,7 +1523,9 @@ func applyProcStrike(g *core.GameState, skill core.SkillID, quality int, ps proc
 	}
 	damage, defeated, crit := strikeWithCrit(g, actor, skill, rawDamage, quality)
 	enqueueSkillVFXAtEnemy(g, skill)
-	procced := tryProcStatus(g.Rand(), ps.counter(enemy), defeated, ps.chance(effect), quality, ps.minGrade, ps.dur(effect), resistWIS)
+	// Rider lands only on a hit that dealt damage — an armor-soaked 0 inflicts no
+	// status (mirrors the enemy basic attack's dealt>0 gate).
+	procced := damage > 0 && tryProcStatus(g.Rand(), ps.counter(enemy), defeated, ps.chance(effect), quality, ps.minGrade, ps.dur(effect), resistWIS)
 	logFoeHit(g, appendCrit(procSkillMessage(ps.arms, actor.Name, target, damage, quality, defeated, procced, false), crit), defeated)
 	finishActorTurn(g)
 	return true
@@ -1877,16 +1879,20 @@ func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, hitVerb, emptyVe
 		resistWIS := core.EffectiveEnemyStats(enemy).WIS
 		// Count each foe afflicted at most once so the tally can't exceed foe count.
 		struck := false
-		if tryProcStatus(g.Rand(), &enemy.BurnTurns, defeated, effect.BurnChance, quality, 0, effect.BurnDuration, resistWIS) {
-			struck = true
-		}
-		if tryProcStatus(g.Rand(), &enemy.PoisonTurns, defeated, effect.PoisonChance, quality, 0, effect.PoisonDuration, resistWIS) {
-			struck = true
-		}
-		// Per-target Stun (Chain Lightning's shock) — any grade, low chance. Every
-		// other AoE skill carries StunChance 0, so this short-circuits for them.
-		if tryProcStatus(g.Rand(), &enemy.StunTurns, defeated, effect.StunChance, quality, 0, effect.StunDuration, resistWIS) {
-			struck = true
+		// Status riders land only on a hit that dealt damage — an armor/MDef-soaked 0
+		// inflicts no Burn/Poison/Stun (mirrors the enemy basic attack's dealt>0 gate).
+		if dealt > 0 {
+			if tryProcStatus(g.Rand(), &enemy.BurnTurns, defeated, effect.BurnChance, quality, 0, effect.BurnDuration, resistWIS) {
+				struck = true
+			}
+			if tryProcStatus(g.Rand(), &enemy.PoisonTurns, defeated, effect.PoisonChance, quality, 0, effect.PoisonDuration, resistWIS) {
+				struck = true
+			}
+			// Per-target Stun (Chain Lightning's shock) — any grade, low chance. Every
+			// other AoE skill carries StunChance 0, so this short-circuits for them.
+			if tryProcStatus(g.Rand(), &enemy.StunTurns, defeated, effect.StunChance, quality, 0, effect.StunDuration, resistWIS) {
+				struck = true
+			}
 		}
 		// AoE stat debuff (Cone of Cold's chill) — guaranteed on a survivor.
 		// Skills with no buff (BuffTurns 0) skip it.
@@ -3142,6 +3148,7 @@ func gainPartyReadiness(g *core.GameState, partyIndex, amount int) {
 		g.Battle.Readiness = map[core.ActorRef]int{}
 	}
 	g.Battle.Readiness[ref] += amount
+	refreshTurnForecast(g) // readiness shifted — re-bake the next-round forecast
 }
 
 // offTurnReflect applies an off-turn counter-strike at enemySlot for `raw` damage

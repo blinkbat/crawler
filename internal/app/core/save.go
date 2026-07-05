@@ -288,7 +288,11 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	// per-floor Level is available.
 	voxel := area.IsVoxel()
 	blockedByCrystal := crystalIndexOn(g.Crystals, x, z, level, voxel) >= 0
-	if area.BlockedAt(x, z) || blockedByCrystal ||
+	// spawnTileOpen is the level-aware standability predicate (heightfield: !BlockedAt;
+	// voxel: Standable + blocking-floor + PropBlocksStanding at `level`). Flat BlockedAt
+	// would false-block a party saved on a deck above a ground-floor prop/deep water,
+	// mirroring the crystal/chest checks that are already level-aware here.
+	if !area.spawnTileOpen(x, z, level) || blockedByCrystal ||
 		chestIndexOn(g.Chests, x, z, level, voxel) >= 0 {
 		x, z = g.Player.TileX, g.Player.TileZ
 		// The saved level belonged to the blocked tile; on the fallback tile derive

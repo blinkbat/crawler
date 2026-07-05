@@ -39,8 +39,17 @@ func mapStatsLines(s *State) []string {
 			}
 		}
 	}
-	props := countCharCells(a.Props, core.IsPropChar) + countStackCells(a.PropStack, core.IsPropChar)
-	decor := countCharCells(a.Decor, isAuthoredDecor) + countStackCells(a.DecorStack, isAuthoredDecor)
+	// A materialized per-floor stack is authoritative and the legacy grid is frozen
+	// but still populated (EnsurePropStack copies from it without clearing), so summing
+	// both double-counts every ground-floor item. Count the stack when present, else the grid.
+	props := countCharCells(a.Props, core.IsPropChar)
+	if len(a.PropStack) > 0 {
+		props = countStackCells(a.PropStack, core.IsPropChar)
+	}
+	decor := countCharCells(a.Decor, isAuthoredDecor)
+	if len(a.DecorStack) > 0 {
+		decor = countStackCells(a.DecorStack, isAuthoredDecor)
+	}
 
 	enemies, tierSum, goldMin, goldMax := 0, 0, 0, 0
 	for _, p := range a.PackSpawns {

@@ -705,6 +705,11 @@ func SetGuard(party []PartyMember, guardian, ward int) {
 	if guardian == ward {
 		return // nothing to cover
 	}
+	// If a DIFFERENT guardian already covers this ward, release them first — otherwise
+	// their Guarding flag (and its badge) is stranded true once GuardedBy is overwritten.
+	if party[ward].Guarded && party[ward].GuardedBy != guardian {
+		ClearGuardBy(party, party[ward].GuardedBy)
+	}
 	party[guardian].Guarding = true
 	party[ward].Guarded = true
 	party[ward].GuardedBy = guardian

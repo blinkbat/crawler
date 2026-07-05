@@ -66,7 +66,12 @@ func partyClassPresentationFor(class core.PartyClass) partyClassPresentation {
 // classAccent is the per-class accent color (its turn color); single seam if the
 // accent ever stops being the turn color.
 func classAccent(class core.PartyClass) rl.Color {
-	return partyClassPresentationFor(class).turnColor
+	// Fail soft on a stray/corrupt class (mirrors drawClassGlyph's guard): a neutral
+	// accent beats a panic mid-draw. Valid classes are init-asserted present.
+	if p, ok := partyClassPresentations[class]; ok {
+		return p.turnColor
+	}
+	return textMuted
 }
 
 // drawClassGlyph paints a small per-class sigil. Geometric (no texture asset) so

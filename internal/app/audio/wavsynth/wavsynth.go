@@ -355,6 +355,9 @@ func SynthChord(duration float64, freqs []float64, volume float64) []int16 {
 	if math.IsNaN(duration) || math.IsInf(duration, 0) {
 		return nil
 	}
+	if duration > maxDuration {
+		duration = maxDuration // bound the alloc, like samplesFor and every other synth path
+	}
 	samples := int(duration * SampleRate)
 	if samples <= 0 {
 		// No time → no samples. (A non-positive duration must NOT fall through to

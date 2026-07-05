@@ -1333,6 +1333,9 @@ func undoOne(s *State) {
 	invalidateContentCaches(s) // area replaced — rebuild reachability + epoch caches lazily
 	// Drop the dirty marker if we stepped back to the on-disk baseline.
 	s.dirty = !core.AreaContentEqual(s.area, s.baseline)
+	if !s.dirty {
+		clearRecovery() // stepped back onto the saved baseline — nothing unsaved to recover
+	}
 }
 
 func redoOne(s *State) {
@@ -1346,6 +1349,9 @@ func redoOne(s *State) {
 	s.area = last
 	invalidateContentCaches(s) // area replaced — rebuild reachability + epoch caches lazily
 	s.dirty = !core.AreaContentEqual(s.area, s.baseline)
+	if !s.dirty {
+		clearRecovery() // stepped back onto the saved baseline — nothing unsaved to recover
+	}
 }
 
 // resize grows or shrinks every layer to (w,h). New cells get the layer's blank
@@ -1600,6 +1606,7 @@ func revertToSaved(s *State) {
 	invalidateContentCaches(s)
 	clearSelection(s) // edits reverted — a stale marquee could outline changed tiles
 	s.dirty = false
+	clearRecovery() // back on the saved baseline — no unsaved edits to recover
 	s.flash("Reverted to last saved")
 }
 

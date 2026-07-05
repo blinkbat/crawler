@@ -633,16 +633,20 @@ func buildRampWedgeModel(pixels []color.RGBA, shader rl.Shader) rl.Model {
 	var verts, normals, uvs []float32
 	addTri := func(a, b, c rl.Vector3) {
 		n := triNormal(a, b, c)
+		ua, ub, uc := [2]float32{0, 0}, [2]float32{1, 0}, [2]float32{0.5, 1}
 		mid := rl.NewVector3((a.X+b.X+c.X)/3, (a.Y+b.Y+c.Y)/3, (a.Z+b.Z+c.Z)/3)
 		if n.X*(mid.X-center.X)+n.Y*(mid.Y-center.Y)+n.Z*(mid.Z-center.Z) < 0 {
-			b, c = c, b // flip winding so the normal points outward
+			b, c = c, b     // flip winding so the normal points outward
+			ub, uc = uc, ub // swap UVs alongside so each vertex keeps its own coord
 			n = triNormal(a, b, c)
 		}
-		for _, p := range [3]rl.Vector3{a, b, c} {
+		tri := [3]rl.Vector3{a, b, c}
+		triUV := [3][2]float32{ua, ub, uc}
+		for i, p := range tri {
 			verts = append(verts, p.X, p.Y, p.Z)
 			normals = append(normals, n.X, n.Y, n.Z)
+			uvs = append(uvs, triUV[i][0], triUV[i][1])
 		}
-		uvs = append(uvs, 0, 0, 1, 0, 0.5, 1)
 	}
 	addQuad := func(a, b, c, d rl.Vector3) { addTri(a, b, c); addTri(a, c, d) }
 

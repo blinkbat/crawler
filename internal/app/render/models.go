@@ -366,17 +366,22 @@ func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32
 		// Canopy lumps lean in the wind, higher lumps more (lean scales sway by
 		// Y offset, capped at 1.4) so the crown drifts further. Trunk/root skipped.
 		offsetY := yOffset
+		var swayWorldX, swayWorldZ float32
 		if pv.isCanopy {
 			lean := part.offset.Y / 3.0
 			if lean > 1.4 {
 				lean = 1.4
 			}
-			offX += swayX * lean
-			offZ += swayZ * lean
+			// Horizontal sway is world-space wind — apply it AFTER the yaw rotation
+			// (like propModel.draw), else each tree's per-tile yaw spins the wind
+			// direction and a varied-yaw stand sways incoherently. swayY is vertical,
+			// unaffected by the Y-axis rotation, so it stays in the local offset.
+			swayWorldX = swayX * lean
+			swayWorldZ = swayZ * lean
 			offsetY += swayY * lean
 		}
 		offset := rotateOffsetY(rl.NewVector3(offX, offsetY, offZ), overall, yaw)
-		position := rl.NewVector3(center.X+offset.X, center.Y+offset.Y, center.Z+offset.Z)
+		position := rl.NewVector3(center.X+offset.X+swayWorldX, center.Y+offset.Y, center.Z+offset.Z+swayWorldZ)
 		drawScale := rl.NewVector3(part.scale.X*pv.sx*overall, part.scale.Y*pv.sy*trunkYScale*overall, part.scale.Z*pv.sz*overall)
 		drawYawedPart(t.models[part.modelIdx], position, drawScale, part, yaw, pv.tint)
 	}

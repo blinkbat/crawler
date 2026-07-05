@@ -1038,13 +1038,20 @@ func NewDefault() State {
 	// priority — reopen it with dirty set so the edits aren't lost.
 	if area, ok := loadRecovery(); ok {
 		s := NewFromArea(area)
+		diskBaseline := false
 		if area.Path != "" {
 			if disk, err := core.LoadArea(area.Path); err == nil {
 				s.baseline = core.CloneArea(disk) // revert/dirty compare against real disk state
+				diskBaseline = true
 			}
 		}
 		surfaceAreaLevels(&s)
-		if core.AreaContentEqual(s.area, s.baseline) {
+		// Only a real disk baseline can be "stale" (snapshot == saved file). A
+		// never-saved map (Path == "") or an unreadable/deleted baseline has NO other
+		// copy: freshState seeded baseline = clone(area), so AreaContentEqual is
+		// vacuously true — dropping it here would silently lose the recovered work.
+		// Keep it dirty in that case.
+		if diskBaseline && core.AreaContentEqual(s.area, s.baseline) {
 			clearRecovery() // stale snapshot equals disk — drop it and open normally
 		} else {
 			s.dirty = true

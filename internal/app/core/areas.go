@@ -269,12 +269,11 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		// Blocked-tile check mirrors the runtime's split: level-aware on a voxel
 		// map (a deck crystal is fine above a blocked ground floor), flat 2D
 		// BlockedAt on a heightfield.
+		// Resolve to the floor placeCrystals actually rests the crystal on (a non-standable
+		// authored level drops to the ground surface); the blocked check AND the dedup key
+		// both key off this so validation matches placement.
+		level := area.resolveEntityLevel(c.TileX, c.TileZ, c.Level)
 		if len(area.Solids) > 0 {
-			// Validate at the SAME floor the runtime rests the crystal on: placeCrystals
-			// resolves a non-standable authored level down to the ground surface, so a
-			// legacy Level:0 crystal validated at floor 0 (inside solid rock) would
-			// vacuously pass yet embed in a blocking prop at its resolved ground floor.
-			level := area.resolveEntityLevel(c.TileX, c.TileZ, c.Level)
 			floor, ok := area.layerByteAt(area.Floor, c.TileX, c.TileZ)
 			blocked := (ok && IsBlockingFloor(floor)) ||
 				area.PropBlocksStanding(c.TileX, level, c.TileZ)
@@ -289,9 +288,10 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		if c.TileX == mf.StartX && c.TileZ == mf.StartZ {
 			return AreaDefinition{}, onStartErr("crystal", c.TileX, c.TileZ)
 		}
-		// Duplicate key includes the floor: two crystals in one column on
-		// different voxel floors are distinct, runtime-supported placements.
-		key := [3]int{c.TileX, c.TileZ, c.Level}
+		// Dedup on the RESOLVED floor, not the authored level: two authored levels that
+		// resolve to the same ground floor are one runtime placement (stacked) and must
+		// collide. Distinct standable decks resolve to distinct levels and stay separate.
+		key := [3]int{c.TileX, c.TileZ, level}
 		if seenCrystal[key] {
 			return AreaDefinition{}, fmt.Errorf("duplicate crystal at (%d,%d)", c.TileX, c.TileZ)
 		}
