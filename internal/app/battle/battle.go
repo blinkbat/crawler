@@ -580,10 +580,11 @@ func consumeDefendAndGuardOnSkip(g *core.GameState, actor core.ActorRef) {
 // skipped turn. No-ops on enemies and zeroed counters.
 //
 // NOTE: this is a hand-maintained tick list, NOT table-driven — a NEW timed `*Turns`
-// counter must be added here (or to the enemy mirror) by hand to drain each turn. The
+// counter drained at turn end must be added here (or to the enemy mirror) by hand. The
 // death-clear classifier (partyDeathStatuses in actions.go, reflect-asserted complete)
-// forces every `*Turns` counter to be acknowledged there; use that same edit as the
-// reminder to wire a per-turn drain here.
+// forces every `*Turns` counter to be acknowledged there AND to declare its drainKind;
+// a kept-on-death counter with no drain path fails startup, and TestTurnEndDrainCounters
+// verifies every drainTurnEnd counter actually ticks down here.
 func drainNonDamagingPartyStatuses(g *core.GameState, actor core.ActorRef) {
 	tickWebbedAfterPartyTurn(g, actor)
 	tickConfusedAfterPartyTurn(g, actor)
@@ -932,11 +933,12 @@ func updateAttackTiming(g *core.GameState, dt float32) {
 	resolveTimingBar(g, func() { applyPendingAction(g, g.Battle.Timing.Quality) })
 }
 
-// gradeSounds is the per-grade audio cue table — all bars dispatch off it so the
-// same grade sounds the same.
-// Two bands by design: a miss cue, the "landed" cue for the lower grades, and the
-// "great" cue for the top grades. The shared value across each band is intentional
-// — retuning a band means changing BOTH of its cells.
+// gradeSounds is the per-grade audio cue table — all bars dispatch off it so the same
+// grade sounds the same. Three cues across three bands by design: a Miss cue, one
+// "landed" cue shared by the lower grades (Nice/Good), and one "great" cue shared by
+// the top grades (Great/Excellent). The shared value within a band is intentional —
+// retuning the landed or great band means changing BOTH of its cells (unenforced;
+// keep the pair in sync).
 var gradeSounds = [...]audio.Sound{
 	core.TimingQualityMiss: audio.SoundInputMiss,
 	// Landed band.

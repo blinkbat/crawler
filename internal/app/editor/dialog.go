@@ -748,8 +748,7 @@ func dialogTrigTextTarget(s *State) *string {
 func focusDialogNumeric(s *State, focus focusField, value int) {
 	s.focus = focus
 	s.dialogNumBuf = strconv.Itoa(value)
-	s.dialogNumUndoBefore = core.CloneArea(s.area)
-	s.dialogNumSnapDone = false
+	s.dialogNumUndo.begin(s)
 }
 
 // pumpDialogNumeric routes typed digits into the focused numeric field (empty = 0).
@@ -763,9 +762,8 @@ func pumpDialogNumeric(s *State) bool {
 	}
 	before := s.dialogNumBuf
 	pumpFocusField(s, &s.dialogNumBuf)
-	if s.dialogNumBuf != before && !s.dialogNumSnapDone {
-		commitUndoSnapshot(s, s.dialogNumUndoBefore)
-		s.dialogNumSnapDone = true
+	if s.dialogNumBuf != before {
+		s.dialogNumUndo.commitOnce(s)
 	}
 	v, _ := strconv.Atoi(s.dialogNumBuf)
 	*target = v

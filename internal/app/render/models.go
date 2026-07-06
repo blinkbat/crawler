@@ -1455,7 +1455,7 @@ func loadDoorProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	doorPanel := rl.NewColor(98, 70, 50, 255)
 	plankDark := rl.NewColor(70, 48, 32, 255)
 	brass := rl.NewColor(178, 142, 78, 255)
-	brassBright := rl.NewColor(206, 168, 96, 255)
+	brassBright := brassStud // shared door-stud / wall-switch brass (theme.go)
 	return propModel{
 		models: models,
 		parts: []treePart{

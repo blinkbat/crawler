@@ -77,13 +77,6 @@ func onStartErr(what string, x, z int) error {
 	return fmt.Errorf("%s at (%d,%d) sits on the player start", what, x, z)
 }
 
-// validateLayerDims checks a layer's row count and per-row width against w×h.
-// Delegates to mapfile.ValidateGridDims so the editor path (which bypasses
-// mapfile.validate) shares that one dimension check rather than duplicating it.
-func validateLayerDims(name string, rows []string, w, h int) error {
-	return mapfile.ValidateGridDims(name, rows, w, h)
-}
-
 // AreaFromMapFile is the converter half of LoadArea, exposed so the editor
 // can build a runnable area from in-memory edits without touching disk.
 func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
@@ -100,53 +93,12 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	if mf.Width <= 0 || mf.Height <= 0 {
 		return AreaDefinition{}, fmt.Errorf("map dimensions must be positive (got %dx%d)", mf.Width, mf.Height)
 	}
-	for _, layer := range mf.RequiredLayers() {
-		if err := validateLayerDims(layer.Name, layer.Rows, mf.Width, mf.Height); err != nil {
-			return AreaDefinition{}, err
-		}
-	}
-	// Ceiling/elevation are OPTIONAL (absent → blank-filled below), but a PRESENT
-	// one must match dimensions: OptionalLayerOrBlank only substitutes for an
-	// entirely-empty section, so a truncated layer would else default its missing
-	// cells (a short ceiling reads as "no roof", flipping AreaIsOutdoor).
-	optional := []struct {
-		name string
-		rows []string
-	}{
-		{mapfile.SectionCeiling, mf.Ceiling},
-		{mapfile.SectionElevation, mf.Elevation},
-		// PropLevels/DecorLevels: optional per-tile level grids. Guarded here for
-		// parity with the editor's direct-AreaFromMapFile path, which skips validate().
-		{mapfile.SectionPropLevels, mf.PropLevels},
-		{mapfile.SectionPropYaw, mf.PropYaw},
-		{mapfile.SectionDecorLevels, mf.DecorLevels},
-	}
-	for _, layer := range optional {
-		if len(layer.rows) == 0 {
-			continue // absent — defaulted by its reader
-		}
-		if err := validateLayerDims(layer.name, layer.rows, mf.Width, mf.Height); err != nil {
-			return AreaDefinition{}, err
-		}
-	}
-	// Solids: optional voxel stack. Same editor-path parity guard so a ragged
-	// plane can't reach SolidAt / the renderer.
-	for L, plane := range mf.Solids {
-		if err := validateLayerDims(fmt.Sprintf("%s plane %d", mapfile.SectionSolids, L), plane, mf.Width, mf.Height); err != nil {
-			return AreaDefinition{}, err
-		}
-	}
-	// PropStack/DecorStack: same editor-path parity guard as solids so a ragged
-	// plane can't reach PropAt / the renderer.
-	for L, plane := range mf.PropStack {
-		if err := validateLayerDims(fmt.Sprintf("%s plane %d", mapfile.SectionPropStack, L), plane, mf.Width, mf.Height); err != nil {
-			return AreaDefinition{}, err
-		}
-	}
-	for L, plane := range mf.DecorStack {
-		if err := validateLayerDims(fmt.Sprintf("%s plane %d", mapfile.SectionDecorStack, L), plane, mf.Width, mf.Height); err != nil {
-			return AreaDefinition{}, err
-		}
+	// Grid validation — dimensions AND cell-char alphabet (bad level/yaw/elevation
+	// chars) — shared with disk Load via mapfile.ValidateGrids, so this editor-facing
+	// direct-build path rejects exactly what a disk load would rather than a weaker
+	// dims-only subset. Absent optional grids are skipped (their readers default them).
+	if err := mf.ValidateGrids(); err != nil {
+		return AreaDefinition{}, err
 	}
 	if !mapfile.InBoundsWH(mf.StartX, mf.StartZ, mf.Width, mf.Height) {
 		return AreaDefinition{}, oobErr("start position", mf.StartX, mf.StartZ, mf.Width, mf.Height)
@@ -279,10 +231,7 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		// both key off this so validation matches placement.
 		level := area.resolveEntityLevel(c.TileX, c.TileZ, c.Level)
 		if len(area.Solids) > 0 {
-			floor, ok := area.layerByteAt(area.Floor, c.TileX, c.TileZ)
-			blocked := (ok && IsBlockingFloor(floor)) ||
-				area.PropBlocksStanding(c.TileX, level, c.TileZ)
-			if blocked {
+			if area.columnBlockedForEntity(c.TileX, c.TileZ, level) {
 				return AreaDefinition{}, fmt.Errorf("crystal at (%d,%d) floor %d sits on a blocked spot (prop/deep water)", c.TileX, c.TileZ, c.Level)
 			}
 		} else if area.BlockedAt(c.TileX, c.TileZ) {

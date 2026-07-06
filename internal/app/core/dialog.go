@@ -108,7 +108,7 @@ type DialogDefinition struct {
 
 // NodeByID returns the node with the given id, or (zero, false) if absent.
 func (d DialogDefinition) NodeByID(id string) (DialogNode, bool) {
-	return findByID(d.Nodes, id, func(n DialogNode) string { return n.ID })
+	return findByValue(d.Nodes, id, func(n DialogNode) string { return n.ID })
 }
 
 // DialogState is the live conversation; Def is a copy of the area's definition (self-contained).
@@ -175,7 +175,7 @@ func DialogsFromLines(lines []string) ([]DialogDefinition, error) {
 
 // DialogDefByID returns the area's dialog with the given id, or (zero, false).
 func DialogDefByID(a AreaDefinition, id string) (DialogDefinition, bool) {
-	return findByID(a.Dialogs, id, func(d DialogDefinition) string { return d.ID })
+	return findByValue(a.Dialogs, id, func(d DialogDefinition) string { return d.ID })
 }
 
 // StartDialog opens the dialog with the given id at its start node (false if
@@ -255,18 +255,17 @@ const dialogCondFailUnknown = "Unavailable"
 func evalDialogCondition(g *GameState, cond DialogChoiceCondition) (bool, string) {
 	switch cond.Kind {
 	case DialogCondGold:
-		if g.Gold >= cond.Gold {
+		if goldMet(g, cond.Gold, CmpAtLeast) {
 			return true, ""
 		}
 		return false, dialogCondReason(cond, dialogCondFailReasons[cond.Kind])
 	case DialogCondQuest:
-		idx := QuestIndexByID(g.Quests, cond.QuestID)
-		if idx >= 0 && g.Quests[idx].Status == cond.QuestStatus {
+		if questStatusMet(g, cond.QuestID, cond.QuestStatus) {
 			return true, ""
 		}
 		return false, dialogCondReason(cond, dialogCondFailReasons[cond.Kind])
 	case DialogCondFoeKilled:
-		if foeKillCountMet(g, cond.FoeKind, cond.FoeKills) {
+		if foeKillCountMet(g, cond.FoeKind, cond.FoeKills, CmpAtLeast) {
 			return true, ""
 		}
 		return false, dialogCondReason(cond, "Requires defeating "+FoeKindName(cond.FoeKind))

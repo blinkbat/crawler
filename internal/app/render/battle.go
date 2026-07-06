@@ -652,7 +652,7 @@ func drawActionMenuRow(font rl.Font, row core.ActionRow, iconX, labelX, y, right
 	if disabled {
 		iconCol = fadeColor(iconCol, 0.5)
 	}
-	drawActionIcon(row, iconCX, iconCY, 7, iconCol)
+	drawActionIcon(row, iconCX, iconCY, actionMedallionSigilR, iconCol)
 }
 
 // drawMedallion paints the shared socketed-medallion primitive (used by the action rivet and
@@ -670,13 +670,23 @@ func drawMedallion(cx, cy, outerR, ringR, faceR float32, outerCol, ringCol, face
 	}
 }
 
+// Action-sigil rivet geometry. The sigil glyph radius is bound to the medallion here
+// (co-located) so a medallion resize can't silently leave the glyph overflowing its
+// face — actionMedallionSigilR must stay < actionMedallionFaceR.
+const (
+	actionMedallionOuterR = float32(12)   // dark outer seat
+	actionMedallionRingR  = float32(11)   // gilt ring
+	actionMedallionFaceR  = float32(9.5)  // recessed face the sigil sits on
+	actionMedallionSigilR = float32(7)    // sigil glyph radius inside the face
+)
+
 // drawIconMedallion paints the action-sigil rivet (gilt ring candle-lit when selected).
 func drawIconMedallion(cx, cy float32, selected bool) {
 	ring := fadeColor(giltDim, 0.85)
 	if selected {
 		ring = fadeColor(giltBright, 0.9*candleFlicker())
 	}
-	drawMedallion(cx, cy, 12, 11, 9.5,
+	drawMedallion(cx, cy, actionMedallionOuterR, actionMedallionRingR, actionMedallionFaceR,
 		fadeColor(woodDark, 0.95), ring, fadeColor(glassDeep, 0.96), 0, nil)
 }
 

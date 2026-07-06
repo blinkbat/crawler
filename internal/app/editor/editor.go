@@ -158,8 +158,11 @@ func brushHotkeyPrefix(i int) string {
 	}
 }
 
-// faceSkinSwatch maps a cliff-face skin char to its palette swatch (one muted
-// grey family with per-variant tints). Unmapped skins fall back to wallSwatch.
+// faceSkinSwatch maps a cliff-face skin char to its palette swatch (one muted grey
+// family with per-variant tints). Only the VARIANTS are listed; plain core.TileRock
+// deliberately has no entry and falls back to the base wallSwatch — so this is NOT
+// coverage-asserted against core.FaceSkins the way entityBrushColors is against
+// EnemyKinds (the fallback is intentional, not an omission).
 var faceSkinSwatch = map[byte]rl.Color{
 	core.TileWallRockIvyLight:  tintSwatch(wallSwatch, -8, 6, -10),
 	core.TileWallRockIvyHeavy:  tintSwatch(wallSwatch, -20, 4, -22),
@@ -390,6 +393,14 @@ func layerAccent(l Layer) rl.Color {
 		return editorBorderActive
 	}
 	return layerDefs[l].accent
+}
+
+// layerDescription returns layer l's one-line picker caption ("" if out of range).
+func layerDescription(l Layer) string {
+	if int(l) < 0 || int(l) >= layerCount {
+		return ""
+	}
+	return layerDefs[l].desc
 }
 
 // selectableLayers are the layers the author can make active (Tab-cycle, Alt+N,
@@ -743,19 +754,15 @@ type State struct {
 	// dialogNumBuf is the shared edit buffer for the focused numeric dialog field
 	// (only one numeric field is ever focused).
 	dialogNumBuf string
-	// dialogNumUndoBefore / dialogNumSnapDone give a focused numeric dialog field
-	// the same lazy single-step undo as a paint stroke: snapshot the area on focus,
-	// bank ONE step on the first real edit (focusDialogNumeric / pumpDialogNumeric).
-	dialogNumUndoBefore core.AreaDefinition
-	dialogNumSnapDone   bool
-	// textUndoBefore / textUndoFocus / textUndoSnapped give focused PROSE text fields
-	// (map Name/Quiet, door + location names/targets, dialog text/labels) the same
-	// lazy single-step undo: armTextUndo snapshots the area when the field gains focus,
-	// onFocusedTextEdit banks ONE step on the first keystroke. textUndoFocus is the
-	// focus the snapshot belongs to (focusNone = disarmed).
-	textUndoBefore  core.AreaDefinition
-	textUndoFocus   focusField
-	textUndoSnapped bool
+	// dialogNumUndo gives a focused numeric dialog field the same lazy single-step undo
+	// as a paint stroke: begin() snapshots on focus, commitOnce() banks ONE step on the
+	// first real edit (focusDialogNumeric / pumpDialogNumeric).
+	dialogNumUndo lazyUndoSession
+	// textUndo gives focused PROSE text fields (map Name/Quiet, door + location
+	// names/targets, dialog text/labels) the same lazy single-step undo: armFor()
+	// snapshots when the field gains focus (keyed on focus identity), commitOnce() banks
+	// ONE step on the first keystroke (armTextUndo / onFocusedTextEdit).
+	textUndo lazyUndoSession
 	// New-map dialog state (in-progress dims + default floor char), committed by
 	// blankArea on confirm — not the area until then.
 	modalNewWidth  int
@@ -1238,8 +1245,8 @@ func Update(s *State, dt float32) Action {
 	// Disarm the prose-text-field undo session once its field loses focus, so
 	// re-entering the SAME field later arms a fresh snapshot (armTextUndo keys on
 	// focus identity). Runs before input so a same-frame refocus re-arms cleanly.
-	if s.focus == focusNone && s.textUndoFocus != focusNone {
-		s.textUndoFocus = focusNone
+	if s.focus == focusNone && s.textUndo.focus != focusNone {
+		s.textUndo.focus = focusNone
 	}
 
 	if s.modal != modalNone {

@@ -27,21 +27,10 @@ var shopTabLabels = [ShopTabCount]string{
 	ShopTabSell: "Sell",
 }
 
-func init() {
-	for t := ShopTab(0); t < ShopTabCount; t++ {
-		if shopTabLabels[t] == "" {
-			panic("core: shopTabLabels has an empty entry — label every ShopTab")
-		}
-	}
-}
+func init() { assertNoEmptyLabels("shopTabLabels", shopTabLabels[:]) }
 
 // ShopTabLabel is the on-screen header for a shop tab.
-func ShopTabLabel(t ShopTab) string {
-	if t < 0 || int(t) >= len(shopTabLabels) {
-		return ""
-	}
-	return shopTabLabels[t]
-}
+func ShopTabLabel(t ShopTab) string { return enumLabel(shopTabLabels[:], t) }
 
 // ShopSellPrice is the gold for selling one unit: Price / ShopSellDivisor,
 // floored at 1 so a priced item is always worth something. Price <= 0 = not

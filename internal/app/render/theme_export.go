@@ -168,6 +168,13 @@ func drawModalTextRowList(font rl.Font, rowX, y, rowW, rowH int32, rows []modalT
 
 // DrawSelectedRow paints the standard cursor-on-row highlight per UI_STANDARDS.md
 // "Row > Selected": warm glass fill, 3px gilt left spine, thin gilt-dim underline.
+//
+// Deliberately NOT unified with drawFocusableRow (theme.go — a lighter gilt-frame
+// hover used by the panel lists) or drawModalTextRow above (cursor highlight + label
+// for the modal lists): the three carry different chrome on purpose (spine+sheen vs
+// frame vs highlight+label). A single drawListRow helper lived here briefly and was
+// removed in the audit-perf pass because it flattened those per-surface differences
+// poorly (see UI_STANDARDS.md "Row"). Keep them separate.
 func DrawSelectedRow(r rl.Rectangle) {
 	flick := candleFlicker()
 	drawShadowedGlassPane(r, glassWarm)

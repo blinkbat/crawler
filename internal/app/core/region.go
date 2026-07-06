@@ -43,12 +43,13 @@ func clampSubstr(s string, lo, hi int) string {
 	return s[lo:hi]
 }
 
-// CopyRegion snapshots the inclusive rectangle (x0,z0)-(x1,z1) (any corner
-// order) across all grid layers; coords clamped to the area, degenerate yields
-// empty. Returned strings are immutable, so the snapshot survives later source edits.
-func CopyRegion(a *AreaDefinition, x0, z0, x1, z1 int) TileRegion {
+// normalizeRect corner-swaps (x0,z0)-(x1,z1) into min/max order and clamps it to the
+// area bounds, reporting ok=false when the area is empty or the clamped rect is
+// degenerate. The shared preamble behind CopyRegion / ClearRegion (both take any
+// corner order); extracted so the swap/clamp/bail can't drift between the two.
+func (a *AreaDefinition) normalizeRect(x0, z0, x1, z1 int) (nx0, nz0, nx1, nz1 int, ok bool) {
 	if a == nil || a.Width <= 0 || a.Height <= 0 {
-		return TileRegion{}
+		return 0, 0, 0, 0, false
 	}
 	if x0 > x1 {
 		x0, x1 = x1, x0
@@ -59,6 +60,17 @@ func CopyRegion(a *AreaDefinition, x0, z0, x1, z1 int) TileRegion {
 	x0, x1 = Clamp(x0, 0, a.Width-1), Clamp(x1, 0, a.Width-1)
 	z0, z1 = Clamp(z0, 0, a.Height-1), Clamp(z1, 0, a.Height-1)
 	if x1 < x0 || z1 < z0 {
+		return 0, 0, 0, 0, false
+	}
+	return x0, z0, x1, z1, true
+}
+
+// CopyRegion snapshots the inclusive rectangle (x0,z0)-(x1,z1) (any corner
+// order) across all grid layers; coords clamped to the area, degenerate yields
+// empty. Returned strings are immutable, so the snapshot survives later source edits.
+func CopyRegion(a *AreaDefinition, x0, z0, x1, z1 int) TileRegion {
+	x0, z0, x1, z1, ok := a.normalizeRect(x0, z0, x1, z1)
+	if !ok {
 		return TileRegion{}
 	}
 	w, h := x1-x0+1, z1-z0+1
@@ -400,18 +412,8 @@ func (a *AreaDefinition) pasteLevelGrid(dest *[]string, src []string, atX, atZ i
 // face overrides inside it, and leaves spawns to the caller. Inverse of PasteRegion;
 // the editor's Cut / region-move snapshot first, then call this on the old bounds.
 func (a *AreaDefinition) ClearRegion(x0, z0, x1, z1 int) {
-	if a == nil || a.Width <= 0 || a.Height <= 0 {
-		return
-	}
-	if x0 > x1 {
-		x0, x1 = x1, x0
-	}
-	if z0 > z1 {
-		z0, z1 = z1, z0
-	}
-	x0, x1 = Clamp(x0, 0, a.Width-1), Clamp(x1, 0, a.Width-1)
-	z0, z1 = Clamp(z0, 0, a.Height-1), Clamp(z1, 0, a.Height-1)
-	if x1 < x0 || z1 < z0 {
+	x0, z0, x1, z1, ok := a.normalizeRect(x0, z0, x1, z1)
+	if !ok {
 		return
 	}
 	for _, lp := range a.gridLayers() {

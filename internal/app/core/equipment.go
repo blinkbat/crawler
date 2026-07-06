@@ -137,15 +137,23 @@ func EffectiveDefenses(m PartyMember) (armor, mdef int) {
 	equipDelta, equipArmor, equipMDef := foldEquipment(&m)
 	buffStats, buffArmor, buffMDef := SumStatusMods(m.Buffs)
 	armor = MaxZero(m.Armor + equipArmor + buffArmor)
-	// WIS-derived MDef reads effective WIS (base + equip + buff), then the starving
-	// penalty (so a starving member's magic defense sags with the rest of their stats).
-	eff := addStatsFloored(addStatsFloored(m.Stats, equipDelta), buffStats)
-	eff = addStatsFloored(eff, starvingPenalty(&m))
-	mdef = MagicDefense(eff) + equipMDef + buffMDef
+	// WIS-derived MDef reads effective WIS (base + equip + buff + starving), so a
+	// starving member's magic defense sags with the rest of their stats.
+	mdef = MagicDefense(effectiveStatBlock(&m, equipDelta, buffStats)) + equipMDef + buffMDef
 	if m.IceArmorTurns > 0 {
 		mdef += IceArmorMDef
 	}
 	return armor, MaxZero(mdef)
+}
+
+// effectiveStatBlock folds the equipment + buff stat deltas onto base and applies the
+// starving penalty, each step floored at 0. The single base+equip+buff+starving stat
+// fold shared by EffectiveStatsPtr and EffectiveDefenses' MDef base, so a new
+// persistent stat modifier lands in both instead of one silently diverging.
+func effectiveStatBlock(m *PartyMember, equipDelta, buffStats Stats) Stats {
+	out := addStatsFloored(m.Stats, equipDelta)
+	out = addStatsFloored(out, buffStats)
+	return addStatsFloored(out, starvingPenalty(m))
 }
 
 // EffectiveStats returns base stats with equipped StatBonus folded in. Read
@@ -157,16 +165,13 @@ func EffectiveStats(m PartyMember) Stats {
 // EffectiveStatsPtr is the pointer form of EffectiveStats, for hot-path callers
 // (actorSpeed) that shouldn't pay to copy the whole PartyMember. Only reads m.
 func EffectiveStatsPtr(m *PartyMember) Stats {
-	// Fold equipment into one delta, add on top of base (floored at 0 so a
-	// negative StatBonus can't drive a stat below zero into combat math).
+	// Fold equipment + active stat buffs onto base (each floored at 0 so a negative
+	// StatBonus can't drive a stat below zero), then the starving penalty. Starving is
+	// persistent, not a combat buff, so it folds here rather than living in m.Buffs
+	// (which battle exit would clear). Shared with EffectiveDefenses via effectiveStatBlock.
 	equipDelta, _, _ := foldEquipment(m)
-	out := addStatsFloored(m.Stats, equipDelta)
-	// Active stat buffs fold on top, same floor-at-0; an un-buffed member is a no-op.
 	buffStats, _, _ := SumStatusMods(m.Buffs)
-	out = addStatsFloored(out, buffStats)
-	// Starving saps every stat (floored at 0). Persistent, not a combat buff, so it
-	// folds here rather than living in m.Buffs (which battle exit would clear).
-	return addStatsFloored(out, starvingPenalty(m))
+	return effectiveStatBlock(m, equipDelta, buffStats)
 }
 
 // EquipPickerRow is one selectable row in an equip slot's item picker. A Kind ==

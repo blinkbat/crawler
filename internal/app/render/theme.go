@@ -121,6 +121,11 @@ var (
 	woodAccent = rl.NewColor(184, 140, 92, 255)
 	woodInlay  = rl.NewColor(34, 22, 14, 175)
 
+	// brassStud is the bright brass fitting tint shared by the door-frame studs
+	// (models.go) and the wall-switch lever knob (wallfeatures.go) — one value so
+	// the two fixtures can't drift apart.
+	brassStud = rl.NewColor(206, 168, 96, 255)
+
 	// ----- Wood-accent fades -----
 	// Single source for the wood rule/outline/icon fade tones (were scattered
 	// fadeColor(woodAccent, X) literals).

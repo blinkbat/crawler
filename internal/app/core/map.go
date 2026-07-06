@@ -278,13 +278,21 @@ func (a *AreaDefinition) spawnTileOpen(x, z, level int) bool {
 		return a.FloorAt(x, z)
 	}
 	L := a.resolveEntityLevel(x, z, level)
-	if !a.Standable(x, L, z) {
-		return false
-	}
+	return a.Standable(x, L, z) && !a.columnBlockedForEntity(x, z, L)
+}
+
+// columnBlockedForEntity reports whether column (x,z) at RESOLVED floor `level` is
+// blocked for a placed/moving entity: a blocking floor char OR a prop occupying the
+// standing space. The shared kernel behind spawnTileOpen, the crystal load-validation,
+// and CanEnterTileAtLevel — each layers its own extra checks on top (spawnTileOpen
+// also requires Standable; CanEnterTileAtLevel also runs the runtime blocker tail; the
+// crystal validator deliberately omits Standable since its level is already resolved
+// to a standable floor).
+func (a *AreaDefinition) columnBlockedForEntity(x, z, level int) bool {
 	if floor, ok := a.layerByteAt(a.Floor, x, z); ok && IsBlockingFloor(floor) {
-		return false
+		return true
 	}
-	return !a.PropBlocksStanding(x, L, z)
+	return a.PropBlocksStanding(x, level, z)
 }
 
 func nearestOpenTile(a *AreaDefinition, wantX, wantZ, level int, occupied map[[2]int]bool) (int, int) {
@@ -846,10 +854,7 @@ func CanEnterTileAtLevel(g *GameState, tx, tz, level int, opts EnterOpts) bool {
 	if g == nil || !g.Area.InBounds(tx, tz) {
 		return false
 	}
-	if f, ok := g.Area.layerByteAt(g.Area.Floor, tx, tz); ok && IsBlockingFloor(f) {
-		return false
-	}
-	if g.Area.PropBlocksStanding(tx, level, tz) {
+	if g.Area.columnBlockedForEntity(tx, tz, level) {
 		return false
 	}
 	return canEnterRuntimeBlockersAt(g, tx, tz, level, true, opts)
@@ -924,12 +929,7 @@ func ChestIndexAt(chests []Chest, x, z int) int {
 // chestIndexOn is the level-aware chest lookup for the blocker tail: when
 // levelAware, only a chest on `level` blocks (walk-under-deck); else tile-only.
 func chestIndexOn(chests []Chest, x, z, level int, levelAware bool) int {
-	for i, c := range chests {
-		if c.TileX == x && c.TileZ == z && (!levelAware || c.Level == level) {
-			return i
-		}
-	}
-	return -1
+	return leveledIndexOn(chests, x, z, level, levelAware)
 }
 
 // AdjacentChestIndex returns the index of a chest one cardinal step from (x,z),
@@ -981,6 +981,18 @@ func SpawnIndexAt[T TileXZ](spawns []T, x, z int) int {
 // PackSpawnIndexAt returns the index of the pack spawn at (x,z), or -1.
 func PackSpawnIndexAt(spawns []PackSpawn, x, z int) int {
 	return SpawnIndexAt(spawns, x, z)
+}
+
+// leveledIndexOn is the shared level-aware blocker-tail scan: the first entity on
+// (x,z), matching level too when levelAware (voxel maps — an entity on another floor
+// of the same column must not block/fire through it), tile-only otherwise. One scan
+// shared by the chest / crystal / door lookups that each open-coded it. (Packs keep
+// their own PackIndexAtTileLevel — it also filters on PackAlive.)
+func leveledIndexOn[T LeveledTileXZ](items []T, x, z, level int, levelAware bool) int {
+	return slices.IndexFunc(items, func(it T) bool {
+		tx, tz := it.Tile()
+		return tx == x && tz == z && (!levelAware || it.FloorLevel() == level)
+	})
 }
 
 // ChestSpawnIndexAt returns the index of the chest spawn at (x,z), or -1.

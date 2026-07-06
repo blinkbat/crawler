@@ -2,6 +2,7 @@ package core
 
 import (
 	"cmp"
+	"fmt"
 	"image/color"
 	"math"
 	"math/rand"
@@ -18,8 +19,10 @@ func BuildRegistry[K comparable, V any](defs []V, key func(V) K) map[K]V {
 	return m
 }
 
-// indexByID returns the index of the first element whose key matches id, or -1.
-// The shared "linear scan for a struct by string ID" walk.
+// indexByID returns the index of the first element whose key EXACTLY matches id, or
+// -1. The value→index scan (case-sensitive, -1 sentinel). Distinct from areas.go's
+// indexByName, which case-FOLDS and returns (int, bool) for the on-disk name decoders;
+// the value→row form is findByValue (findByID folded into it — a string is just one V).
 func indexByID[T any](slice []T, id string, key func(T) string) int {
 	for i := range slice {
 		if key(slice[i]) == id {
@@ -29,13 +32,25 @@ func indexByID[T any](slice []T, id string, key func(T) string) int {
 	return -1
 }
 
-// findByID returns the first element whose key matches id, or (zero, false).
-func findByID[T any](slice []T, id string, key func(T) string) (T, bool) {
-	if i := indexByID(slice, id, key); i >= 0 {
-		return slice[i], true
+// enumLabel returns labels[t], or "" if t is out of range. The shared bounds-checked
+// accessor behind ShopTabLabel / PanelTabLabel / JournalSubtabLabel / etc. — each an
+// enum→[]string table that used to hand-roll this identical range check.
+func enumLabel[T ~int](labels []string, t T) string {
+	if t < 0 || int(t) >= len(labels) {
+		return ""
 	}
-	var zero T
-	return zero, false
+	return labels[t]
+}
+
+// assertNoEmptyLabels panics if any of labels is "", naming the table. The shared init
+// guard so every enum→label table fails loudly at startup on a gap, rather than one
+// table (satietyStageLabels) silently shipping a "" entry because it lacked the loop.
+func assertNoEmptyLabels(name string, labels []string) {
+	for i, s := range labels {
+		if s == "" {
+			panic(fmt.Sprintf("core: %s has an empty entry at index %d — label every value", name, i))
+		}
+	}
 }
 
 func FlashTint(base color.RGBA, timer float32) color.RGBA {

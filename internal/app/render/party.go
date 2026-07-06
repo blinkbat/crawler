@@ -54,6 +54,21 @@ func init() {
 		k := core.PartyStatusKind(i)
 		return k != core.PartyStatusNone && partyStatusVisuals[k].Glyph == nil
 	})
+	// sharedStatusVisuals is the source of truth for statuses drawn on BOTH party cards
+	// and enemy pills. Assert each entry is a valid, complete kind AND that the party
+	// table pulls the SAME accent from it — so the two sides can't drift (a shared
+	// status added to one table with a different/blank color than the other).
+	for k, sv := range sharedStatusVisuals {
+		if k <= core.PartyStatusNone || int(k) >= int(core.PartyStatusCount) {
+			panic(fmt.Sprintf("render: sharedStatusVisuals has invalid PartyStatusKind %d", int(k)))
+		}
+		if sv.Glyph == nil || sv.Col == (rl.Color{}) {
+			panic(fmt.Sprintf("render: sharedStatusVisuals[%d] is missing its Col/Glyph", int(k)))
+		}
+		if partyStatusVisuals[k].Col != sv.Col {
+			panic(fmt.Sprintf("render: partyStatusVisuals[%d] accent diverged from sharedStatusVisuals — party cards and enemy pills would disagree", int(k)))
+		}
+	}
 }
 
 // partyStatusVisual returns the per-status color + flicker flag (out-of-range → None).

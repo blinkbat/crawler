@@ -234,15 +234,7 @@ func DoorIndexAt(doors []Door, x, z int) int {
 // `level` matches (so a door on another floor of the same column doesn't fire /
 // block through the floor), else tile-only. Mirrors PackIndexAtLanding.
 func DoorIndexOn(doors []Door, x, z, level int, isVoxel bool) int {
-	if !isVoxel {
-		return SpawnIndexAt(doors, x, z)
-	}
-	for i, d := range doors {
-		if d.TileX == x && d.TileZ == z && d.Level == level {
-			return i
-		}
-	}
-	return -1
+	return leveledIndexOn(doors, x, z, level, isVoxel)
 }
 
 // doorIndexOn is DoorIndexOn's blocker-tail spelling (levelAware flag matches the
@@ -316,13 +308,9 @@ func placeCrystals(a AreaDefinition) []Crystal {
 // doesn't actually collide, so only a same-floor pack drops it — mirroring the
 // level-aware PackIndexAtLanding runtime blocker. Filters in place; order preserved.
 func dropCrystalsOnPacks(crystals []Crystal, packs []Pack, isVoxel bool) []Crystal {
-	kept := crystals[:0]
-	for _, c := range crystals {
-		if PackIndexAtLanding(packs, c.TileX, c.TileZ, c.Level, isVoxel) < 0 {
-			kept = append(kept, c)
-		}
-	}
-	return kept
+	return filterInto(crystals[:0], crystals, func(c Crystal) bool {
+		return PackIndexAtLanding(packs, c.TileX, c.TileZ, c.Level, isVoxel) < 0
+	})
 }
 
 // DefaultEntranceCrystalSpawns returns the auto-placed entrance crystal position
@@ -368,12 +356,7 @@ func CrystalIndexAt(crystals []Crystal, x, z int) int {
 // crystalIndexOn is the level-aware crystal lookup for the blocker tail: when
 // levelAware, only a crystal on `level` blocks; else tile-only.
 func crystalIndexOn(crystals []Crystal, x, z, level int, levelAware bool) int {
-	for i, c := range crystals {
-		if c.TileX == x && c.TileZ == z && (!levelAware || c.Level == level) {
-			return i
-		}
-	}
-	return -1
+	return leveledIndexOn(crystals, x, z, level, levelAware)
 }
 
 // AdjacentChargedCrystalIndex returns a CHARGED crystal within Manhattan

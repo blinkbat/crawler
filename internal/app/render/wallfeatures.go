@@ -8,10 +8,10 @@ import (
 
 // Wall-feature fixture tints (unlit markers, deliberately readable against stone).
 var (
-	wallSwitchPlate   = rl.NewColor(72, 60, 44, 255)   // dark iron backing plate
-	wallSwitchKnob    = rl.NewColor(206, 168, 96, 255)  // brass lever knob (matches door studs)
-	wallBombablePanel = rl.NewColor(96, 78, 66, 255)    // cracked masonry patch
-	wallBombableSeam  = rl.NewColor(30, 24, 20, 255)    // dark fracture line
+	wallSwitchPlate   = rl.NewColor(72, 60, 44, 255) // dark iron backing plate
+	wallSwitchKnob    = brassStud                    // brass lever knob (shared with door studs)
+	wallBombablePanel = rl.NewColor(96, 78, 66, 255) // cracked masonry patch
+	wallBombableSeam  = rl.NewColor(30, 24, 20, 255) // dark fracture line
 )
 
 // DrawWallFeatures paints a small fixture on each authored wall feature's face: a
@@ -52,6 +52,12 @@ func DrawWallFeatures(camera rl.Camera3D, g *core.GameState, assets Resources) {
 				rl.DrawCube(pos, 0.06, 0.40, 0.40, wallBombablePanel)
 				rl.DrawCube(rl.NewVector3(cx, cy, cz), 0.07, 0.42, 0.06, wallBombableSeam)
 			}
+		default:
+			// WallSecret is handled by the continue above (draws nothing in-game); any
+			// OTHER kind is a new core.WallFeatureKind added without a fixture here —
+			// fail loud (matches the package's unhandled-enum discipline) rather than
+			// silently drawing an invisible feature.
+			panic("render: DrawWallFeatures has no fixture for WallFeatureKind " + string(f.Kind))
 		}
 	}
 }

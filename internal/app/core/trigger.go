@@ -125,21 +125,13 @@ func evalConditionRaw(g *GameState, c Condition) bool {
 		}
 		return false
 	case CondFoeKilled:
-		kills := g.Bestiary.Entry(c.FoeKind).Kills
-		want := c.Count
-		if c.Cmp == "" || c.Cmp == CmpAtLeast {
-			want = RequiredFoeKills(c.Count) // legacy "0 = once" rule for the default cmp
-		}
-		return compareCount(kills, want, c.Cmp)
+		return foeKillCountMet(g, c.FoeKind, c.Count, c.Cmp)
 	case CondTileVisited:
 		return tileVisited(g, c.TileX, c.TileZ)
 	case CondQuest:
-		if idx := QuestIndexByID(g.Quests, c.QuestID); idx >= 0 {
-			return g.Quests[idx].Status == c.QuestStatus
-		}
-		return false
+		return questStatusMet(g, c.QuestID, c.QuestStatus)
 	case CondGold:
-		return compareCount(g.Gold, c.Count, c.Cmp)
+		return goldMet(g, c.Count, c.Cmp)
 	default:
 		return false // unknown kind (authoring typo) — treat as unmet, don't panic
 	}
@@ -436,12 +428,35 @@ func EvaluateWorldTriggers(g *GameState) {
 // Shared predicate helpers (also used by dialog choice-conditions)
 // ---------------------------------------------------------------------------
 
-// foeKillCountMet reports whether the bestiary records the required kills.
-func foeKillCountMet(g *GameState, kind EnemyKind, kills int) bool {
+// foeKillCountMet reports whether bestiary kills of kind satisfy want under cmp.
+// For the default comparator (atLeast/empty) the legacy "0 = once" rule applies.
+func foeKillCountMet(g *GameState, kind EnemyKind, want int, cmp Comparator) bool {
 	if g == nil {
 		return false
 	}
-	return g.Bestiary.Entry(kind).Kills >= RequiredFoeKills(kills)
+	if cmp == "" || cmp == CmpAtLeast {
+		want = RequiredFoeKills(want) // legacy "0 = once" rule for the default cmp
+	}
+	return compareCount(g.Bestiary.Entry(kind).Kills, want, cmp)
+}
+
+// goldMet reports whether party gold satisfies want under cmp (empty cmp = atLeast).
+func goldMet(g *GameState, want int, cmp Comparator) bool {
+	if g == nil {
+		return false
+	}
+	return compareCount(g.Gold, want, cmp)
+}
+
+// questStatusMet reports whether the party's quest questID is exactly at status.
+func questStatusMet(g *GameState, questID string, status QuestStatus) bool {
+	if g == nil {
+		return false
+	}
+	if idx := QuestIndexByID(g.Quests, questID); idx >= 0 {
+		return g.Quests[idx].Status == status
+	}
+	return false
 }
 
 // RequiredFoeKills normalizes a foe-kill threshold: <= 0 means once.

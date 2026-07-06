@@ -70,13 +70,10 @@ var satietyStageLabels = [SatietyStageCount]string{
 	SatietyStarving: "STARVING",
 }
 
+func init() { assertNoEmptyLabels("satietyStageLabels", satietyStageLabels[:]) }
+
 // SatietyStageLabel returns the short uppercase label for a stage.
-func SatietyStageLabel(s SatietyStage) string {
-	if s < 0 || int(s) >= len(satietyStageLabels) {
-		return ""
-	}
-	return satietyStageLabels[s]
-}
+func SatietyStageLabel(s SatietyStage) string { return enumLabel(satietyStageLabels[:], s) }
 
 // SatietyHungerPhrase humanizes a satiety amount as the noun phrase of hunger it
 // covers, measured against a day of crawling (StepsPerCycle) so the ladder scales

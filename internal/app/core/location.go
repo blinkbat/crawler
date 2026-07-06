@@ -1,9 +1,10 @@
 package core
 
 // Locations are named, elevation-specific rectangular regions of a map's tile
-// grid (the spatial counterpart to a single enterTile). A DialogTriggerEnterLocation
-// fires when the party crosses INTO a region on its level — rising-edge, tracked in
-// GameState.InsideLocations so it fires once per crossing, not every step inside.
+// grid (the spatial counterpart to a single enterTile). The CondAtLocation trigger
+// condition holds while the party stands inside a region on its level; rising-edge
+// crossings are tracked in GameState.InsideLocations so a location-gated trigger
+// can fire once per crossing rather than every step inside.
 
 // Location is one named region: a tile-AABB [X, X+W) × [Z, Z+H) on elevation Level.
 type Location struct {

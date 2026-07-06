@@ -379,7 +379,9 @@ func PanelTabShortcutPressed() (core.PanelTab, bool) {
 	case rl.IsKeyPressed(rl.KeyM):
 		return core.PanelTabMap, true
 	}
-	return 0, false
+	// Named zero, not a bare 0: callers gate on the bool, but this keeps the "no tab"
+	// sentinel from silently reading as PanelTabStats if the enum's zero meaning shifts.
+	return core.PanelTab(0), false
 }
 
 // MenuTabPrevPressed / MenuTabNextPressed page panels-overlay tabs: L1/L2 back,

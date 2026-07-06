@@ -116,6 +116,18 @@ func (c Chest) Tile() (int, int)        { return c.TileX, c.TileZ }
 func (d Door) Tile() (int, int)         { return d.TileX, d.TileZ }
 func (c Crystal) Tile() (int, int)      { return c.TileX, c.TileZ }
 
+// LeveledTileXZ is a TileXZ that also carries a voxel floor level, so the level-aware
+// blocker-tail scans (chest / crystal / door) share one generic lookup (leveledIndexOn)
+// instead of each open-coding the same tile+level match.
+type LeveledTileXZ interface {
+	TileXZ
+	FloorLevel() int
+}
+
+func (c Chest) FloorLevel() int   { return c.Level }
+func (d Door) FloorLevel() int    { return d.Level }
+func (c Crystal) FloorLevel() int { return c.Level }
+
 // Door is one runtime door (from DoorSpawns via placeDoors). Blocks neither
 // movement nor vision: stepping onto its tile fires the area transition.
 type Door struct {
@@ -178,21 +190,10 @@ var panelTabLabels = [PanelTabCount]string{
 	PanelTabMap:       "Map",
 }
 
-func init() {
-	for t := PanelTab(0); t < PanelTabCount; t++ {
-		if panelTabLabels[t] == "" {
-			panic("core: panelTabLabels has an empty entry — label every PanelTab")
-		}
-	}
-}
+func init() { assertNoEmptyLabels("panelTabLabels", panelTabLabels[:]) }
 
 // PanelTabLabel returns the short label for a tab (the tab-strip header).
-func PanelTabLabel(t PanelTab) string {
-	if t < 0 || int(t) >= len(panelTabLabels) {
-		return ""
-	}
-	return panelTabLabels[t]
-}
+func PanelTabLabel(t PanelTab) string { return enumLabel(panelTabLabels[:], t) }
 
 // JournalSubtab selects the Journal tab's view (quest log or bestiary), toggled
 // Left/Right. Active view is GameState.JournalTab.
@@ -211,21 +212,10 @@ var journalSubtabLabels = [JournalSubtabCount]string{
 	JournalBestiary: "Bestiary",
 }
 
-func init() {
-	for s := JournalSubtab(0); s < JournalSubtabCount; s++ {
-		if journalSubtabLabels[s] == "" {
-			panic("core: journalSubtabLabels has an empty entry — label every JournalSubtab")
-		}
-	}
-}
+func init() { assertNoEmptyLabels("journalSubtabLabels", journalSubtabLabels[:]) }
 
 // JournalSubtabLabel returns the short label for a journal sub-tab.
-func JournalSubtabLabel(s JournalSubtab) string {
-	if s < 0 || int(s) >= len(journalSubtabLabels) {
-		return ""
-	}
-	return journalSubtabLabels[s]
-}
+func JournalSubtabLabel(s JournalSubtab) string { return enumLabel(journalSubtabLabels[:], s) }
 
 // JournalRowCount returns the active Journal sub-view's row count (quest entries vs
 // seen foes) — one source the panel cursor-clamp (and any scroll logic) share so they

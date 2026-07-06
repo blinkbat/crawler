@@ -14,6 +14,11 @@ const (
 	// PropYawSteps is the authored-orientation resolution — 30° increments, matching
 	// the renderer's steppedYaw30 so authored and procedural facings share the grid.
 	PropYawSteps = 12
+	// propYawDigitSpan is the count of leading decimal digits ('0'..'9') the step
+	// encoding uses before spilling into letters ('a'..) — the pivot both
+	// PropYawStepChar and propYawStepFromChar key off (mirrors elevation's digit-span;
+	// the alphabets differ, so it's named here rather than shared).
+	propYawDigitSpan = 10
 )
 
 // mapfile.validatePropYawGrid derives its accepted char alphabet from its own
@@ -31,10 +36,10 @@ func PropYawStepChar(step int) byte {
 	if step < 0 || step >= PropYawSteps {
 		return PropYawAuto
 	}
-	if step < 10 {
+	if step < propYawDigitSpan {
 		return byte('0' + step)
 	}
-	return byte('a' + step - 10)
+	return byte('a' + step - propYawDigitSpan)
 }
 
 // propYawStepFromChar decodes a grid char to a step; ok=false for '.'/invalid.
@@ -43,7 +48,7 @@ func propYawStepFromChar(c byte) (int, bool) {
 	case c >= '0' && c <= '9':
 		return int(c - '0'), true
 	case c >= 'a' && c <= 'z':
-		if step := int(c-'a') + 10; step < PropYawSteps {
+		if step := int(c-'a') + propYawDigitSpan; step < PropYawSteps {
 			return step, true
 		}
 	}

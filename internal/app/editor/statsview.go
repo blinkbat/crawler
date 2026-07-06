@@ -54,7 +54,7 @@ func mapStatsLines(s *State) []string {
 	enemies, tierSum, goldMin, goldMax := 0, 0, 0, 0
 	for _, p := range a.PackSpawns {
 		for i := range p.Members {
-			def := core.PackMemberDefinition(*a, p, i)
+			def := core.PackMemberDefinition(p, i)
 			enemies++
 			tierSum += def.Tier
 			goldMin += def.GoldMin

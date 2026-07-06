@@ -459,15 +459,16 @@ func init() {
 	}
 	for _, def := range enemyDefinitions {
 		if err := validateEnemyStatBounds(enemyStatBounds{
-			Name:            def.Name,
-			SkillCastChance: def.SkillCastChance,
-			PoisonChance:    def.PoisonChance,
-			Armor:           def.Armor,
-			MDef:            def.MDef,
-			AttackDamage:    def.AttackDamage,
-			XPValue:         def.XPValue,
-			SpellPower:      def.SpellPower,
-			Tier:            def.Tier,
+			Name:             def.Name,
+			SkillCastChance:  def.SkillCastChance,
+			PoisonChance:     def.PoisonChance,
+			LifestealPercent: def.LifestealPercent,
+			Armor:            def.Armor,
+			MDef:             def.MDef,
+			AttackDamage:     def.AttackDamage,
+			XPValue:          def.XPValue,
+			SpellPower:       def.SpellPower,
+			Tier:             def.Tier,
 		}); err != nil {
 			panic("core/enemies: " + err.Error())
 		}
@@ -799,7 +800,7 @@ func BattleEnemyInfo(g *GameState) EnemyDefinition {
 	if len(members) > 0 {
 		return EnemyInfoFor(members[0])
 	}
-	return EnemyInfo(EnemyRat)
+	return EnemyInfo(defaultEnemyKind)
 }
 
 func BattleEnemyGroupName(g *GameState) string {

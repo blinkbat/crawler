@@ -6,14 +6,23 @@ package core
 // on their own (the world rebuilds from the .map) — durable effects should be gated
 // on a persisted Switch/Counter via a Preserve trigger, which re-applies on load.
 
+// placementOffMap reports whether a runtime placement at (x,z) must bail: no game or
+// off the map. The shared guard prologue for the Spawn*/OpenWall/Teleport effects.
+func placementOffMap(g *GameState, x, z int) bool {
+	return g == nil || !g.Area.InBounds(x, z)
+}
+
+// onPlayerTile reports whether (x,z) is the party's tile — a placement there would
+// embed a pack/chest under the party, so the spawn effects skip it.
+func (g *GameState) onPlayerTile(x, z int) bool {
+	return g.Player.TileX == x && g.Player.TileZ == z
+}
+
 // SpawnFoeAt drops a one-member pack of kind at (x,z) on the given level (0 = resolve
 // to the tile's standable surface). No-op off-map, on the player's tile, or where a
 // pack already stands. The pack engages by the normal step-into / AI rules.
 func SpawnFoeAt(g *GameState, kind EnemyKind, x, z, level int) {
-	if g == nil || !g.Area.InBounds(x, z) {
-		return
-	}
-	if g.Player.TileX == x && g.Player.TileZ == z {
+	if placementOffMap(g, x, z) || g.onPlayerTile(x, z) {
 		return
 	}
 	if PackIndexAtTile(g.Packs, x, z) >= 0 {
@@ -37,10 +46,7 @@ func SpawnFoeAt(g *GameState, kind EnemyKind, x, z, level int) {
 // tile, or where a chest already stands (chests block their tile). An empty item
 // list yields a pre-looted chest (matches placeChests).
 func SpawnChestAt(g *GameState, x, z, level int, items []ItemKind) {
-	if g == nil || !g.Area.InBounds(x, z) {
-		return
-	}
-	if g.Player.TileX == x && g.Player.TileZ == z {
+	if placementOffMap(g, x, z) || g.onPlayerTile(x, z) {
 		return
 	}
 	if ChestIndexAt(g.Chests, x, z) >= 0 {
@@ -66,7 +72,7 @@ func SpawnChestAt(g *GameState, x, z, level int, items []ItemKind) {
 // flat map with no wall layer. Rendering/movement caches key on the grid layers, so
 // the passage opens the same frame.
 func OpenWallAt(g *GameState, x, z, level int) {
-	if g == nil || !g.Area.InBounds(x, z) {
+	if placementOffMap(g, x, z) {
 		return
 	}
 	a := &g.Area
@@ -91,7 +97,7 @@ func OpenWallAt(g *GameState, x, z, level int) {
 // TeleportParty moves the party to (x,z) on level (0 = resolve to the tile's surface),
 // centering the sprite. No animation — an instant blink (the trigger-action move).
 func TeleportParty(g *GameState, x, z, level int) {
-	if g == nil || !g.Area.InBounds(x, z) {
+	if placementOffMap(g, x, z) {
 		return
 	}
 	g.Player.TileX = x

@@ -38,19 +38,8 @@ var phaseNames = [TimeOfDayCount]string{
 	Midnight:  "Midnight",
 }
 
-func init() {
-	for _, n := range phaseNames {
-		if n == "" {
-			panic("core: phaseNames is missing a label for a TimeOfDay phase — add a row to the keyed array")
-		}
-	}
-}
+func init() { assertNoEmptyLabels("phaseNames", phaseNames[:]) }
 
 // PhaseName returns the HUD label, or "" for an out-of-range phase (defensive:
 // in-package callers feed 0..TimeOfDayCount-1, but guard a stray external value).
-func PhaseName(p TimeOfDay) string {
-	if p < 0 || int(p) >= TimeOfDayCount {
-		return ""
-	}
-	return phaseNames[p]
-}
+func PhaseName(p TimeOfDay) string { return enumLabel(phaseNames[:], p) }

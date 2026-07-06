@@ -17,6 +17,7 @@ import (
 
 type layerDef struct {
 	name         string                                     // selector label (layerName)
+	desc         string                                     // one-line layer-picker caption (layerDescription)
 	accent       rl.Color                                   // selector chip / dropdown swatch (layerAccent)
 	grid         func(s *State) *[]string                   // edited slice; nil = gridless (Entities)
 	stampsLevel  bool                                       // a content paint lifts the tile to editLevel
@@ -41,6 +42,7 @@ func init() {
 	layerDefs = [layerCount]layerDef{
 		LayerWalls: {
 			name: "Faces", accent: rl.NewColor(150, 148, 142, 255),
+			desc: "Cliff-face skin (set via right-click, not painted).",
 			grid:     func(s *State) *[]string { return &s.area.Walls },
 			sentinel: core.TileOpen, hasSentinel: true,
 			// Walls don't stamp a level; stampActiveLevel no-ops, so paintContentCell just
@@ -66,6 +68,7 @@ func init() {
 		},
 		LayerFloor: {
 			name: "Floor", accent: rl.NewColor(120, 184, 110, 255),
+			desc: "Walkable surface variant — grass, stone, water, ramps.",
 			grid:        func(s *State) *[]string { return &s.area.Floor },
 			stampsLevel: true,
 			sentinel:    core.FloorAuto, hasSentinel: true,
@@ -85,6 +88,7 @@ func init() {
 		},
 		LayerDecor: {
 			name: "Decor", accent: rl.NewColor(110, 186, 170, 255),
+			desc: "Cosmetic scatter that never blocks — plants, debris, rugs.",
 			grid:        func(s *State) *[]string { return &s.area.Decor },
 			stampsLevel: true,
 			sentinel:    core.DecorEmpty, hasSentinel: true,
@@ -111,6 +115,7 @@ func init() {
 		},
 		LayerProps: {
 			name: "Props", accent: rl.NewColor(200, 140, 82, 255),
+			desc: "Placed objects — trees, crates, pillars (most block).",
 			grid:        func(s *State) *[]string { return &s.area.Props },
 			stampsLevel: true,
 			sentinel:    core.TilePropEmpty, hasSentinel: true,
@@ -136,6 +141,7 @@ func init() {
 		},
 		LayerCeiling: {
 			name: "Ceiling", accent: rl.NewColor(96, 150, 208, 255),
+			desc: "Overhead slab: solid roof vs open sky.",
 			grid:        func(s *State) *[]string { return &s.area.Ceiling },
 			stampsLevel: true,
 			sentinel:    core.TileCeilingOpen, hasSentinel: true,
@@ -155,6 +161,7 @@ func init() {
 		},
 		LayerElevation: {
 			name: "Elevation", accent: rl.NewColor(198, 168, 120, 255),
+			desc: "Per-tile ground height — paint cubes to raise/lower terrain.",
 			grid:     func(s *State) *[]string { return &s.area.Elevation },
 			sentinel: core.ElevationChar(core.ElevationBaseline), hasSentinel: true,
 			apply: func(s *State, x, z int, b Brush) {
@@ -182,6 +189,7 @@ func init() {
 		},
 		LayerEntities: {
 			name: "Entities", accent: rl.NewColor(214, 176, 96, 255),
+			desc: "Player start, enemy packs, chests, doors, crystals.",
 			// Gridless: no grid/sentinel/footprint/level tags. applyEntityBrush sets its own
 			// dirty only when a placement lands; clearEntitiesAt reports whether it removed one.
 			apply:        func(s *State, x, z int, b Brush) { applyEntityBrush(s, x, z, b.Entity) },
@@ -192,18 +200,6 @@ func init() {
 			glyph:        func(s *State, x, z, lvl int) (byte, bool) { return 0, false },
 		},
 	}
-}
-
-// layerDescriptions is the one-line caption the layer picker shows for each layer
-// (the "per-row description" the menus already carry). Indexed by Layer.
-var layerDescriptions = [layerCount]string{
-	LayerWalls:     "Cliff-face skin (set via right-click, not painted).",
-	LayerFloor:     "Walkable surface variant — grass, stone, water, ramps.",
-	LayerDecor:     "Cosmetic scatter that never blocks — plants, debris, rugs.",
-	LayerProps:     "Placed objects — trees, crates, pillars (most block).",
-	LayerCeiling:   "Overhead slab: solid roof vs open sky.",
-	LayerElevation: "Per-tile ground height — paint cubes to raise/lower terrain.",
-	LayerEntities:  "Player start, enemy packs, chests, doors, crystals.",
 }
 
 // paintContentCell stamps a cell via set (which reports whether a paint actually
@@ -230,9 +226,9 @@ func eraseToSentinel(s *State, x, z int) bool {
 func init() {
 	for l := 0; l < layerCount; l++ {
 		d := &layerDefs[l]
-		if d.name == "" || d.apply == nil || d.erase == nil || d.charAt == nil ||
+		if d.name == "" || d.desc == "" || d.apply == nil || d.erase == nil || d.charAt == nil ||
 			d.isSentinel == nil || d.previewColor == nil || d.glyph == nil {
-			panic(fmt.Sprintf("editor: layerDefs[%d] incomplete — a new layer must fill every behavior field", l))
+			panic(fmt.Sprintf("editor: layerDefs[%d] incomplete — a new layer must fill every behavior field (incl. name + desc)", l))
 		}
 	}
 }

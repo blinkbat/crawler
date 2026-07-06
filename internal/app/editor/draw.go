@@ -2545,12 +2545,12 @@ func drawGrid(s *State, font rl.Font) {
 			continue
 		}
 		cx, cy := s.rect.tileCenter(sp.TileX, sp.TileZ)
-		leaderSlot := core.PackSpawnLeaderSlot(s.area, sp)
-		leader := packSpawnLeaderKind(s.area, sp)
+		leaderSlot := core.PackSpawnLeaderSlot(sp)
+		leader := packSpawnLeaderKind(sp)
 		col := fadeAlpha(packMarkerColor(leader), entityAlpha)
 		rl.DrawCircle(int32(cx), int32(cy), cell*packMarkerRadiusFrac, col)
 		rl.DrawCircleLines(int32(cx), int32(cy), cell*packMarkerRadiusFrac, fadeAlpha(entityMarkerOutline, entityAlpha))
-		label := packMarkerInitial(core.PackMemberDisplayName(s.area, sp, leaderSlot))
+		label := packMarkerInitial(core.PackMemberDisplayName(sp, leaderSlot))
 		measure := render.MeasureRichText(font, label, cell*packLabelFontFrac, 1)
 		render.DrawRichText(font, label,
 			rl.NewVector2(cx-measure.X/2, cy-measure.Y/2),
@@ -2801,7 +2801,7 @@ func tooltipLinesFor(s *State, x, z int) []string {
 			counts := map[string]int{}
 			order := []string{}
 			for i := range sp.Members {
-				name := core.PackMemberDisplayName(s.area, sp, i)
+				name := core.PackMemberDisplayName(sp, i)
 				if _, ok := counts[name]; !ok {
 					order = append(order, name)
 				}
@@ -3456,9 +3456,9 @@ func drawPackEditModal(s *State, font rl.Font, theme render.Theme) {
 	// Leader hint: the highest-tier member is whose silhouette shows in-world.
 	leaderText := "Leader: —"
 	if len(pack.Members) > 0 {
-		leaderIdx := core.PackSpawnLeaderSlot(s.area, pack)
+		leaderIdx := core.PackSpawnLeaderSlot(pack)
 		if leaderIdx >= 0 && leaderIdx < len(pack.Members) {
-			leaderText = "Leader (highest tier): " + core.PackMemberDisplayName(s.area, pack, leaderIdx)
+			leaderText = "Leader (highest tier): " + core.PackMemberDisplayName(pack, leaderIdx)
 		}
 	}
 	render.DrawTextWithShadow(font, leaderText, r.X+modalContentInset, r.Y+38, editorFontHint, theme.TextMuted)
@@ -3471,7 +3471,7 @@ func drawPackEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawEntityListWindow(font, theme, lay, len(pack.Members), s.modalCursor,
 		"(empty — close to drop)",
 		func(i int) string {
-			return core.PackMemberDisplayName(s.area, pack, i) + " · " + core.RowLabel(pack.Members[i].Row)
+			return core.PackMemberDisplayName(pack, i) + " · " + core.RowLabel(pack.Members[i].Row)
 		})
 	drawModalButtons(font, lay.actRects, cmdLabels(actions))
 	drawModalButtons(font, lay.addRects, cmdLabels(adds))
@@ -3631,7 +3631,7 @@ func entityListRows(s *State) []entityListRow {
 	for i, p := range s.area.PackSpawns {
 		name := "(empty)"
 		if len(p.Members) > 0 {
-			name = core.PackMemberDisplayName(s.area, p, core.PackSpawnLeaderSlot(s.area, p))
+			name = core.PackMemberDisplayName(p, core.PackSpawnLeaderSlot(p))
 		}
 		rows = append(rows, entityListRow{
 			label: fmt.Sprintf("Pack x%d  %s  —  %s", len(p.Members), name, core.TileCoord(p.TileX, p.TileZ)),

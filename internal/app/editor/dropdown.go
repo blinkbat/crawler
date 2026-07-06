@@ -406,7 +406,7 @@ func layerSelectEntries(s *State) []dropdownEntry {
 		l := l
 		out = append(out, dropdownEntry{
 			label:    layerName(l),
-			desc:     layerDescriptions[l],
+			desc:     layerDescription(l),
 			apply:    func(s *State) { s.layer = l },
 			toggle:   func(s *State) { toggleLayerVisibility(s, int(l), false) },
 			toggleOn: func(s *State) bool { return !s.layerHidden[l] },

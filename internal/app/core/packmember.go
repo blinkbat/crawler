@@ -42,65 +42,74 @@ func SwapPackMembers(sp *PackSpawn, i, j int) {
 	sp.Members[i], sp.Members[j] = sp.Members[j], sp.Members[i]
 }
 
-// PackMemberDefinition returns a pack member's effective definition. The area param
-// is retained for call-site stability (member kinds resolve straight to the registry).
-func PackMemberDefinition(a AreaDefinition, sp PackSpawn, idx int) EnemyDefinition {
+// defaultEnemyKind is the fallback kind returned when a pack slot or battle target
+// can't be resolved (empty pack, out-of-range index). Named so the "which enemy do we
+// fall back to" decision lives in one place instead of EnemyRat hardcoded at each site.
+const defaultEnemyKind = EnemyRat
+
+// PackMemberDefinition returns a pack member's effective definition (member kinds
+// resolve straight to the registry).
+func PackMemberDefinition(sp PackSpawn, idx int) EnemyDefinition {
 	if !PackMemberIndexInRange(sp, idx) {
-		return EnemyInfo(EnemyRat)
+		return EnemyInfo(defaultEnemyKind)
 	}
 	return EnemyInfo(sp.Members[idx].Kind)
 }
 
 // PackMemberDisplayName is the editor-facing name for an authored pack slot.
-func PackMemberDisplayName(a AreaDefinition, sp PackSpawn, idx int) string {
-	return PackMemberDefinition(a, sp, idx).SingularName
+func PackMemberDisplayName(sp PackSpawn, idx int) string {
+	return PackMemberDefinition(sp, idx).SingularName
 }
 
 // PackMemberVisualKind returns the base kind whose sprite/color represents a pack slot.
-func PackMemberVisualKind(a AreaDefinition, sp PackSpawn, idx int) EnemyKind {
+func PackMemberVisualKind(sp PackSpawn, idx int) EnemyKind {
 	if !PackMemberIndexInRange(sp, idx) {
-		return EnemyRat
+		return defaultEnemyKind
 	}
 	return sp.Members[idx].Kind
 }
 
 // PackSpawnLeaderSlot returns the highest-tier member slot.
-func PackSpawnLeaderSlot(a AreaDefinition, sp PackSpawn) int {
-	return leaderSlot(len(sp.Members), func(i int) int { return PackMemberDefinition(a, sp, i).Tier })
+func PackSpawnLeaderSlot(sp PackSpawn) int {
+	return leaderSlot(len(sp.Members), func(i int) int { return PackMemberDefinition(sp, i).Tier })
 }
 
 // PackSpawnLeaderKind returns the visual base kind for the pack's highest-tier member.
-func PackSpawnLeaderKind(a AreaDefinition, sp PackSpawn) EnemyKind {
+func PackSpawnLeaderKind(sp PackSpawn) EnemyKind {
 	if len(sp.Members) == 0 {
-		return EnemyRat
+		return defaultEnemyKind
 	}
-	return PackMemberVisualKind(a, sp, PackSpawnLeaderSlot(a, sp))
+	return PackMemberVisualKind(sp, PackSpawnLeaderSlot(sp))
 }
 
 // enemyStatBounds names the combat-stat fields validateEnemyStatBounds checks, so
 // callers can't transpose armor/mdef/attack/xp/spellpower/tier into the wrong slot
 // (they're all bare ints).
 type enemyStatBounds struct {
-	Name            string
-	SkillCastChance float64
-	PoisonChance    float64
-	Armor           int
-	MDef            int
-	AttackDamage    int
-	XPValue         int
-	SpellPower      int
-	Tier            int
+	Name             string
+	SkillCastChance  float64
+	PoisonChance     float64
+	LifestealPercent float64
+	Armor            int
+	MDef             int
+	AttackDamage     int
+	XPValue          int
+	SpellPower       int
+	Tier             int
 }
 
 // validateEnemyStatBounds checks the static enemy registry's combat-stat fields at
-// init: proc chances (SkillCastChance, PoisonChance) must be in [0,1]; mitigation,
-// reward, damage, and tier must be non-negative.
+// init: probability fields (SkillCastChance, PoisonChance, LifestealPercent) must be
+// in [0,1]; mitigation, reward, damage, and tier must be non-negative.
 func validateEnemyStatBounds(b enemyStatBounds) error {
 	if !ValidChance(b.SkillCastChance) {
 		return fmt.Errorf("enemy %q has SkillCastChance %v outside [0, 1]", b.Name, b.SkillCastChance)
 	}
 	if !ValidChance(b.PoisonChance) {
 		return fmt.Errorf("enemy %q has PoisonChance %v outside [0, 1]", b.Name, b.PoisonChance)
+	}
+	if !ValidChance(b.LifestealPercent) {
+		return fmt.Errorf("enemy %q has LifestealPercent %v outside [0, 1]", b.Name, b.LifestealPercent)
 	}
 	if b.Armor < 0 || b.MDef < 0 || b.AttackDamage < 0 || b.XPValue < 0 || b.SpellPower < 0 || b.Tier < 0 {
 		return fmt.Errorf("enemy %q has a negative stat field (armor/mdef/attack/xp/spellpower/tier)", b.Name)

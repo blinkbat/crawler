@@ -752,10 +752,13 @@ func drawRecallBar(timing core.TimingState, g *core.GameState, assets Resources,
 			result = timing.SequenceResults[i]
 		}
 		switch result {
-		case core.SeqResultCorrect:
-			drawArrow(cx, cy, arrowSize, timing.SequenceTargets[i], fadeForFlash(seqOkColor, flashing, g.Battle.TimingFlash))
-		case core.SeqResultWrong:
-			drawArrow(cx, cy, arrowSize, timing.SequenceTargets[i], fadeForFlash(seqFailColor, flashing, g.Battle.TimingFlash))
+		case core.SeqResultCorrect, core.SeqResultWrong:
+			// Landed reveal: arrow tinted by correctness via the SHARED seqResultColor
+			// mapping (so a retune of the ok/fail hues flows to both bars). This is a
+			// FACE-DOWN reveal, so — unlike drawSeqArrowSlot — no drop shadow and no
+			// landed pulse; that visual divergence is why recall doesn't route through
+			// drawSeqArrowSlot wholesale.
+			drawArrow(cx, cy, arrowSize, timing.SequenceTargets[i], fadeForFlash(seqResultColor(result), flashing, g.Battle.TimingFlash))
 		default:
 			rl.DrawCircleV(rl.NewVector2(cx, cy), arrowSize*0.5, colorWithAlpha(timingCursorColor, 90))
 		}

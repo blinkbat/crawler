@@ -1377,19 +1377,14 @@ func (s *State) armTextUndo() {
 	if !focusIsAreaText(s.focus) {
 		return
 	}
-	if s.textUndoFocus != s.focus {
-		s.textUndoBefore = core.CloneArea(s.area)
-		s.textUndoFocus = s.focus
-		s.textUndoSnapped = false
-	}
+	s.textUndo.armFor(s, s.focus)
 }
 
 // onFocusedTextEdit is pumpFocusField's per-keystroke onChange: dirty + cache
 // invalidation (markDirty), plus ONE lazy undo step for area-mutating prose fields.
 func (s *State) onFocusedTextEdit() {
-	if focusIsAreaText(s.focus) && !s.textUndoSnapped {
-		commitUndoSnapshot(s, s.textUndoBefore)
-		s.textUndoSnapped = true
+	if focusIsAreaText(s.focus) {
+		s.textUndo.commitOnce(s)
 	}
 	s.markDirty()
 }
@@ -2151,7 +2146,7 @@ func packToggleSelectedRow(s *State, pack *core.PackSpawn) {
 		m.Row = core.RowBack
 	}
 	s.dirty = true
-	s.flash(core.PackMemberDisplayName(s.area, *pack, s.modalCursor) + " → " + packRowLabel(pack, s.modalCursor) + " row")
+	s.flash(core.PackMemberDisplayName(*pack, s.modalCursor) + " → " + packRowLabel(pack, s.modalCursor) + " row")
 }
 
 // openPackAIDropdown arms the AI-mode dropdown anchored on the "AI:" button.

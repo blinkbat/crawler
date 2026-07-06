@@ -123,8 +123,8 @@ type MapFile struct {
 	// Dialogs is the authored conversation list — one OPAQUE JSON object per line.
 	// This leaf package stays JSON-agnostic (verbatim); core marshals DialogDefinition.
 	Dialogs []string
-	// Triggers is the authored dialog-trigger list — opaque JSON per line, same
-	// verbatim handling as Dialogs (core marshals DialogTrigger).
+	// Triggers is the authored trigger list — opaque JSON per line, same
+	// verbatim handling as Dialogs (core marshals Trigger).
 	Triggers []string
 	// Locations is the authored named-region list — opaque JSON per line, same
 	// verbatim handling as Dialogs (core marshals Location).
@@ -1082,34 +1082,33 @@ func levelCharRangeHint() string {
 	return fmt.Sprintf("'0'..'9' or 'A'..'%c'", MaxLevelChar)
 }
 
-func (mf *MapFile) validate() error {
-	if mf.Width <= 0 || mf.Height <= 0 {
-		return fmt.Errorf("size must be >0x0; got %dx%d", mf.Width, mf.Height)
-	}
-	for _, layer := range mf.requiredLayers() {
-		if err := mf.validateGridDims(layer.name+" layer", layer.rows); err != nil {
+// ValidateGrids runs EVERY grid check — dimensions AND cell-char alphabet — over the
+// required layers and each PRESENT optional grid (ceiling, elevation, solids/prop/
+// decor stacks, prop_levels/prop_yaw/decor_levels). Absent optional grids are skipped
+// (their readers default them). Exported so core's editor-path AreaFromMapFile shares
+// the SAME checks as disk Load, rather than the weaker dims-only subset it used to run
+// (which silently accepted bad level/yaw/elevation chars a disk load rejects).
+func (mf *MapFile) ValidateGrids() error {
+	for _, layer := range mf.RequiredLayers() {
+		if err := mf.validateGridDims(layer.Name+" layer", layer.Rows); err != nil {
 			return err
 		}
 	}
-	// Ceiling optional: missing → blank "no ceiling" layer so downstream can
-	// index it like the others; partial → malformed (an authoring mistake).
-	if len(mf.Ceiling) == 0 {
-		mf.Ceiling = BlankLayer(mf.Width, mf.Height, CeilingOpenChar)
-	} else if err := mf.validateGridDims("ceiling layer", mf.Ceiling); err != nil {
-		return err
+	// Ceiling: dims only (no cell alphabet). Absent → skipped (reader blanks it).
+	if len(mf.Ceiling) > 0 {
+		if err := mf.validateGridDims("ceiling layer", mf.Ceiling); err != nil {
+			return err
+		}
 	}
-	// Elevation optional (same rule as ceiling): missing → blank all-'0' (flat).
-	if len(mf.Elevation) == 0 {
-		mf.Elevation = BlankLayer(mf.Width, mf.Height, ElevationGroundChar)
-	} else {
+	// Elevation: dims + level-char alphabet. Each cell must be a level char '0'..'9'
+	// then 'A'..'K' for 10..20 (upper bound 'K' = core's MaxElevationLevel; core's
+	// map.go init pins ElevationChar(MaxElevationLevel)=='K' so this can't drift).
+	// Anything else reads as ground 0, silently flattening the geometry.
+	if len(mf.Elevation) > 0 {
 		if err := mf.validateGridDims("elevation layer", mf.Elevation); err != nil {
 			return err
 		}
 		for i, row := range mf.Elevation {
-			// Each cell must be a level char: '0'..'9' then 'A'..'K' for 10..20
-			// (upper bound 'K' = core's MaxElevationLevel 20; core's map.go init
-			// asserts ElevationChar(MaxElevationLevel)=='K' so this can't drift).
-			// Anything else reads as ground 0, silently flattening the geometry.
 			for c := 0; c < len(row); c++ {
 				if b := row[c]; !isLevelChar(b) {
 					return fmt.Errorf("elevation layer row %d col %d has bad level char %q (expected %s)", i, c, string(row[c]), levelCharRangeHint())
@@ -1135,7 +1134,7 @@ func (mf *MapFile) validate() error {
 			return err
 		}
 	}
-	// prop_levels / decor_levels: optional per-tile level grids; dimension-check only.
+	// prop_levels / decor_levels: dims + level-char alphabet; prop_yaw its own facing alphabet.
 	if err := mf.validateOptionalGrid(SectionPropLevels, mf.PropLevels); err != nil {
 		return err
 	}
@@ -1143,6 +1142,25 @@ func (mf *MapFile) validate() error {
 		return err
 	}
 	if err := mf.validateOptionalGrid(SectionDecorLevels, mf.DecorLevels); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (mf *MapFile) validate() error {
+	if mf.Width <= 0 || mf.Height <= 0 {
+		return fmt.Errorf("size must be >0x0; got %dx%d", mf.Width, mf.Height)
+	}
+	// Ceiling/Elevation optional: missing → blank layer so downstream can index them
+	// like the others (ceiling = "no roof", elevation = flat all-'0'). Fill BEFORE
+	// ValidateGrids so a partial (present-but-ragged) one still fails as malformed.
+	if len(mf.Ceiling) == 0 {
+		mf.Ceiling = BlankLayer(mf.Width, mf.Height, CeilingOpenChar)
+	}
+	if len(mf.Elevation) == 0 {
+		mf.Elevation = BlankLayer(mf.Width, mf.Height, ElevationGroundChar)
+	}
+	if err := mf.ValidateGrids(); err != nil {
 		return err
 	}
 	// faces: bounds-check each so a stray line can't feed an off-map index.

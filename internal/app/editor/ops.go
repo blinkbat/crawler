@@ -516,14 +516,10 @@ func applyEntityBrush(s *State, x, z int, kind entityKind) {
 		moveStartTo(s, x, z)
 		return
 	}
-	if s.area.WallAt(x, z) {
-		s.flash("Entities need an open cell")
-		return
-	}
-	if blkProp(&s.area, x, z).fail {
-		s.flash("Cell is occupied by a prop")
-		return
-	}
+	// No upfront wall/prop guard here: each place*At below runs its own
+	// firstBlocker(...PlaceBlockers) whose commonEntityBlockers already reject wall/prop
+	// with noun-specific messages ("Pack needs an open cell…"). A generic guard here
+	// would only preempt those clearer rejections.
 	brush := s.activeBrush()
 	switch kind {
 	case entityAddEnemy:
@@ -897,8 +893,8 @@ func removePackAt(packs []core.PackSpawn, x, z int) []core.PackSpawn {
 
 // packSpawnLeaderKind picks the pack's field icon kind (highest-Tier member, ties
 // by order). Delegates to core.PackSpawnLeaderKind.
-func packSpawnLeaderKind(a core.AreaDefinition, sp core.PackSpawn) core.EnemyKind {
-	return core.PackSpawnLeaderKind(a, sp)
+func packSpawnLeaderKind(sp core.PackSpawn) core.EnemyKind {
+	return core.PackSpawnLeaderKind(sp)
 }
 
 // setLayerCell writes byte b at (x,z) in a layer grid. Callers flag reachability
@@ -1311,6 +1307,41 @@ func invalidateContentCaches(s *State) {
 // for GC (avoids a fresh array alloc every stroke at the cap).
 func pushUndo(s *State) {
 	commitUndoSnapshot(s, core.CloneArea(s.area))
+}
+
+// lazyUndoSession banks ONE undo step per focused-field edit session, lazily on the
+// first change (like a paint stroke), so Ctrl+Z steps back to the pre-edit state
+// rather than past it. Shared by the numeric-dialog and prose-text focus paths, which
+// used to carry two separate before/snapped(/focus) field-triples on State.
+type lazyUndoSession struct {
+	before  core.AreaDefinition // pre-edit snapshot
+	focus   focusField          // focus this snapshot belongs to (focusNone = disarmed); armFor only
+	snapped bool                // whether the single step has been banked yet
+}
+
+// begin (re)snapshots unconditionally — for a path that starts a fresh session on
+// every focus (the numeric dialog field).
+func (u *lazyUndoSession) begin(s *State) {
+	u.before = core.CloneArea(s.area)
+	u.snapped = false
+}
+
+// armFor snapshots only when focus changes to f — for the prose fields, where staying
+// on the same field continues one session. Disarm by setting u.focus = focusNone.
+func (u *lazyUndoSession) armFor(s *State, f focusField) {
+	if u.focus != f {
+		u.before = core.CloneArea(s.area)
+		u.focus = f
+		u.snapped = false
+	}
+}
+
+// commitOnce banks the snapshot the first time it's called since begin/armFor.
+func (u *lazyUndoSession) commitOnce(s *State) {
+	if !u.snapped {
+		commitUndoSnapshot(s, u.before)
+		u.snapped = true
+	}
 }
 
 // commitUndoSnapshot banks `before` onto the undo stack, invalidates the

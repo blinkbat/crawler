@@ -2764,41 +2764,58 @@ func damagePartyMemberDefendableCrit(g *core.GameState, partyIndex, rawAmount in
 // The init() assert pins each descriptor to the reflected `*Turns` field set so a
 // new counter can't silently linger on a corpse.
 
+// drainKind records HOW a timed `*Turns` counter drains over time. The init assert
+// requires every KEEP-ON-DEATH counter (clearOnDeath:false) to name a real drain path
+// — else, since the per-turn tick list is hand-maintained (see
+// drainNonDamagingPartyStatuses), a new kept counter could be classified for death but
+// silently never tick down on a living actor, lingering forever.
+type drainKind int
+
+const (
+	drainNone      drainKind = iota // does not drain over time
+	drainTurnEnd                    // drainNonDamaging{Party,Enemy}Statuses, at the actor's turn end
+	drainTurnStart                  // tickSkipStatusAtTurnStart (Sleep/Stun), at turn start
+	drainDoT                        // the damage-over-time tick path (Poison/Bleed/Burn)
+	drainCustom                     // its own bespoke per-turn path (e.g. Spirit)
+)
+
 // enemyStatusCounter is one classified timed counter: field name (for the assert),
-// a live-field accessor, and whether it's wiped on death.
+// a live-field accessor, whether it's wiped on death, and how it drains.
 type enemyStatusCounter struct {
 	field        string
 	ptr          func(*core.Enemy) *int
 	clearOnDeath bool
+	drain        drainKind
 }
 
 type partyStatusCounter struct {
 	field        string
 	ptr          func(*core.PartyMember) *int
 	clearOnDeath bool
+	drain        drainKind
 }
 
 // enemyDeathStatuses / partyDeathStatuses classify every `*Turns` counter;
 // clearOnDeath=true rows are zeroed, false rows preserved (see doc above).
 var enemyDeathStatuses = []enemyStatusCounter{
-	{"BurnTurns", func(e *core.Enemy) *int { return &e.BurnTurns }, true},
-	{"SleepTurns", func(e *core.Enemy) *int { return &e.SleepTurns }, true},
-	{"StunTurns", func(e *core.Enemy) *int { return &e.StunTurns }, true},
-	{"PoisonTurns", func(e *core.Enemy) *int { return &e.PoisonTurns }, true},
-	{"BleedTurns", func(e *core.Enemy) *int { return &e.BleedTurns }, true},
-	{"TauntTurns", func(e *core.Enemy) *int { return &e.TauntTurns }, false},
+	{"BurnTurns", func(e *core.Enemy) *int { return &e.BurnTurns }, true, drainDoT},
+	{"SleepTurns", func(e *core.Enemy) *int { return &e.SleepTurns }, true, drainTurnStart},
+	{"StunTurns", func(e *core.Enemy) *int { return &e.StunTurns }, true, drainTurnStart},
+	{"PoisonTurns", func(e *core.Enemy) *int { return &e.PoisonTurns }, true, drainDoT},
+	{"BleedTurns", func(e *core.Enemy) *int { return &e.BleedTurns }, true, drainDoT},
+	{"TauntTurns", func(e *core.Enemy) *int { return &e.TauntTurns }, false, drainTurnEnd},
 }
 
 var partyDeathStatuses = []partyStatusCounter{
-	{"SleepTurns", func(m *core.PartyMember) *int { return &m.SleepTurns }, true},
-	{"WebbedTurns", func(m *core.PartyMember) *int { return &m.WebbedTurns }, true},
-	{"ConfusedTurns", func(m *core.PartyMember) *int { return &m.ConfusedTurns }, true},
-	{"PoisonTurns", func(m *core.PartyMember) *int { return &m.PoisonTurns }, false},
-	{"StunTurns", func(m *core.PartyMember) *int { return &m.StunTurns }, false},
-	{"IceArmorTurns", func(m *core.PartyMember) *int { return &m.IceArmorTurns }, false},
-	{"RegenTurns", func(m *core.PartyMember) *int { return &m.RegenTurns }, false},
-	{"VanishTurns", func(m *core.PartyMember) *int { return &m.VanishTurns }, true},
-	{"SpiritTurns", func(m *core.PartyMember) *int { return &m.SpiritTurns }, true},
+	{"SleepTurns", func(m *core.PartyMember) *int { return &m.SleepTurns }, true, drainTurnStart},
+	{"WebbedTurns", func(m *core.PartyMember) *int { return &m.WebbedTurns }, true, drainTurnEnd},
+	{"ConfusedTurns", func(m *core.PartyMember) *int { return &m.ConfusedTurns }, true, drainTurnEnd},
+	{"PoisonTurns", func(m *core.PartyMember) *int { return &m.PoisonTurns }, false, drainDoT},
+	{"StunTurns", func(m *core.PartyMember) *int { return &m.StunTurns }, false, drainTurnStart},
+	{"IceArmorTurns", func(m *core.PartyMember) *int { return &m.IceArmorTurns }, false, drainTurnEnd},
+	{"RegenTurns", func(m *core.PartyMember) *int { return &m.RegenTurns }, false, drainTurnEnd},
+	{"VanishTurns", func(m *core.PartyMember) *int { return &m.VanishTurns }, true, drainTurnEnd},
+	{"SpiritTurns", func(m *core.PartyMember) *int { return &m.SpiritTurns }, true, drainCustom},
 }
 
 // init asserts the death-clear descriptors are COMPLETE: every `int` field ending
@@ -2820,10 +2837,18 @@ func init() {
 	enemyClassified := make(map[string]bool, len(enemyDeathStatuses))
 	for _, s := range enemyDeathStatuses {
 		enemyClassified[s.field] = true
+		// A counter KEPT on death must name a real drain path, else it lingers forever
+		// on a living actor (the hand-maintained tick list can't catch a forgotten one).
+		if !s.clearOnDeath && s.drain == drainNone {
+			panic("battle: Enemy." + s.field + " is kept on death but has no drain path (drainNone) — it would never tick down; classify how it drains")
+		}
 	}
 	partyClassified := make(map[string]bool, len(partyDeathStatuses))
 	for _, s := range partyDeathStatuses {
 		partyClassified[s.field] = true
+		if !s.clearOnDeath && s.drain == drainNone {
+			panic("battle: PartyMember." + s.field + " is kept on death but has no drain path (drainNone) — it would never tick down; classify how it drains")
+		}
 	}
 	assertTurnsCountersClassified("Enemy", core.Enemy{}, enemyClassified)
 	assertTurnsCountersClassified("PartyMember", core.PartyMember{}, partyClassified)
