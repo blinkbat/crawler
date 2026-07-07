@@ -130,6 +130,7 @@ const (
 	cutoffMinAlpha = 0.02 // LPF floor so Cutoff=0 stays a dark tone, not silence
 	crushMaxHold   = 24   // Crush=1 → sample-and-hold 25 samples (~882 Hz)
 	maxDuration    = 30.0 // length cap (sec) so a corrupt .snd can't drive a huge alloc
+	shortSynthFloor = 0.02 // floor (sec) for a non-positive duration: a short blip, not a 30s tone
 )
 
 // ShapeParams is the full knob set for the sound editor; SynthShape wraps it
@@ -230,14 +231,17 @@ func adsrEnv(secs, duration, attack, decay, sustain, release, releaseStart float
 //
 //	oscillator → noise mix → drive → low-pass → bitcrush → ×(ADSR·tremolo·volume)
 func SynthShapeParams(p ShapeParams) []int16 {
-	// NaN slips past `> maxDuration` (all NaN comparisons are false), and int(NaN)
-	// is unspecified — it can land large-positive and dodge the samples<=0 guard,
-	// blowing up the make below. Pin non-finite/non-positive durations first.
-	if math.IsNaN(p.Duration) || p.Duration <= 0 {
+	// NaN/±Inf slip past `> maxDuration` (all NaN comparisons are false) and make
+	// int(p.Duration*SampleRate) unspecified — it can land large-positive and dodge
+	// the samples<=0 guard, blowing up the make below. Pin the length before any math.
+	switch {
+	case math.IsNaN(p.Duration) || math.IsInf(p.Duration, 0) || p.Duration > maxDuration:
 		p.Duration = maxDuration
-	}
-	if p.Duration > maxDuration {
-		p.Duration = maxDuration
+	case p.Duration <= 0:
+		// A non-positive duration is a (near-)silent cue, not a full-length tone; floor
+		// it to a short blip (like SynthChord's "no time → minimal") so a corrupt "0"
+		// sidecar can't emit a 30s buffer, while keeping the envelope math finite.
+		p.Duration = shortSynthFloor
 	}
 	samples := samplesFor(p.Duration)
 	noiseMix := clamp01(p.NoiseMix)

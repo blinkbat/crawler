@@ -644,18 +644,28 @@ func tauntedAttackerTarget(g *GameState) (int, bool) {
 // Shared by the battle commit (pickEnemyAttackTarget) and the render forecast so
 // the incoming-hit marker can't drift from who's actually struck. -1 = no target.
 func PeekEnemyAttackerTarget(g *GameState) int {
+	strike, _ := EnemyAttackTargets(g)
+	return strike
+}
+
+// EnemyAttackTargets returns the slot the current enemy attacker actually STRIKES
+// (Taunt/Guard redirect folded in) and the NATURAL round-robin slot the
+// EnemyAttackCursor must advance to. They differ under a Guard: the strike bends onto
+// the guardian, but the cursor must still advance by the ward's own natural slot —
+// else the round-robin keeps re-picking the ward, redirecting onto the guardian, and
+// stalls there, sparing the rest of the party. A live Taunt forces both onto the
+// taunter (Guard redirect suppressed). Neither advances the cursor; both -1 for no target.
+func EnemyAttackTargets(g *GameState) (strike, cursor int) {
 	if forced, ok := tauntedAttackerTarget(g); ok {
-		return forced
+		return forced, forced
 	}
-	var target int
+	var natural int
 	if enemyPendingActionIsMelee(g) {
-		target = PeekNextMeleeEnemyTarget(g)
+		natural = PeekNextMeleeEnemyTarget(g)
 	} else {
-		target = PeekNextEnemyTarget(g)
+		natural = PeekNextEnemyTarget(g)
 	}
-	// Guard redirect rides here (like Taunt above) so the render forecast and the
-	// commit path agree on who's actually struck.
-	return redirectToGuardian(g, target)
+	return redirectToGuardian(g, natural), natural
 }
 
 // enemyPendingActionIsMelee reports whether the enemy attacker's committed

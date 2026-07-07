@@ -524,6 +524,34 @@ func TestPickEnemyAttackTarget_SkipsDeadPartyMembers(t *testing.T) {
 	}
 }
 
+// TestPickEnemyAttackTarget_GuardDoesNotStallRotation: a Guard redirects the ward's
+// incoming hits onto the guardian, but must NOT freeze the round-robin cursor on the
+// guardian — the rest of the party still has to come up in rotation. Regression for
+// the cursor committing the redirected (guardian) slot instead of the natural pick,
+// which stalled every enemy attack onto the guardian and spared slots 2/3.
+func TestPickEnemyAttackTarget_GuardDoesNotStallRotation(t *testing.T) {
+	g := newTestState()
+	for i := range g.Party {
+		g.Party[i].Row = core.RowFront // all reachable so the melee round-robin covers everyone
+	}
+	core.SetGuard(g.Party, 0, 1) // Warrior (0) guards Cleric (1)
+	g.Battle.EnemyAttackCursor = -1
+
+	seen := map[int]bool{}
+	for i := 0; i < 8; i++ {
+		seen[pickEnemyAttackTarget(g)] = true
+	}
+	// Slots 2 and 3 are neither ward nor guardian; if the rotation stalled on the
+	// guardian they would never be struck.
+	if !seen[2] || !seen[3] {
+		t.Fatalf("Guard stalled the enemy rotation: struck slots %v, want 2 and 3 to be reached", seen)
+	}
+	// The ward's slot never takes a direct hit — its turns redirect to the guardian.
+	if seen[1] {
+		t.Errorf("guarded ward (slot 1) took a direct hit; should redirect to the guardian")
+	}
+}
+
 func TestQualityTag_HidesLowGrades(t *testing.T) {
 	if qualityTag(core.TimingQualityMiss) != "" {
 		t.Errorf("Miss should not prefix")

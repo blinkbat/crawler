@@ -230,19 +230,25 @@ func EquipFromInventory(g *GameState, member int, slot EquipSlotIndex, kind Item
 	m := &g.Party[member]
 	// Two-handers occupy BOTH hands: equipping one clears the other hand, and
 	// equipping into a hand beside a two-hander clears that two-hander — else its
-	// StatBonus would stack twice. The freed item routes back to inventory.
-	if other, isHand := otherHand(slot); isHand {
-		if ItemIsTwoHanded(kind) || ItemIsTwoHanded(m.Equipped[other]) {
-			if freed := UnequipItem(m, other); freed != ItemNone {
-				g.Inventory = AddItem(g.Inventory, freed, 1)
-			}
-		}
+	// StatBonus would stack twice.
+	other, isHand := otherHand(slot)
+	freedOff := ItemNone
+	if isHand && (ItemIsTwoHanded(kind) || ItemIsTwoHanded(m.Equipped[other])) {
+		freedOff = UnequipItem(m, other)
 	}
 	prev, equipOk := EquipItem(m, slot, kind)
 	if !equipOk {
-		// Equip refused — put the consumed item back.
+		// Equip refused — put the consumed item back and restore the off-hand we
+		// evicted above, so a failed equip can't strand it unequipped in the bag.
 		g.Inventory = AddItem(g.Inventory, kind, 1)
+		if freedOff != ItemNone {
+			EquipItem(m, other, freedOff)
+		}
 		return false
+	}
+	// Route the freed off-hand and the displaced slot item back to inventory.
+	if freedOff != ItemNone {
+		g.Inventory = AddItem(g.Inventory, freedOff, 1)
 	}
 	if prev != ItemNone {
 		g.Inventory = AddItem(g.Inventory, prev, 1)

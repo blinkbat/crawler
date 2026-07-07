@@ -583,7 +583,7 @@ func applyAoEDamageToSlots(g *core.GameState, skill core.SkillID, slots []int, d
 		if _, ok := livingEnemyAt(g, slot); !ok {
 			continue
 		}
-		damageEnemyCrit(g, slot, damage, quality, tag, crit, false)
+		damageEnemyCrit(g, slot, damage, quality, tag, crit, false, false)
 		core.EnqueueEnemyVFX(g, vfx, slot)
 		hits++
 	}
@@ -1163,7 +1163,7 @@ func applySteal(g *core.GameState, quality int) bool {
 		if mod.StealBonusDamage > 0 {
 			rawBonus := core.EffectiveStats(*actor).STR * mod.StealBonusDamage
 			critBonus, _ = rollSkillCrit(g, actor, core.SkillSteal, quality)
-			bonus, defeated = damageEnemyCrit(g, g.Battle.EnemyIndex, rawBonus, quality, core.SkillTagPhys, critBonus, false)
+			bonus, defeated = damageEnemyCrit(g, g.Battle.EnemyIndex, rawBonus, quality, core.SkillTagPhys, critBonus, false, false)
 		}
 		enqueueSkillVFXAtEnemy(g, core.SkillSteal)
 		msg := stealMessage(actor.Name, kind, quality)
@@ -1421,7 +1421,7 @@ func applyBackstab(g *core.GameState, quality int) bool {
 	// universal DEX+timing crit chance.
 	crit, double := rollSkillCrit(g, actor, core.SkillBackstab, quality)
 	// Crit (and T2's double) applied post-armor inside damageEnemyCrit.
-	damage, defeated := damageEnemyCrit(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillBackstab), crit, double)
+	damage, defeated := damageEnemyCrit(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillBackstab), crit, double, false)
 	core.EnqueueEnemyVFX(g, core.VFXSlash, g.Battle.EnemyIndex)
 	logFoeHit(g, backstabMessage(actor.Name, target, damage, quality, defeated, crit), defeated)
 	finishActorTurn(g)
@@ -1497,7 +1497,7 @@ func strikeWithCrit(g *core.GameState, actor *core.PartyMember, skill core.Skill
 		tag = core.SkillTagPhys
 	}
 	// Crit is applied post-armor inside damageEnemyCrit.
-	damage, defeated = damageEnemyCrit(g, g.Battle.EnemyIndex, rawDamage, quality, tag, crit, false)
+	damage, defeated = damageEnemyCrit(g, g.Battle.EnemyIndex, rawDamage, quality, tag, crit, false, false)
 	return damage, defeated, crit
 }
 
@@ -1676,7 +1676,9 @@ func applyJudgment(g *core.GameState, quality int) bool {
 		raw = live.HP
 		tag = core.SkillTagNone
 	}
-	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, raw, quality, tag)
+	// bypassCap=executed: the execute must land its full HP even past MaxHitDamage,
+	// or a foe above the ceiling would survive the "guaranteed" kill.
+	damage, defeated := damageEnemyCrit(g, g.Battle.EnemyIndex, raw, quality, tag, false, false, executed)
 	enqueueSkillVFXAtEnemy(g, core.SkillJudgment)
 	foe := core.EnemySingularNoun(&target)
 	var msg string
@@ -1874,7 +1876,7 @@ func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, hitVerb, emptyVe
 	afflicted := 0
 	totalDealt := 0
 	forEachTargetableEnemy(g, skill, func(slot int, enemy *core.Enemy) {
-		dealt, defeated := damageEnemyCrit(g, slot, damage, quality, tag, crit, false)
+		dealt, defeated := damageEnemyCrit(g, slot, damage, quality, tag, crit, false, false)
 		totalDealt += dealt
 		core.EnqueueEnemyVFX(g, vfx, slot)
 		hits++
@@ -2218,15 +2220,20 @@ func applyTierDouble(raw int, actor *core.PartyMember, skill core.SkillID, quali
 }
 
 // applyCritMultiplier returns the post-crit damage, capped at core.MaxHitDamage —
-// the sanity ceiling vs extreme authored stats shared by both damage paths.
-// `double` (Backstab T2) multiplies again on top of CritMultiplier.
-func applyCritMultiplier(raw int, crit, double bool) int {
-	if !crit {
-		return min(raw, core.MaxHitDamage)
+// the sanity ceiling vs extreme authored stats shared by both damage paths. `double`
+// (Backstab T2) multiplies again on top of CritMultiplier. `bypassCap` lifts the
+// ceiling for a guaranteed-lethal execute (Judgment), which must land its full amount
+// or a very-high-HP foe would survive the "guaranteed" kill.
+func applyCritMultiplier(raw int, crit, double, bypassCap bool) int {
+	out := raw
+	if crit {
+		out *= core.CritMultiplier
+		if double {
+			out *= core.TierDamageDoubler
+		}
 	}
-	out := raw * core.CritMultiplier
-	if double {
-		out *= core.TierDamageDoubler
+	if bypassCap {
+		return out
 	}
 	return min(out, core.MaxHitDamage)
 }
@@ -2299,7 +2306,7 @@ func damageEnemyUntallied(g *core.GameState, slot, rawDamage, quality int, tag c
 // damageEnemyCrit for the many callers that never crit (DoTs, AoE status passes,
 // off-turn counters, tests).
 func damageEnemy(g *core.GameState, slot, rawDamage, quality int, tag core.SkillTag) (int, bool) {
-	return damageEnemyCrit(g, slot, rawDamage, quality, tag, false, false)
+	return damageEnemyCrit(g, slot, rawDamage, quality, tag, false, false, false)
 }
 
 // damageEnemyCrit applies rawDamage to the enemy at slot (mitigated per tag), then
@@ -2308,7 +2315,7 @@ func damageEnemy(g *core.GameState, slot, rawDamage, quality int, tag core.Skill
 // returns (final damage, defeated) — callers log the figure so it matches the HP
 // delta. `double` is Backstab T2's extra ×2. quality may be Miss for non-action
 // damage. Any damage > 0 wakes a sleeping enemy.
-func damageEnemyCrit(g *core.GameState, slot, rawDamage, quality int, tag core.SkillTag, crit, double bool) (int, bool) {
+func damageEnemyCrit(g *core.GameState, slot, rawDamage, quality int, tag core.SkillTag, crit, double, bypassCap bool) (int, bool) {
 	enemy, ok := livingEnemyAt(g, slot)
 	if !ok {
 		return 0, false
@@ -2319,7 +2326,7 @@ func damageEnemyCrit(g *core.GameState, slot, rawDamage, quality int, tag core.S
 	damage := mitigateDamage(rawDamage, tag, effArmor, effMDef)
 	// Crit multiplies the MITIGATED damage (post-armor), so a crit reliably beats a
 	// tank's armor floor instead of being swallowed by it.
-	damage = applyCritMultiplier(damage, crit, double)
+	damage = applyCritMultiplier(damage, crit, double, bypassCap)
 
 	// Tally phys output this turn for Bloodthirst (finishActorTurn banks it as
 	// lifesteal). Off-turn counters (tryRiposte) snapshot/restore around this so
@@ -2679,7 +2686,7 @@ func applyPartyDamage(g *core.GameState, member *core.PartyMember, rawAmount int
 	armorVal, mdefVal := core.EffectiveDefenses(*member)
 	amount := mitigateDamage(rawAmount, tag, armorVal, mdefVal)
 	// Crit punches post-armor (mirror of the enemy path) before the shield soaks it.
-	amount = applyCritMultiplier(amount, crit, false)
+	amount = applyCritMultiplier(amount, crit, false, false)
 
 	// Aegis shield soaks post-mitigation BEFORE HP; only overflow reaches HP, and
 	// the bookkeeping below reads the post-shield amount.
@@ -3342,11 +3349,14 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 // The melee/front-row gate and Taunt override live in core.PeekEnemyAttackerTarget
 // so the render forecast picks the identical slot.
 func pickEnemyAttackTarget(g *core.GameState) int {
-	target := core.PeekEnemyAttackerTarget(g)
-	if target >= 0 {
-		g.Battle.EnemyAttackCursor = target
+	// Advance the cursor by the NATURAL round-robin slot, not the Guard-redirected
+	// strike slot — otherwise a Guard stalls the rotation onto the guardian and the
+	// rest of the party is never targeted. See core.EnemyAttackTargets.
+	strike, cursor := core.EnemyAttackTargets(g)
+	if cursor >= 0 {
+		g.Battle.EnemyAttackCursor = cursor
 	}
-	return target
+	return strike
 }
 
 func enemyHitMessage(enemy core.Enemy, targetName string, damage, defendQuality int, defending bool) string {

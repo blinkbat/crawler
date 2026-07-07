@@ -16,7 +16,7 @@ func TestDamageEnemyCrit_PostArmor(t *testing.T) {
 	e.MaxHP, e.HP = 100, 100
 
 	// raw 3 vs armor 8 → mitigated floor of 1; crit ×CritMultiplier post-armor.
-	dealt, _ := damageEnemyCrit(g, 0, 3, core.TimingQualityMiss, core.SkillTagPhys, true, false)
+	dealt, _ := damageEnemyCrit(g, 0, 3, core.TimingQualityMiss, core.SkillTagPhys, true, false, false)
 	if want := 1 * core.CritMultiplier; dealt != want {
 		t.Fatalf("post-armor crit dealt %d, want %d (1 mitigated × %d)", dealt, want, core.CritMultiplier)
 	}
@@ -26,7 +26,7 @@ func TestDamageEnemyCrit_PostArmor(t *testing.T) {
 
 	// Non-crit baseline: same armor floor, no multiply, no crit flag.
 	e.HP = 100
-	dealt, _ = damageEnemyCrit(g, 0, 3, core.TimingQualityMiss, core.SkillTagPhys, false, false)
+	dealt, _ = damageEnemyCrit(g, 0, 3, core.TimingQualityMiss, core.SkillTagPhys, false, false, false)
 	if dealt != 1 {
 		t.Fatalf("non-crit floored hit dealt %d, want 1", dealt)
 	}

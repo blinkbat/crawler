@@ -164,10 +164,19 @@ func DisplayTogglePressed() bool {
 	return altDown() && (rl.IsKeyPressed(rl.KeyEnter) || rl.IsKeyPressed(rl.KeyKpEnter))
 }
 
-// plainEnterPressed is "bare main-Enter edge, NOT Alt+Enter" (the display
-// toggle), shared by both confirm predicates. Main Enter only.
+// plainEnterPressed/Down/Released are "bare main-Enter, NOT Alt+Enter" (the display
+// toggle), shared by the confirm predicates so the fullscreen chord can't also read
+// as a confirm edge / held / release. Main Enter only.
 func plainEnterPressed() bool {
 	return rl.IsKeyPressed(rl.KeyEnter) && !altDown()
+}
+
+func plainEnterDown() bool {
+	return rl.IsKeyDown(rl.KeyEnter) && !altDown()
+}
+
+func plainEnterReleased() bool {
+	return rl.IsKeyReleased(rl.KeyEnter) && !altDown()
 }
 
 // confirmChord is the confirm button set — Enter / Space / Z plus pad A/Cross.
@@ -460,11 +469,23 @@ func TurnRightHeld() bool {
 // ConfirmDown / ConfirmReleased are the held / up-edge counterparts to
 // ConfirmPressed, for hold-mode minigames.
 func ConfirmDown() bool {
-	return confirmChord(rl.IsKeyDown, padDown)
+	// Enter arm ignores Alt+Enter (fullscreen chord), matching ConfirmPressed, so the
+	// display toggle can't read as a held confirm during a charge minigame.
+	return confirmChord(func(k int32) bool {
+		if k == rl.KeyEnter {
+			return plainEnterDown()
+		}
+		return rl.IsKeyDown(k)
+	}, padDown)
 }
 
 func ConfirmReleased() bool {
-	return confirmChord(rl.IsKeyReleased, padReleased)
+	return confirmChord(func(k int32) bool {
+		if k == rl.KeyEnter {
+			return plainEnterReleased()
+		}
+		return rl.IsKeyReleased(k)
+	}, padReleased)
 }
 
 // AttackTiming{Pressed,Held,Released} map the timed/charge attack minigame to the

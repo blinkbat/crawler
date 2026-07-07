@@ -102,6 +102,21 @@ func forEachKeyValueLine(data []byte, fn func(key, val string)) {
 	}
 }
 
+// atomicWriteFile writes data via a same-dir temp file + rename, so a crash mid-write
+// can't leave a truncated volumes/assignments/.wav file (which would silently drop the
+// tail entries or corrupt the audio). Same-dir temp keeps the rename on one filesystem.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, perm); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
 // SaveVolumes writes music + SFX volume + mute to maps/sounds/volumes.txt (creating
 // the dir if needed). Volumes clamped to [0,1] so a stray value can't persist out of range.
 func SaveVolumes(music, sfx float32, muted bool) error {
@@ -110,7 +125,7 @@ func SaveVolumes(music, sfx float32, muted bool) error {
 		return err
 	}
 	body := fmt.Sprintf("music=%.3f\nsfx=%.3f\nmute=%t\n", core.Clamp(music, 0, 1), core.Clamp(sfx, 0, 1), muted)
-	return os.WriteFile(filepath.Join(dir, VolumesFile), []byte(body), core.AssetFileMode)
+	return atomicWriteFile(filepath.Join(dir, VolumesFile), []byte(body), core.AssetFileMode)
 }
 
 // SanitizeName normalizes a name into a safe filename stem; empty stays empty
@@ -182,7 +197,7 @@ func WriteWAV(name string, pcm []int16) (string, error) {
 	}
 	wav := wavsynth.BuildWAV(pcm)
 	path := filepath.Join(dir, clean+WavExt)
-	if err := os.WriteFile(path, wav, core.AssetFileMode); err != nil {
+	if err := atomicWriteFile(path, wav, core.AssetFileMode); err != nil {
 		return clean, err
 	}
 	return clean, nil
@@ -297,5 +312,5 @@ func SaveAssignments(assigns map[string]string) error {
 		}
 		fmt.Fprintf(&b, "%s=%s\n", cue, name)
 	}
-	return os.WriteFile(filepath.Join(dir, AssignmentFile), []byte(b.String()), core.AssetFileMode)
+	return atomicWriteFile(filepath.Join(dir, AssignmentFile), []byte(b.String()), core.AssetFileMode)
 }

@@ -1363,7 +1363,8 @@ func focusIsAreaText(f focusField) bool {
 		focusDoorName, focusDoorTargetMap, focusDoorTargetDoor,
 		focusDialogNodeText, focusDialogNodeNext, focusDialogNodeContinue,
 		focusDialogChoiceLabel, focusDialogChoiceNext,
-		focusDialogActionID, focusDialogCondQuestID, focusDialogCondMessage:
+		focusDialogActionID, focusDialogCondQuestID, focusDialogCondMessage,
+		focusTrigCondText, focusTrigActText, focusWallFeatureSwitch:
 		return true
 	}
 	return false
