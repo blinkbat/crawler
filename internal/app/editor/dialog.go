@@ -5,6 +5,7 @@ import (
 	"crawler/internal/app/input"
 	"crawler/internal/app/render"
 	"fmt"
+	"slices"
 	"strconv"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -307,10 +308,11 @@ func questStatusLabel(qs core.QuestStatus) string {
 	return "Active"
 }
 
-// trigCond / trigAct return the editor's primary Condition[0] / Action[0] for the
-// current trigger, allocating a default entry when the list is empty (the trigger
-// editor edits the first condition and first action; extra entries are hand-authored
-// / a future multi-row UI). nil when no trigger is selected.
+// trigCond / trigAct return the SELECTED condition / action of the current trigger
+// (trigCondSel / trigActSel), allocating a default entry when the list is empty and
+// clamping a stale selection. The trigger editor authors the full AND-list of
+// conditions + the ordered action list; the selector chrome moves the selection.
+// nil when no trigger is selected.
 func trigCond(s *State) *core.Condition {
 	t := currentDialogTrigger(s)
 	if t == nil {
@@ -319,7 +321,8 @@ func trigCond(s *State) *core.Condition {
 	if len(t.Conditions) == 0 {
 		t.Conditions = []core.Condition{{Kind: core.CondAlways}}
 	}
-	return &t.Conditions[0]
+	s.trigCondSel = core.Clamp(s.trigCondSel, 0, len(t.Conditions)-1)
+	return &t.Conditions[s.trigCondSel]
 }
 
 func trigAct(s *State) *core.Action {
@@ -330,7 +333,96 @@ func trigAct(s *State) *core.Action {
 	if len(t.Actions) == 0 {
 		t.Actions = []core.Action{{Kind: core.ActionDialog}}
 	}
-	return &t.Actions[0]
+	s.trigActSel = core.Clamp(s.trigActSel, 0, len(t.Actions)-1)
+	return &t.Actions[s.trigActSel]
+}
+
+// stepTrigCondSel / stepTrigActSel move the condition / action selection, wrapping.
+func stepTrigCondSel(s *State, dir int) {
+	if t := currentDialogTrigger(s); t != nil && len(t.Conditions) > 0 {
+		s.trigCondSel = core.WrapIndex(s.trigCondSel+dir, len(t.Conditions))
+		clearDialogFocus(s)
+	}
+}
+
+func stepTrigActSel(s *State, dir int) {
+	if t := currentDialogTrigger(s); t != nil && len(t.Actions) > 0 {
+		s.trigActSel = core.WrapIndex(s.trigActSel+dir, len(t.Actions))
+		clearDialogFocus(s)
+	}
+}
+
+// addTrigCond / addTrigAct append a fresh entry and select it (one undo step).
+func addTrigCond(s *State) {
+	t := currentDialogTrigger(s)
+	if t == nil {
+		return
+	}
+	pushUndo(s)
+	t.Conditions = append(t.Conditions, core.Condition{Kind: core.CondAlways})
+	s.trigCondSel = len(t.Conditions) - 1
+	s.dirty = true
+	clearDialogFocus(s)
+}
+
+func addTrigAct(s *State) {
+	t := currentDialogTrigger(s)
+	if t == nil {
+		return
+	}
+	pushUndo(s)
+	t.Actions = append(t.Actions, core.Action{Kind: core.ActionMessage})
+	s.trigActSel = len(t.Actions) - 1
+	s.dirty = true
+	clearDialogFocus(s)
+}
+
+// delTrigCond / delTrigAct remove the selected entry, keeping at least one (a trigger
+// always has a primary condition + action so trigCond/trigAct never re-allocate).
+func delTrigCond(s *State) {
+	t := currentDialogTrigger(s)
+	if t == nil || len(t.Conditions) <= 1 {
+		return
+	}
+	pushUndo(s)
+	t.Conditions = slices.Delete(t.Conditions, s.trigCondSel, s.trigCondSel+1)
+	s.trigCondSel = core.Clamp(s.trigCondSel, 0, len(t.Conditions)-1)
+	s.dirty = true
+	clearDialogFocus(s)
+}
+
+func delTrigAct(s *State) {
+	t := currentDialogTrigger(s)
+	if t == nil || len(t.Actions) <= 1 {
+		return
+	}
+	pushUndo(s)
+	t.Actions = slices.Delete(t.Actions, s.trigActSel, s.trigActSel+1)
+	s.trigActSel = core.Clamp(s.trigActSel, 0, len(t.Actions)-1)
+	s.dirty = true
+	clearDialogFocus(s)
+}
+
+// toggleTrigNegate flips the selected condition's Negate (logical NOT).
+func toggleTrigNegate(s *State) {
+	if c := trigCond(s); c != nil {
+		setIfChanged(s, &c.Negate, !c.Negate)
+	}
+}
+
+// editAction is the Action the shared trigger-action rows + field setters edit: the
+// dialog end-action holder while the dialog action editor is open (may be nil = the
+// "None" action), else the selected trigger action. This one seam lets the dialog
+// end-action editor reuse trigActRows and every trig*Entries action setter, so the
+// full 11-kind Action union is authorable from BOTH the trigger and dialog editors.
+func editAction(s *State) *core.Action {
+	if s.modal == modalDialogActionEdit {
+		if h := currentDialogActionHolder(s); h != nil {
+			return *h
+		}
+		return nil
+	}
+	return trigAct(s)
 }
 
 // conditionKindLabel / actionKindLabel are the editor labels for the trigger engine's
@@ -434,13 +526,12 @@ func init() {
 			panic("editor: actionKindLabel missing a case for action kind " + string(k))
 		}
 	}
-	// The dialog end-action picker exposes a subset (quest/event); assert each of its
-	// setters yields a labeled kind (not the "None" fallback).
-	for _, set := range dialogActionSetters {
-		var probe core.Action
-		set(&probe)
+	// The dialog end-action picker exposes the full Action union via dialogActionLabel
+	// (→ actionKindLabel); assert every kind yields a real label, not the "None" fallback.
+	for _, k := range core.ActionKinds() {
+		probe := core.Action{Kind: k}
 		if dialogActionLabel(&probe) == "None" {
-			panic("editor: dialogActionLabel missing a case for a dialog-action setter kind " + string(probe.Kind))
+			panic("editor: dialogActionLabel returns None for action kind " + string(k))
 		}
 	}
 }
@@ -602,7 +693,7 @@ func trigActKindEntries(s *State) []dropdownEntry {
 // dialogTriggerDialogEntries picks the dialog for a Start-dialog ACTION.
 func dialogTriggerDialogEntries(s *State) []dropdownEntry {
 	return fieldEntries(s.area.Dialogs, func(d core.DialogDefinition) string { return d.ID }, func(s *State, d core.DialogDefinition) {
-		if a := trigAct(s); a != nil {
+		if a := editAction(s); a != nil {
 			setIfChanged(s, &a.DialogID, d.ID)
 		}
 	})
@@ -621,7 +712,7 @@ func dialogTriggerFoeEntries(s *State) []dropdownEntry {
 // trigActFoeEntries picks the foe for a spawnFoe ACTION.
 func trigActFoeEntries(s *State) []dropdownEntry {
 	return enemyKindEntries(func(s *State, kind core.EnemyKind) {
-		if a := trigAct(s); a != nil {
+		if a := editAction(s); a != nil {
 			setIfChanged(s, &a.FoeKind, kind)
 		}
 	})
@@ -639,7 +730,7 @@ func dialogTriggerLocationEntries(s *State) []dropdownEntry {
 // trigSwitchOpEntries picks the setSwitch action's operation.
 func trigSwitchOpEntries(s *State) []dropdownEntry {
 	return fieldEntries(core.SwitchOps(), func(op core.SwitchOp) string { return string(op) }, func(s *State, op core.SwitchOp) {
-		if a := trigAct(s); a != nil {
+		if a := editAction(s); a != nil {
 			setIfChanged(s, &a.SwitchOp, op)
 		}
 	})
@@ -648,10 +739,85 @@ func trigSwitchOpEntries(s *State) []dropdownEntry {
 // trigCounterOpEntries picks the setCounter action's operation (set / add).
 func trigCounterOpEntries(s *State) []dropdownEntry {
 	return fieldEntries(core.CounterOps(), func(op core.CounterOp) string { return string(op) }, func(s *State, op core.CounterOp) {
-		if a := trigAct(s); a != nil {
+		if a := editAction(s); a != nil {
 			setIfChanged(s, &a.CounterOp, op)
 		}
 	})
+}
+
+// comparatorLabel is the display text for a numeric-condition comparator.
+func comparatorLabel(c core.Comparator) string {
+	switch c {
+	case core.CmpAtMost:
+		return "≤ at most"
+	case core.CmpExactly:
+		return "= exactly"
+	default: // CmpAtLeast / empty
+		return "≥ at least"
+	}
+}
+
+// questOpLabel is the display text for a quest action's op (empty = Start default).
+func questOpLabel(op core.DialogQuestOp) string {
+	if op == core.DialogQuestComplete {
+		return "Complete"
+	}
+	return "Start"
+}
+
+// trigCmpEntries picks the comparator for the selected numeric condition.
+func trigCmpEntries(s *State) []dropdownEntry {
+	return fieldEntries(core.Comparators(), comparatorLabel, func(s *State, cmp core.Comparator) {
+		if c := trigCond(s); c != nil {
+			setIfChanged(s, &c.Cmp, cmp)
+		}
+	})
+}
+
+// trigQuestOpEntries picks the quest action's op (start / complete).
+func trigQuestOpEntries(s *State) []dropdownEntry {
+	return fieldEntries(core.DialogQuestOps(), questOpLabel, func(s *State, op core.DialogQuestOp) {
+		if a := editAction(s); a != nil {
+			setIfChanged(s, &a.QuestOp, op)
+		}
+	})
+}
+
+// trigActItemEntries builds the spawnChest item picker acting on the item slot the
+// dropdown was opened for (s.trigActItemSel): the "+ add" row (slot == len) appends,
+// an existing slot replaces, and a leading "(remove)" row deletes that slot.
+func trigActItemEntries(s *State) []dropdownEntry {
+	a := editAction(s)
+	if a == nil {
+		return nil
+	}
+	idx := s.trigActItemSel
+	out := itemKindEntries(func(s *State, kind core.ItemKind) {
+		a := editAction(s)
+		if a == nil {
+			return
+		}
+		pushUndo(s)
+		if idx >= 0 && idx < len(a.Items) {
+			a.Items[idx] = kind
+		} else {
+			a.Items = append(a.Items, kind)
+		}
+		s.dirty = true
+	})
+	if idx >= 0 && idx < len(a.Items) {
+		remove := dropdownEntry{label: "(remove)", apply: func(s *State) {
+			a := editAction(s)
+			if a == nil || idx < 0 || idx >= len(a.Items) {
+				return
+			}
+			pushUndo(s)
+			a.Items = slices.Delete(a.Items, idx, idx+1)
+			s.dirty = true
+		}}
+		out = append([]dropdownEntry{remove}, out...)
+	}
+	return out
 }
 
 // Shared numeric-field editing: dialogNumericTarget + focusDialogNumeric +
@@ -689,17 +855,25 @@ func dialogNumericTarget(s *State) *int {
 		if c := trigCond(s); c != nil {
 			return &c.Count
 		}
+	case focusDialogTrigLevel:
+		if c := trigCond(s); c != nil {
+			return &c.Level
+		}
 	case focusTrigActTileX:
-		if a := trigAct(s); a != nil {
+		if a := editAction(s); a != nil {
 			return &a.TileX
 		}
 	case focusTrigActTileZ:
-		if a := trigAct(s); a != nil {
+		if a := editAction(s); a != nil {
 			return &a.TileZ
 		}
 	case focusTrigActCount:
-		if a := trigAct(s); a != nil {
+		if a := editAction(s); a != nil {
 			return &a.Count
+		}
+	case focusTrigActLevel:
+		if a := editAction(s); a != nil {
+			return &a.Level
 		}
 	}
 	return nil
@@ -723,7 +897,7 @@ func dialogTrigTextTarget(s *State) *string {
 			return &c.QuestID
 		}
 	case focusTrigActText:
-		a := trigAct(s)
+		a := editAction(s)
 		if a == nil {
 			return nil
 		}
@@ -1425,28 +1599,54 @@ func cycleDialogChoiceFocus(s *State) {
 
 // ========================= modalDialogActionEdit ===========================
 
-const (
-	dialogActionModalW = dialogEditModalNarrowW
-	dialogActionModalH = float32(240)
-)
+const dialogActionModalW = dialogEditModalNarrowW
 
+// dialogActionLayout is the end-action editor's dynamic layout: a kind picker plus the
+// selected action's param rows (shared trigActRows) and, for spawnChest, its item list.
 type dialogActionLayout struct {
-	card    rl.Rectangle
-	kindBtn rl.Rectangle
-	idField rl.Rectangle
-	backBtn rl.Rectangle
+	card     rl.Rectangle
+	contentX float32
+	contentW float32
+	kindBtn  rl.Rectangle
+	rows     []rl.Rectangle
+	itemRows []rl.Rectangle // spawnChest: one per Items entry + a trailing "+ add"
+	backBtn  rl.Rectangle
 }
 
-func dialogActionLayoutFor() dialogActionLayout {
-	r := centeredCardRect(dialogActionModalW, dialogActionModalH)
+func dialogActionLayoutFor(s *State) dialogActionLayout {
+	a := editAction(s)
+	rowN, itemN := 0, 0
+	if a != nil {
+		rowN = len(trigActRows(s, a))
+		if a.Kind == core.ActionSpawnChest {
+			itemN = len(a.Items) + 1
+		}
+	}
+	h := dialogHeaderInset + dialogTrigRowGap + float32(rowN)*dialogTrigRowGap
+	if itemN > 0 {
+		h += trigItemHdrH + float32(itemN)*trigItemRowH
+	}
+	h += trigFooterReserve
+
+	r := centeredCardRect(dialogActionModalW, h)
 	x, fw := cardContentBox(r)
 	fieldH := dialogFieldH
 	y := r.Y + dialogHeaderInset
-	fields := stackRows(x, y, fw, fieldH, dialogActionRowGap, 2)
-	kindBtn := fields[0]
-	idField := fields[1]
-	backBtn := bottomRightBtn(r)
-	return dialogActionLayout{card: r, kindBtn: kindBtn, idField: idField, backBtn: backBtn}
+	l := dialogActionLayout{card: r, contentX: x, contentW: fw}
+	l.kindBtn = rl.NewRectangle(x, y, fw, fieldH)
+	y += dialogTrigRowGap
+	l.rows = stackRows(x, y, fw, fieldH, dialogTrigRowGap, rowN)
+	y += float32(rowN) * dialogTrigRowGap
+	if itemN > 0 {
+		y += trigItemHdrH
+		l.itemRows = make([]rl.Rectangle, itemN)
+		for i := range l.itemRows {
+			l.itemRows[i] = rl.NewRectangle(x, y+float32(i)*trigItemRowH, fw, trigItemRowH-4)
+		}
+		y += float32(itemN) * trigItemRowH
+	}
+	l.backBtn = bottomRightBtn(r)
+	return l
 }
 
 // currentDialogActionHolder returns the EndAction field the action editor targets
@@ -1465,103 +1665,45 @@ func currentDialogActionHolder(s *State) **core.Action {
 	return nil
 }
 
-// dialogActionLabel is the human label for an end-action (nil = "None"). The dialog
-// end-action UI exposes the quest/event kinds; other Action kinds (spawnFoe, openWall,
-// …) are authored from the trigger editor.
+// dialogActionLabel is the human label for an end-action (nil = "None"). A dialog
+// node/choice EndAction now spans the full Action union (the same catalog triggers
+// fire), authored by reusing the trigger action rows.
 func dialogActionLabel(a *core.Action) string {
 	if a == nil {
 		return "None"
 	}
-	switch a.Kind {
-	case core.ActionQuest:
-		if a.QuestOp == core.DialogQuestStart {
-			return "Start quest"
-		}
-		return "Complete quest"
-	case core.ActionEvent:
-		return "Emit event"
-	}
-	return "None"
+	return actionKindLabel(a.Kind)
 }
 
-// dialogActionIDTarget returns the action's id field (quest id or event id), or
-// nil when the current action has none.
-func dialogActionIDTarget(s *State) *string {
-	holder := currentDialogActionHolder(s)
-	if holder == nil || *holder == nil {
-		return nil
-	}
-	switch (*holder).Kind {
-	case core.ActionQuest:
-		return &(*holder).QuestID
-	case core.ActionEvent:
-		return &(*holder).EventID
-	}
-	return nil
-}
-
-// dialogActionSetters FULLY specify each non-None action-picker row's payload
-// (clearing the other kind's id so a stale QuestID/EventID can't linger). Shared by
-// the picker builder and the init() coverage assert.
-var dialogActionSetters = []func(*core.Action){
-	func(a *core.Action) {
-		a.Kind = core.ActionQuest
-		a.QuestOp = core.DialogQuestStart
-		a.EventID = ""
-	},
-	func(a *core.Action) {
-		a.Kind = core.ActionQuest
-		a.QuestOp = core.DialogQuestComplete
-		a.EventID = ""
-	},
-	func(a *core.Action) { a.Kind = core.ActionEvent; a.QuestOp = ""; a.QuestID = "" },
-}
-
-// dialogActionKindEntries are the action picker's rows (None + flattened
-// start/complete/event). set == nil is "None"; labels derive from dialogActionLabel
-// against a probe so they can't drift.
+// dialogActionKindEntries are the action picker's rows: "None" (clears the EndAction)
+// then one row per Action kind. Selecting a new kind resets the holder to a clean
+// Action of that kind (stale params from the old kind can't linger); the follow-on
+// params are edited by the shared trigActRows via editAction.
 func dialogActionKindEntries(s *State) []dropdownEntry {
-	sets := append([]func(*core.Action){nil}, dialogActionSetters...)
-	out := make([]dropdownEntry, 0, len(sets))
-	for _, set := range sets {
-		set := set
-		label := dialogActionLabel(nil) // "None"
-		if set != nil {
-			var probe core.Action
-			set(&probe)
-			label = dialogActionLabel(&probe)
+	out := []dropdownEntry{{label: "None", apply: func(s *State) {
+		holder := currentDialogActionHolder(s)
+		if holder == nil || *holder == nil {
+			return // already None — no-op (no undo/dirty churn)
 		}
-		out = append(out, dropdownEntry{label: label, apply: func(s *State) {
+		pushUndo(s)
+		*holder = nil
+		s.dirty = true
+	}}}
+	for _, k := range core.ActionKinds() {
+		k := k
+		out = append(out, dropdownEntry{label: actionKindLabel(k), apply: func(s *State) {
 			holder := currentDialogActionHolder(s)
 			if holder == nil {
 				return
 			}
-			// No-change guard: re-picking the action the holder already has shouldn't
-			// bank a no-op undo or dirty the map (mirrors the sibling field pickers).
-			// Probe by applying set to a COPY of the current action, not to a zero value:
-			// a setter only rewrites the fields it owns (Kind/QuestOp), leaving QuestID/
-			// EventID intact, so a zero-value probe would spuriously differ from a holder
-			// that already carries an ID and bank a redundant undo/dirty on a true no-op.
-			if set == nil {
-				if *holder == nil {
-					return
-				}
-			} else if *holder != nil {
-				probe := **holder
-				set(&probe)
-				if core.ActionsEqual(probe, **holder) {
-					return
-				}
+			if *holder != nil && (*holder).Kind == k {
+				return // re-picking the current kind — no-op
 			}
 			pushUndo(s)
-			if set == nil {
-				*holder = nil
-			} else {
-				if *holder == nil {
-					*holder = &core.Action{}
-				}
-				set(*holder)
+			if *holder == nil {
+				*holder = &core.Action{}
 			}
+			**holder = core.Action{Kind: k}
 			s.dirty = true
 		}})
 	}
@@ -1594,7 +1736,8 @@ func drawDialogActionEditModal(s *State, font rl.Font, theme render.Theme) {
 		return
 	}
 	a := *holder
-	l := dialogActionLayoutFor()
+	l := dialogActionLayoutFor(s)
+	x, fw := l.contentX, l.contentW
 	title := "NODE ACTION"
 	if s.modalDialogActionOnChoice {
 		title = "CHOICE ACTION"
@@ -1605,13 +1748,12 @@ func drawDialogActionEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawButton(font, l.kindBtn, dialogActionLabel(a)+dropdownArrowSuffix, a != nil)
 
 	if a != nil {
-		switch a.Kind {
-		case core.ActionQuest:
-			drawLabel(font, "Quest id", labelAbove(l.idField))
-			drawTextField(font, l.idField, a.QuestID, s.focus == focusDialogActionID)
-		case core.ActionEvent:
-			drawLabel(font, "Event id", labelAbove(l.idField))
-			drawTextField(font, l.idField, a.EventID, s.focus == focusDialogActionID)
+		drawDialogEditRows(s, font, trigActRows(s, a), l.rows)
+		for i, rr := range l.itemRows {
+			if i == 0 {
+				drawLabel(font, "Chest items", rl.NewRectangle(x, rr.Y-labelCaptionGap, fw, labelCaptionH))
+			}
+			drawButton(font, rr, trigItemRowLabel(a, i), false)
 		}
 	}
 	drawButton(font, l.backBtn, "Back (Esc)", false)
@@ -1623,7 +1765,8 @@ func updateDialogActionEditModal(s *State) Action {
 		closeModal(s)
 		return ActionNone
 	}
-	l := dialogActionLayoutFor()
+	a := *holder
+	l := dialogActionLayoutFor(s)
 
 	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
 		mp := rl.GetMousePosition()
@@ -1634,15 +1777,42 @@ func updateDialogActionEditModal(s *State) Action {
 		case pointIn(mp, l.backBtn):
 			returnFromDialogActionEdit(s)
 			return ActionNone
-		case pointIn(mp, l.idField) && dialogActionIDTarget(s) != nil:
-			s.focus = focusDialogActionID
+		}
+		for i, rr := range l.itemRows {
+			if pointIn(mp, rr) {
+				s.trigActItemSel = i // i == len(Items) is the "+ add" row
+				openFieldDropdown(s, ddTrigActItem, rr)
+				return ActionNone
+			}
+		}
+		if a != nil && clickDialogEditRows(s, mp, trigActRows(s, a), l.rows) {
 			return ActionNone
 		}
 		s.focus = focusNone
 	}
 
-	if s.focus == focusDialogActionID {
-		pumpFocusedTextField(s, dialogActionIDTarget(s), nil, func() { returnFromDialogActionEdit(s) })
+	// Focused params reuse the shared trigger-action text / numeric pumps (routed to
+	// this holder via editAction), so the dialog end-action editor edits the full union.
+	if target := dialogTrigTextTarget(s); target != nil {
+		pumpFocusField(s, target)
+		if editorCommitPressed() {
+			s.focus = focusNone
+			return ActionNone
+		}
+		if editorCancelPressed() {
+			returnFromDialogActionEdit(s)
+		}
+		return ActionNone
+	}
+	if pumpDialogNumeric(s) {
+		if editorCommitPressed() {
+			s.focus = focusNone
+			return ActionNone
+		}
+		if editorCancelPressed() {
+			returnFromDialogActionEdit(s)
+			return ActionNone
+		}
 		return ActionNone
 	}
 	if editorCancelPressed() {
@@ -1753,7 +1923,13 @@ func dialogCondRows(c *core.DialogChoiceCondition) []dialogEditRow {
 // foci route through dialogNumericTarget, text through dialogTrigTextTarget).
 func trigCondRows(s *State, c *core.Condition) []dialogEditRow {
 	switch c.Kind {
-	case core.CondEnterTile, core.CondTileVisited:
+	case core.CondEnterTile:
+		return []dialogEditRow{
+			{kind: rowNumeric, label: "Tile X", focus: focusDialogTrigTileX, value: c.TileX},
+			{kind: rowNumeric, label: "Tile Z", focus: focusDialogTrigTileZ, value: c.TileZ},
+			{kind: rowNumeric, label: "Floor level (0 = any)", focus: focusDialogTrigLevel, value: c.Level},
+		}
+	case core.CondTileVisited:
 		return []dialogEditRow{
 			{kind: rowNumeric, label: "Tile X", focus: focusDialogTrigTileX, value: c.TileX},
 			{kind: rowNumeric, label: "Tile Z", focus: focusDialogTrigTileZ, value: c.TileZ},
@@ -1761,21 +1937,26 @@ func trigCondRows(s *State, c *core.Condition) []dialogEditRow {
 	case core.CondFoeKilled:
 		return []dialogEditRow{
 			{kind: rowDropdown, label: "Foe (click to choose)", text: core.FoeKindName(c.FoeKind), dd: ddDialogTriggerFoe},
-			{kind: rowNumeric, label: "Kills required (0 = at least one)", focus: focusDialogTrigFoeKills, value: c.Count},
+			{kind: rowDropdown, label: "Compare (click to choose)", text: comparatorLabel(c.Cmp), dd: ddTrigCmp},
+			{kind: rowNumeric, label: "Kills (0 = at least one)", focus: focusDialogTrigFoeKills, value: c.Count},
 		}
 	case core.CondAtLocation:
 		return []dialogEditRow{{kind: rowDropdown, label: "Region (click to choose)", text: triggerLocationButtonLabel(s, c.LocationID), dd: ddDialogTriggerLocation}}
 	case core.CondSwitch:
-		return []dialogEditRow{{kind: rowText, label: "Switch name (set)", focus: focusTrigCondText, text: c.Switch}}
+		return []dialogEditRow{{kind: rowText, label: "Switch name", focus: focusTrigCondText, text: c.Switch}}
 	case core.CondCounter:
 		return []dialogEditRow{
 			{kind: rowText, label: "Counter name", focus: focusTrigCondText, text: c.Counter},
-			{kind: rowNumeric, label: "At least (value)", focus: focusDialogTrigFoeKills, value: c.Count},
+			{kind: rowDropdown, label: "Compare (click to choose)", text: comparatorLabel(c.Cmp), dd: ddTrigCmp},
+			{kind: rowNumeric, label: "Value", focus: focusDialogTrigFoeKills, value: c.Count},
 		}
 	case core.CondQuest:
 		return []dialogEditRow{{kind: rowText, label: "Quest id (active)", focus: focusTrigCondText, text: c.QuestID}}
 	case core.CondGold:
-		return []dialogEditRow{{kind: rowNumeric, label: "Gold at least", focus: focusDialogTrigFoeKills, value: c.Count}}
+		return []dialogEditRow{
+			{kind: rowDropdown, label: "Compare (click to choose)", text: comparatorLabel(c.Cmp), dd: ddTrigCmp},
+			{kind: rowNumeric, label: "Gold", focus: focusDialogTrigFoeKills, value: c.Count},
+		}
 	}
 	return nil // Always / Never: no params
 }
@@ -1809,16 +1990,22 @@ func trigActRows(s *State, a *core.Action) []dialogEditRow {
 			{kind: rowDropdown, label: "Foe (click to choose)", text: core.FoeKindName(a.FoeKind), dd: ddTrigActFoe},
 			{kind: rowNumeric, label: "Tile X", focus: focusTrigActTileX, value: a.TileX},
 			{kind: rowNumeric, label: "Tile Z", focus: focusTrigActTileZ, value: a.TileZ},
+			{kind: rowNumeric, label: "Floor level", focus: focusTrigActLevel, value: a.Level},
 		}
 	case core.ActionSpawnChest, core.ActionOpenWall, core.ActionTeleport:
+		// spawnChest's Items are edited by the item sub-list drawn below these rows.
 		return []dialogEditRow{
 			{kind: rowNumeric, label: "Tile X", focus: focusTrigActTileX, value: a.TileX},
 			{kind: rowNumeric, label: "Tile Z", focus: focusTrigActTileZ, value: a.TileZ},
+			{kind: rowNumeric, label: "Floor level", focus: focusTrigActLevel, value: a.Level},
 		}
 	case core.ActionGiveGold:
 		return []dialogEditRow{{kind: rowNumeric, label: "Gold (+/-)", focus: focusTrigActCount, value: a.Count}}
 	case core.ActionQuest:
-		return []dialogEditRow{{kind: rowText, label: "Quest id (starts it)", focus: focusTrigActText, text: a.QuestID}}
+		return []dialogEditRow{
+			{kind: rowText, label: "Quest id", focus: focusTrigActText, text: a.QuestID},
+			{kind: rowDropdown, label: "Operation (click to choose)", text: questOpLabel(a.QuestOp), dd: ddTrigQuestOp},
+		}
 	case core.ActionMessage:
 		return []dialogEditRow{{kind: rowText, label: "Message text", focus: focusTrigActText, text: a.Text}}
 	case core.ActionEvent:
@@ -1994,35 +2181,88 @@ func updateDialogTriggerListModal(s *State) Action {
 // ========================= modalDialogTriggerEdit ==========================
 
 const (
-	dialogTrigModalW = dialogEditModalW
-	dialogTrigModalH = float32(560)
+	dialogTrigModalW  = dialogEditModalW
+	trigNavStripH     = modalBtnH   // condition / action navigator button-strip height
+	trigNavGap        = float32(14) // gap below a navigator strip before its kind button
+	trigSectionGap    = float32(28) // gap between the WHEN and DO sections (room for a caption)
+	trigItemHdrH      = float32(20) // spawnChest "Items" caption height
+	trigItemRowH      = float32(28) // spawnChest item row pitch
+	trigFooterReserve = float32(58) // bottom-of-card space reserved for the footer button
 )
 
+// dialogTrigLayout is the trigger editor's dynamic layout: the row counts vary with
+// the selected condition / action kind (and a spawnChest action's item list), so the
+// card height and row rects are computed per frame from the current content.
 type dialogTrigLayout struct {
-	card            rl.Rectangle
-	condKindBtn     rl.Rectangle
-	condRows        [2]rl.Rectangle
-	actKindBtn      rl.Rectangle
-	actRows         [3]rl.Rectangle
-	preserveToggle  rl.Rectangle
-	backBtn         rl.Rectangle
+	card        rl.Rectangle
+	contentX    float32
+	contentW    float32
+	condNav     [5]rl.Rectangle // ‹ prev · next › · + add · − del · NOT
+	condKindBtn rl.Rectangle
+	condRows    []rl.Rectangle
+	actNav      [4]rl.Rectangle // ‹ prev · next › · + add · − del
+	actKindBtn  rl.Rectangle
+	actRows     []rl.Rectangle
+	itemRows    []rl.Rectangle // spawnChest: one per Items entry, then a trailing "+ add"
+	preserveBtn rl.Rectangle
+	backBtn     rl.Rectangle
 }
 
-func dialogTrigLayoutFor() dialogTrigLayout {
-	r := centeredCardRect(dialogTrigModalW, dialogTrigModalH)
+func dialogTrigLayoutFor(s *State) dialogTrigLayout {
+	c, a := trigCond(s), trigAct(s)
+	condN := len(trigCondRows(s, c))
+	actN := len(trigActRows(s, a))
+	itemN := 0
+	if a.Kind == core.ActionSpawnChest {
+		itemN = len(a.Items) + 1 // one chip per item + the trailing "+ add" row
+	}
+
+	h := dialogHeaderInset
+	h += trigNavStripH + trigNavGap + dialogTrigRowGap + float32(condN)*dialogTrigRowGap
+	h += trigSectionGap
+	h += trigNavStripH + trigNavGap + dialogTrigRowGap + float32(actN)*dialogTrigRowGap
+	if itemN > 0 {
+		h += trigItemHdrH + float32(itemN)*trigItemRowH
+	}
+	h += modalBtnH + trigFooterReserve
+
+	r := centeredCardRect(dialogTrigModalW, h)
 	x, fw := cardContentBox(r)
 	fieldH := dialogFieldH
 	y := r.Y + dialogHeaderInset
-	f := stackRows(x, y, fw, fieldH, dialogTrigRowGap, 8)
-	return dialogTrigLayout{
-		card:           r,
-		condKindBtn:    f[0],
-		condRows:       [2]rl.Rectangle{f[1], f[2]},
-		actKindBtn:     f[3],
-		actRows:        [3]rl.Rectangle{f[4], f[5], f[6]},
-		preserveToggle: f[7],
-		backBtn:        bottomRightBtn(r),
+
+	l := dialogTrigLayout{card: r, contentX: x, contentW: fw}
+
+	condStrip := equalButtonRow(x, y, fw, trigNavStripH, 5)
+	copy(l.condNav[:], condStrip)
+	y += trigNavStripH + trigNavGap
+	l.condKindBtn = rl.NewRectangle(x, y, fw, fieldH)
+	y += dialogTrigRowGap
+	l.condRows = stackRows(x, y, fw, fieldH, dialogTrigRowGap, condN)
+	y += float32(condN) * dialogTrigRowGap
+
+	y += trigSectionGap
+
+	actStrip := equalButtonRow(x, y, fw, trigNavStripH, 4)
+	copy(l.actNav[:], actStrip)
+	y += trigNavStripH + trigNavGap
+	l.actKindBtn = rl.NewRectangle(x, y, fw, fieldH)
+	y += dialogTrigRowGap
+	l.actRows = stackRows(x, y, fw, fieldH, dialogTrigRowGap, actN)
+	y += float32(actN) * dialogTrigRowGap
+
+	if itemN > 0 {
+		y += trigItemHdrH
+		l.itemRows = make([]rl.Rectangle, itemN)
+		for i := range l.itemRows {
+			l.itemRows[i] = rl.NewRectangle(x, y+float32(i)*trigItemRowH, fw, trigItemRowH-4)
+		}
+		y += float32(itemN) * trigItemRowH
 	}
+
+	l.preserveBtn = rl.NewRectangle(x, y, fw, modalBtnH)
+	l.backBtn = bottomRightBtn(r)
+	return l
 }
 
 func openDialogTriggerEditModal(s *State, idx int) {
@@ -2031,6 +2271,8 @@ func openDialogTriggerEditModal(s *State, idx int) {
 	}
 	s.modal = modalDialogTriggerEdit
 	s.modalDialogTriggerIdx = idx
+	s.trigCondSel = 0
+	s.trigActSel = 0
 	s.focus = focusNone
 	// Normalize a (hand-authored) empty trigger to one primary condition + action here,
 	// at the deliberate open point, so trigCond/trigAct never allocate during a draw read.
@@ -2050,24 +2292,52 @@ func returnToDialogTriggerList(s *State) {
 	clearDialogFocus(s)
 }
 
+// trigItemRowLabel is the caption for spawnChest item row i (an existing item's name,
+// or the trailing "+ Add item" row at i == len(items)).
+func trigItemRowLabel(a *core.Action, i int) string {
+	if i >= 0 && i < len(a.Items) {
+		return core.ItemInfo(a.Items[i]).Name + "  ▼"
+	}
+	return "+ Add item  ▼"
+}
+
 func drawDialogTriggerEditModal(s *State, font rl.Font, theme render.Theme) {
 	t := currentDialogTrigger(s)
 	if t == nil {
 		return
 	}
 	c, a := trigCond(s), trigAct(s)
-	l := dialogTrigLayoutFor()
+	l := dialogTrigLayoutFor(s)
+	x, fw := l.contentX, l.contentW
 	drawModalHeaderAt(font, theme, l.card, "TRIGGER "+t.ID, theme.BorderActive)
 
-	drawLabel(font, "WHEN — condition (click to choose)", labelAbove(l.condKindBtn))
+	drawLabel(font, fmt.Sprintf("WHEN — condition %d/%d  (all must hold)", s.trigCondSel+1, len(t.Conditions)),
+		rl.NewRectangle(x, l.condNav[0].Y-labelCaptionGap, fw, labelCaptionH))
+	drawButton(font, l.condNav[0], "‹ Prev", false)
+	drawButton(font, l.condNav[1], "Next ›", false)
+	drawButton(font, l.condNav[2], "+ Add", false)
+	drawButton(font, l.condNav[3], "− Del", false)
+	drawButton(font, l.condNav[4], "NOT: "+render.OnOffLabel(c.Negate), c.Negate)
 	drawButton(font, l.condKindBtn, conditionKindLabel(c.Kind)+dropdownArrowSuffix, s.dropdown.owner == ddTrigCondKind)
-	drawDialogEditRows(s, font, trigCondRows(s, c), l.condRows[:])
+	drawDialogEditRows(s, font, trigCondRows(s, c), l.condRows)
 
-	drawLabel(font, "DO — action (click to choose)", labelAbove(l.actKindBtn))
+	drawLabel(font, fmt.Sprintf("DO — action %d/%d  (run in order)", s.trigActSel+1, len(t.Actions)),
+		rl.NewRectangle(x, l.actNav[0].Y-labelCaptionGap, fw, labelCaptionH))
+	drawButton(font, l.actNav[0], "‹ Prev", false)
+	drawButton(font, l.actNav[1], "Next ›", false)
+	drawButton(font, l.actNav[2], "+ Add", false)
+	drawButton(font, l.actNav[3], "− Del", false)
 	drawButton(font, l.actKindBtn, actionKindLabel(a.Kind)+dropdownArrowSuffix, s.dropdown.owner == ddTrigActKind)
-	drawDialogEditRows(s, font, trigActRows(s, a), l.actRows[:])
+	drawDialogEditRows(s, font, trigActRows(s, a), l.actRows)
 
-	drawButton(font, l.preserveToggle, "Preserve — stay live after firing (M): "+render.OnOffLabel(t.Preserve), t.Preserve)
+	for i, rr := range l.itemRows {
+		if i == 0 {
+			drawLabel(font, "Chest items", rl.NewRectangle(x, rr.Y-labelCaptionGap, fw, labelCaptionH))
+		}
+		drawButton(font, rr, trigItemRowLabel(a, i), false)
+	}
+
+	drawButton(font, l.preserveBtn, "Preserve — stay live after firing (M): "+render.OnOffLabel(t.Preserve), t.Preserve)
 	drawButton(font, l.backBtn, "Back (Esc)", false)
 }
 
@@ -2078,28 +2348,62 @@ func updateDialogTriggerEditModal(s *State) Action {
 		return ActionNone
 	}
 	c, a := trigCond(s), trigAct(s)
-	l := dialogTrigLayoutFor()
+	l := dialogTrigLayoutFor(s)
 
 	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
 		mp := rl.GetMousePosition()
 		switch {
+		case pointIn(mp, l.condNav[0]):
+			stepTrigCondSel(s, -1)
+			return ActionNone
+		case pointIn(mp, l.condNav[1]):
+			stepTrigCondSel(s, +1)
+			return ActionNone
+		case pointIn(mp, l.condNav[2]):
+			addTrigCond(s)
+			return ActionNone
+		case pointIn(mp, l.condNav[3]):
+			delTrigCond(s)
+			return ActionNone
+		case pointIn(mp, l.condNav[4]):
+			toggleTrigNegate(s)
+			return ActionNone
 		case pointIn(mp, l.condKindBtn):
 			openFieldDropdown(s, ddTrigCondKind, l.condKindBtn)
+			return ActionNone
+		case pointIn(mp, l.actNav[0]):
+			stepTrigActSel(s, -1)
+			return ActionNone
+		case pointIn(mp, l.actNav[1]):
+			stepTrigActSel(s, +1)
+			return ActionNone
+		case pointIn(mp, l.actNav[2]):
+			addTrigAct(s)
+			return ActionNone
+		case pointIn(mp, l.actNav[3]):
+			delTrigAct(s)
 			return ActionNone
 		case pointIn(mp, l.actKindBtn):
 			openFieldDropdown(s, ddTrigActKind, l.actKindBtn)
 			return ActionNone
-		case pointIn(mp, l.preserveToggle):
+		case pointIn(mp, l.preserveBtn):
 			togglePreserve(s)
 			return ActionNone
 		case pointIn(mp, l.backBtn):
 			returnToDialogTriggerList(s)
 			return ActionNone
 		}
-		if clickDialogEditRows(s, mp, trigCondRows(s, c), l.condRows[:]) {
+		for i, rr := range l.itemRows {
+			if pointIn(mp, rr) {
+				s.trigActItemSel = i // i == len(Items) is the "+ add" row
+				openFieldDropdown(s, ddTrigActItem, rr)
+				return ActionNone
+			}
+		}
+		if clickDialogEditRows(s, mp, trigCondRows(s, c), l.condRows) {
 			return ActionNone
 		}
-		if clickDialogEditRows(s, mp, trigActRows(s, a), l.actRows[:]) {
+		if clickDialogEditRows(s, mp, trigActRows(s, a), l.actRows) {
 			return ActionNone
 		}
 		s.focus = focusNone

@@ -3,6 +3,7 @@ package editor
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"crawler/internal/app/core"
@@ -18,19 +19,30 @@ const (
 	editorPrefsFile = "editorprefs.txt"
 	lastMapPrefKey  = "lastMap="
 	recentPrefKey   = "recent="
+	// bookmarkPrefKey stores a per-map view bookmark: "bm=<mapPath>\t<x>\t<z>\t<name>".
+	// Tab-delimited so a path or name with spaces round-trips.
+	bookmarkPrefKey = "bm="
 	// recentMapsMax caps the File-menu recent list.
 	recentMapsMax = 8
 )
+
+// storedBookmark is one persisted view mark, keyed by the map it belongs to.
+type storedBookmark struct {
+	path string
+	x, z int
+	name string
+}
 
 func editorPrefsPath() string {
 	return filepath.Join(core.MapsDir(), editorPrefsFile)
 }
 
-// readPrefs parses the prefs file into (lastMap, recent). Missing/unreadable → zero.
-func readPrefs() (lastMap string, recent []string) {
+// readPrefs parses the prefs file into (lastMap, recent, bookmarks). Missing/
+// unreadable → zero. Bookmark lines that don't parse are skipped (best-effort).
+func readPrefs() (lastMap string, recent []string, bms []storedBookmark) {
 	data, err := os.ReadFile(editorPrefsPath())
 	if err != nil {
-		return "", nil
+		return "", nil, nil
 	}
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
@@ -41,13 +53,35 @@ func readPrefs() (lastMap string, recent []string) {
 			if p := strings.TrimSpace(strings.TrimPrefix(line, recentPrefKey)); p != "" {
 				recent = append(recent, p)
 			}
+		case strings.HasPrefix(line, bookmarkPrefKey):
+			if bm, ok := parseBookmarkLine(strings.TrimPrefix(line, bookmarkPrefKey)); ok {
+				bms = append(bms, bm)
+			}
 		}
 	}
-	return lastMap, recent
+	return lastMap, recent, bms
 }
 
-// writePrefs persists lastMap + recent (best-effort).
-func writePrefs(lastMap string, recent []string) {
+// parseBookmarkLine parses "<path>\t<x>\t<z>\t<name>" (name optional).
+func parseBookmarkLine(rest string) (storedBookmark, bool) {
+	f := strings.Split(rest, "\t")
+	if len(f) < 3 || f[0] == "" {
+		return storedBookmark{}, false
+	}
+	x, ex := strconv.Atoi(f[1])
+	z, ez := strconv.Atoi(f[2])
+	if ex != nil || ez != nil {
+		return storedBookmark{}, false
+	}
+	name := ""
+	if len(f) >= 4 {
+		name = f[3]
+	}
+	return storedBookmark{path: f[0], x: x, z: z, name: name}, true
+}
+
+// writePrefs persists lastMap + recent + bookmarks (best-effort).
+func writePrefs(lastMap string, recent []string, bms []storedBookmark) {
 	var b strings.Builder
 	if lastMap != "" {
 		b.WriteString(lastMapPrefKey + lastMap + "\n")
@@ -55,7 +89,45 @@ func writePrefs(lastMap string, recent []string) {
 	for _, p := range recent {
 		b.WriteString(recentPrefKey + p + "\n")
 	}
+	for _, bm := range bms {
+		b.WriteString(bookmarkPrefKey + bm.path + "\t" + strconv.Itoa(bm.x) + "\t" + strconv.Itoa(bm.z) + "\t" + bm.name + "\n")
+	}
 	_ = os.WriteFile(editorPrefsPath(), []byte(b.String()), core.AssetFileMode)
+}
+
+// bookmarksForMap returns the saved view bookmarks for mapPath (nil if none).
+func bookmarksForMap(mapPath string) []gotoBookmark {
+	if mapPath == "" {
+		return nil
+	}
+	_, _, bms := readPrefs()
+	var out []gotoBookmark
+	for _, bm := range bms {
+		if bm.path == mapPath {
+			out = append(out, gotoBookmark{x: bm.x, z: bm.z, name: bm.name})
+		}
+	}
+	return out
+}
+
+// saveBookmarksForMap persists marks as mapPath's bookmarks, replacing any prior set
+// for that path and preserving lastMap/recent + other maps' bookmarks. No-op for an
+// unsaved map (empty path) — its bookmarks stay in-session only.
+func saveBookmarksForMap(mapPath string, marks []gotoBookmark) {
+	if mapPath == "" {
+		return
+	}
+	last, recent, bms := readPrefs()
+	kept := bms[:0]
+	for _, bm := range bms {
+		if bm.path != mapPath {
+			kept = append(kept, bm)
+		}
+	}
+	for _, m := range marks {
+		kept = append(kept, storedBookmark{path: mapPath, x: m.x, z: m.z, name: m.name})
+	}
+	writePrefs(last, recent, kept)
 }
 
 // Crash-recovery autosave. While a map has unsaved edits the editor periodically
@@ -111,13 +183,13 @@ func loadRecovery() (core.AreaDefinition, bool) {
 
 // LastMapPath returns the stored last-opened map path, or "" if none / unreadable.
 func LastMapPath() string {
-	last, _ := readPrefs()
+	last, _, _ := readPrefs()
 	return last
 }
 
 // RecentMaps returns the recent-opened map paths, newest first.
 func RecentMaps() []string {
-	_, recent := readPrefs()
+	_, recent, _ := readPrefs()
 	return recent
 }
 
@@ -128,7 +200,7 @@ func rememberLastMap(path string) {
 	if path == "" {
 		return
 	}
-	_, recent := readPrefs()
+	_, recent, bms := readPrefs()
 	out := make([]string, 0, recentMapsMax)
 	out = append(out, path)
 	for _, p := range recent {
@@ -140,5 +212,5 @@ func rememberLastMap(path string) {
 			break
 		}
 	}
-	writePrefs(path, out)
+	writePrefs(path, out, bms) // preserve saved bookmarks across the recent-list update
 }

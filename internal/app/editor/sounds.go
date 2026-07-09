@@ -675,7 +675,7 @@ func confirmSoundDelete(s *State, name string) {
 		return
 	}
 	if err := audio.DeleteUserSound(name); err != nil {
-		s.flash("Delete failed: " + err.Error())
+		s.flashWarn("Delete failed: " + err.Error())
 	} else {
 		s.flash("Deleted " + name)
 		refreshSoundCaches(s)
@@ -741,11 +741,11 @@ func soundAssignEntries(s *State) []dropdownEntry {
 func setCueAssignment(s *State, cue audio.Sound, name string) {
 	failed, err := audio.AssignUserSound(cue, name)
 	if err != nil {
-		s.flash("Assign failed: " + err.Error())
+		s.flashWarn("Assign failed: " + err.Error())
 		return
 	}
 	if len(failed) > 0 {
-		s.flash("Saved assignment but reload failed for: " + strings.Join(failed, ", "))
+		s.flashWarn("Saved assignment but reload failed for: " + strings.Join(failed, ", "))
 	}
 	refreshSoundCaches(s)
 }
@@ -782,7 +782,7 @@ func saveCurrentSound(s *State) {
 	}
 	saved, err := audio.SaveUserSoundParams(s.soundName, s.soundParams)
 	if err != nil {
-		s.flash("Save failed: " + err.Error())
+		s.flashWarn("Save failed: " + err.Error())
 		return
 	}
 	s.soundName = saved

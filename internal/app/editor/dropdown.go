@@ -38,6 +38,9 @@ const (
 	ddTrigActFoe                          // trigger editor: pick the foe kind for a spawnFoe action
 	ddTrigSwitchOp                        // trigger editor: pick the setSwitch action's operation
 	ddTrigCounterOp                       // trigger editor: pick the setCounter action's operation
+	ddTrigCmp                             // trigger editor: pick a numeric condition's comparator (≥ / ≤ / =)
+	ddTrigQuestOp                         // trigger editor: pick the quest action's op (start / complete)
+	ddTrigActItem                         // trigger editor: pick an item to add/replace/remove in a spawnChest action
 	ddWallFeatureKind                     // wall-feature editor: pick switch / bombable / secret
 	ddDialogActionKind                    // action editor: pick the end-action (none / start / complete quest / event)
 	ddLayer                               // top-bar layer picker: pick the active layer; each row carries a hide/show eye
@@ -75,7 +78,7 @@ func filterableDropdown(o dropdownOwner) bool {
 	switch o {
 	case ddPackAdd, ddChestAdd, ddFoeKind, ddDialogCondFoe, ddDialogTriggerFoe,
 		ddDialogTriggerDialog, ddDialogSpeaker, ddDialogTriggerLocation, ddSoundAssign,
-		ddDoorTargetMap, ddDoorTargetDoor:
+		ddDoorTargetMap, ddDoorTargetDoor, ddTrigActItem:
 		return true
 	}
 	return false
@@ -217,6 +220,9 @@ var dropdownEntryBuilders = map[dropdownOwner]func(*State) []dropdownEntry{
 	ddTrigActFoe:            trigActFoeEntries,
 	ddTrigSwitchOp:          trigSwitchOpEntries,
 	ddTrigCounterOp:         trigCounterOpEntries,
+	ddTrigCmp:               trigCmpEntries,
+	ddTrigQuestOp:           trigQuestOpEntries,
+	ddTrigActItem:           trigActItemEntries,
 	ddWallFeatureKind:       wallFeatureKindEntries,
 	ddDialogActionKind:      dialogActionKindEntries,
 	ddLayer:                 layerSelectEntries,

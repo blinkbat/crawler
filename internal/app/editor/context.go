@@ -127,6 +127,23 @@ func contextItemsAt(s *State, x, z int) []dropdownEntry {
 	} else {
 		items = append(items, dropdownEntry{label: "Add wall feature…", apply: func(s *State) { addWallFeatureAt(s, x, z) }})
 	}
+	// Global find-and-replace on the active layer (Floor/Ceiling/Walls): swap every
+	// tile matching THIS cell's char for the current brush. Headlines re-theming a
+	// finished map (all grass → dirt) without hand-repainting.
+	if canReplaceOnLayer(s.layer) {
+		if src, ok := layerDefs[s.layer].charAt(s, x, z); ok {
+			b := s.activeBrush()
+			dst := b.Char
+			if b.Erase {
+				dst = layerDefs[s.layer].sentinel
+			}
+			if dst != src {
+				items = append(items, dropdownEntry{label: "Replace all matching on " + layerName(s.layer), apply: func(s *State) {
+					replaceCharOnActiveGrid(s, src, dst)
+				}})
+			}
+		}
+	}
 	items = append(items, dropdownEntry{label: "Erase " + layerName(s.layer) + " here", apply: func(s *State) {
 		// Commit only if changed — a no-op erase banks no undo (shared lazy-commit tail).
 		commitPaintIfChanged(s, func() { eraseAt(s, x, z) })

@@ -315,10 +315,10 @@ func applyQuestOp(g *GameState, questID string, op DialogQuestOp) {
 		return
 	}
 	switch op {
-	case DialogQuestStart:
-		g.Quests = AddQuest(g.Quests, Quest{ID: questID, Title: QuestTitleFromID(questID), Status: QuestActive})
 	case DialogQuestComplete:
 		CompleteQuest(g, questID)
+	default: // DialogQuestStart / empty — an unset op starts the quest (editor default)
+		g.Quests = AddQuest(g.Quests, Quest{ID: questID, Title: QuestTitleFromID(questID), Status: QuestActive})
 	}
 }
 

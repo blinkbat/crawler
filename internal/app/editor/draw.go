@@ -864,7 +864,7 @@ const (
 	modalListChromeH = float32(150) // header + input/button row + footer reserve
 )
 
-func modalBodyTop(card rl.Rectangle) float32       { return card.Y + modalBodyTopDY }
+func modalBodyTop(card rl.Rectangle) float32         { return card.Y + modalBodyTopDY }
 func listModalHeight(rows int, rowH float32) float32 { return modalListChromeH + float32(rows)*rowH }
 
 // drawSelectedListRow fills a list row's cursor plate with the editor's shared
@@ -3660,6 +3660,17 @@ func entityListRows(s *State) []entityListRow {
 			x:     c.TileX, z: c.TileZ, kind: elCrystal, idx: i,
 		})
 	}
+	// Live type-to-filter (case-insensitive label substring). Row idx fields stay the
+	// original spawn indices, so activateEntityRow still targets the right spawn.
+	if f := strings.ToLower(strings.TrimSpace(s.entityListFilter)); f != "" {
+		kept := rows[:0]
+		for _, r := range rows {
+			if strings.Contains(strings.ToLower(r.label), f) {
+				kept = append(kept, r)
+			}
+		}
+		rows = kept
+	}
 	return rows
 }
 
@@ -3727,7 +3738,11 @@ func drawEntityListModal(s *State, font rl.Font, theme render.Theme) {
 		}
 		render.DrawRichText(font, rows[i].label, rl.NewVector2(rr.X+22, rr.Y+(rr.Height-16)/2), editorFontBody, 1, col)
 	}
-	drawModalFooterHint(font, card, fmt.Sprintf("%d objects   ·   Up/Down + Enter or click a row to jump + edit   ·   Esc close", len(rows)), theme)
+	footer := fmt.Sprintf("%d objects   ·   Up/Down + Enter or click a row to jump + edit   ·   type to filter · Esc close", len(rows))
+	if s.entityListFilter != "" {
+		footer = fmt.Sprintf("filter: %q   ·   %d match   ·   Backspace edits · Esc clears", s.entityListFilter, len(rows))
+	}
+	drawModalFooterHint(font, card, footer, theme)
 }
 
 // drawEscMenuModal paints the editor's pause-style menu (Display / Continue /
@@ -3786,12 +3801,12 @@ func hintForPending(saveLabel, discardLabel string) string {
 // Distance-from-start field, cached on contentEpoch + start tile so the BFS runs
 // once per edit, not per frame. dist < 0 = unreachable walkable tile (a pocket).
 var (
-	heatDist              []int
-	heatEpoch             uint64
+	heatDist               []int
+	heatEpoch              uint64
 	heatStartX, heatStartZ int
-	heatW, heatH          int
-	heatMax               int
-	heatReady             bool
+	heatW, heatH           int
+	heatMax                int
+	heatReady              bool
 )
 
 func refreshHeatField(s *State) {

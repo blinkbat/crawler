@@ -22,7 +22,7 @@ var editorMenus = []menuGroup{
 		{label: "New Map", apply: newMap, hotkey: "Ctrl+N", desc: "Start a fresh blank map (prompts for size)."},
 		{label: "Open…", apply: requestOpen, hotkey: "Ctrl+O", desc: "Load a map from disk."},
 		{label: "Save", apply: saveCurrent, hotkey: "Ctrl+S", desc: "Save to the current file."},
-		{label: "Save As…", apply: openSaveAsModal, desc: "Save under a new file name."},
+		{label: "Save As…", apply: openSaveAsModal, hotkey: "Ctrl+Shift+S", desc: "Save under a new file name."},
 		{label: "Revert", apply: revertToSaved, desc: "Discard unsaved edits, restoring the last saved version.", enabled: func(s *State) bool { return s.dirty }},
 		{label: "Exit Editor", apply: func(s *State) { s.exitRequested = true }, desc: "Leave the editor (asks first if there are unsaved changes)."},
 	}},

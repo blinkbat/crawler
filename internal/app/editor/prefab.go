@@ -29,7 +29,7 @@ type prefabFile struct {
 	Crystals []core.CrystalSpawn
 }
 
-func prefabDir() string          { return filepath.Join(core.MapsDir(), "prefabs") }
+func prefabDir() string { return filepath.Join(core.MapsDir(), "prefabs") }
 func prefabPath(name string) string {
 	return filepath.Join(prefabDir(), core.SanitizeFilename(name, "prefab")+prefabExt)
 }
@@ -176,7 +176,7 @@ func savePrefabFromClipboard(s *State) {
 		return
 	}
 	if err := savePrefab(s.prefabName, s.clipboard, s.clipEntities); err != nil {
-		s.flash("Save prefab failed: " + err.Error())
+		s.flashWarn("Save prefab failed: " + err.Error())
 		return
 	}
 	s.prefabPaths = listPrefabs()
@@ -189,7 +189,7 @@ func loadPrefabAt(s *State, i int) {
 	}
 	region, ents, err := loadPrefab(s.prefabPaths[i])
 	if err != nil {
-		s.flash("Load prefab failed: " + err.Error())
+		s.flashWarn("Load prefab failed: " + err.Error())
 		return
 	}
 	s.clipboard = region
@@ -207,7 +207,7 @@ func deletePrefabAt(s *State, i int) {
 		return
 	}
 	if err := os.Remove(path); err != nil {
-		s.flash("Delete failed: " + err.Error())
+		s.flashWarn("Delete failed: " + err.Error())
 		return
 	}
 	s.prefabPaths = listPrefabs()

@@ -136,14 +136,21 @@ func updateHotkeys(s *State) {
 		}
 	}
 
+	// Undo/redo must not fire mid-stroke: a drag banks its single lazy snapshot on
+	// the first changed cell, so popping it while the button is still held would let
+	// the rest of the stroke mutate cells with no undo entry and desync redo. Defer
+	// until the drag releases (finishDrag).
+	canHistory := s.drag == dragNone
 	switch {
-	case ctrl && shift && rl.IsKeyPressed(rl.KeyZ):
+	case canHistory && ctrl && shift && rl.IsKeyPressed(rl.KeyZ):
 		redoOne(s)
+	case ctrl && shift && rl.IsKeyPressed(rl.KeyS):
+		openSaveAsModal(s) // must precede the plain Ctrl+S (Save) case below
 	case ctrl && shift && rl.IsKeyPressed(rl.KeyF):
 		fillEntireLayer(s)
-	case ctrl && rl.IsKeyPressed(rl.KeyZ):
+	case canHistory && ctrl && rl.IsKeyPressed(rl.KeyZ):
 		undoOne(s)
-	case ctrl && rl.IsKeyPressed(rl.KeyY):
+	case canHistory && ctrl && rl.IsKeyPressed(rl.KeyY):
 		redoOne(s)
 	case ctrl && rl.IsKeyPressed(rl.KeyC):
 		copySelection(s)
@@ -1246,26 +1253,43 @@ func keyboardZoom(s *State, dir float32) {
 	zoomBy(s, center, 1+canvasZoomWheelRate*dir*keyboardZoomStep)
 }
 
-// zoomToFit sizes the top-down canvas so the whole map fits, re-centered. In 3D it
-// re-homes the orbit (fit has no single meaning there) via resetView.
+// zoomToFit sizes the top-down canvas so the target fits, re-centered — the active
+// marquee SELECTION when one is set, else the whole map. In 3D it re-homes the orbit
+// (fit has no single meaning there), centering on the selection when present.
 func zoomToFit(s *State) {
+	// Target bounds: the selection if active, else the full map.
+	x0, z0, x1, z1 := 0, 0, s.area.Width-1, s.area.Height-1
+	if s.selActive {
+		x0, z0, x1, z1 = s.selX0, s.selZ0, s.selX1, s.selZ1
+	}
+	w, h := x1-x0+1, z1-z0+1
+	cx, cz := (x0+x1)/2, (z0+z1)/2
+
 	if s.isoView {
-		resetView(s)
+		if s.selActive {
+			centerViewOnTile(s, cx, cz)
+		} else {
+			resetView(s)
+		}
 		return
 	}
 	base := float32(0)
 	if s.zoom > 0 {
 		base = s.rect.cellPx / s.zoom // px-per-cell at 1× zoom
 	}
-	if base <= 0 || s.area.Width <= 0 || s.area.Height <= 0 {
+	if base <= 0 || w <= 0 || h <= 0 {
 		return
 	}
-	fitCell := s.rect.gridW / float32(s.area.Width)
-	if h := s.rect.gridH / float32(s.area.Height); h < fitCell {
-		fitCell = h
+	fitCell := s.rect.gridW / float32(w)
+	if hh := s.rect.gridH / float32(h); hh < fitCell {
+		fitCell = hh
 	}
 	s.zoom = core.Clamp(fitCell/base, minZoom, maxZoom)
 	s.panX, s.panY = 0, 0
+	if s.selActive {
+		s.layout() // re-lay at the new zoom so the follow-on centering uses fresh cellPx
+		centerViewOnTile(s, cx, cz)
+	}
 }
 
 // openSaveAsModal pops the Save As dialog. Single seam for every Save As entry point.
@@ -1953,15 +1977,37 @@ func deleteCrystalAt(s *State, idx int) {
 func openEntityListModal(s *State) {
 	s.modal = modalEntityList
 	s.modalCursor = 0
+	s.entityListFilter = ""
 }
 
 // updateEntityListModal drives the Objects index: Up/Down, Enter/row-click jumps
 // to the entity and opens its editor, Esc / click-outside closes.
 func updateEntityListModal(s *State) Action {
+	// Type-to-filter: printable chars extend the query, Backspace trims it (cursor
+	// snaps to the top match so the filtered view + modalCursor can't drift).
+	for {
+		r := rl.GetCharPressed()
+		if r == 0 {
+			break
+		}
+		if r >= 32 && r < 127 {
+			s.entityListFilter += string(rune(r))
+			s.modalCursor = 0
+		}
+	}
+	if rl.IsKeyPressed(rl.KeyBackspace) && len(s.entityListFilter) > 0 {
+		s.entityListFilter = s.entityListFilter[:len(s.entityListFilter)-1]
+		s.modalCursor = 0
+	}
 	rows := entityListRows(s)
 	n := len(rows)
 	s.modalCursor = input.CursorUpDown(s.modalCursor, n)
 	if editorCancelPressed() {
+		if s.entityListFilter != "" {
+			s.entityListFilter = "" // first Esc clears the filter, second closes
+			s.modalCursor = 0
+			return ActionNone
+		}
 		closeModal(s)
 		return ActionNone
 	}
@@ -2442,12 +2488,12 @@ func openSelectedMap(s *State) Action {
 func loadAreaFromPath(s *State, path string) {
 	mf, err := mapfile.Load(path)
 	if err != nil {
-		s.flash("Open failed: " + err.Error())
+		s.flashWarn("Open failed: " + err.Error())
 		return
 	}
 	area, err := core.AreaFromMapFile(mf, path)
 	if err != nil {
-		s.flash("Open failed: " + err.Error())
+		s.flashWarn("Open failed: " + err.Error())
 		return
 	}
 	area = materializeEntranceCrystal(area)
@@ -2455,11 +2501,12 @@ func loadAreaFromPath(s *State, path string) {
 	s.baseline = core.CloneArea(area)
 	s.undo = nil
 	s.redo = nil
+	s.undoTrimmed = false
 	s.dirty = false
 	s.autosaveTimer = 0
-	s.bookmarks = nil // view bookmarks are map-specific
-	clearRecovery() // loaded a clean map — discard any stale recovery snapshot
-	clearSelection(s) // different map — old selection coords no longer apply
+	s.bookmarks = bookmarksForMap(path) // restore this map's persisted view bookmarks
+	clearRecovery()                     // loaded a clean map — discard any stale recovery snapshot
+	clearSelection(s)                   // different map — old selection coords no longer apply
 	surfaceAreaLevels(s)
 	// Area replaced wholesale — invalidate content-derived caches (like
 	// performNewMap / undo / redo) or stale reachability/tooltip data lingers.
@@ -2486,7 +2533,7 @@ func openDuplicateSelected(s *State) {
 	}
 	newPath, err := duplicateMapFile(src)
 	if err != nil {
-		s.flash("Duplicate failed: " + err.Error())
+		s.flashWarn("Duplicate failed: " + err.Error())
 		return
 	}
 	refreshOpenList(s)
@@ -2522,7 +2569,7 @@ func openRenameCommit(s *State) {
 	s.modalRenaming = ""
 	s.modalRenamingActive = false
 	if err != nil {
-		s.flash("Rename failed: " + err.Error())
+		s.flashWarn("Rename failed: " + err.Error())
 		return
 	}
 	if s.area.Path == oldPath {
@@ -2557,7 +2604,7 @@ func openDeleteSelected(s *State) {
 		return
 	}
 	if err := os.Remove(path); err != nil {
-		s.flash("Delete failed: " + err.Error())
+		s.flashWarn("Delete failed: " + err.Error())
 		s.modalConfirmDelete = false
 		return
 	}
@@ -2675,7 +2722,7 @@ func confirmDirtySave(s *State) Action {
 		return ActionNone
 	}
 	if err := writeAreaTo(s, s.area.Path); err != nil {
-		s.flash("Save failed: " + err.Error())
+		s.flashWarn("Save failed: " + err.Error())
 		closeModal(s)
 		s.pending = pendingNone
 		return ActionNone
@@ -2737,7 +2784,7 @@ func confirmModalForce(s *State) {
 
 func saveTo(s *State, name, path string) {
 	if err := writeAreaTo(s, path); err != nil {
-		s.flash("Save failed: " + err.Error())
+		s.flashWarn("Save failed: " + err.Error())
 		return
 	}
 	closeModal(s)

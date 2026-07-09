@@ -95,22 +95,33 @@ const isoRTSettleFrames = 6
 // drag is captured by the OS and doesn't reliably report the mouse button as down, so
 // IsMouseButtonDown can't be trusted to detect it). The first allocation (no RT yet)
 // still waits out the settle so entering the 3D view mid-drag can't alloc mid-resize.
-func (s *State) ensureIsoRT(w, h int32) {
+// ensureIsoRT returns justAllocated=true on the frame it (re)creates the FBO, so the
+// caller can blit the freshly-cleared target and DEFER the heavy world render one frame
+// — rendering DrawModelEx into a just-created FBO in the same frame is the suspected
+// trigger of the intermittent driver crash, so the alloc and the first world render into
+// it are now split across two frames.
+func (s *State) ensureIsoRT(w, h int32) (justAllocated bool) {
 	if w != s.isoReqW || h != s.isoReqH {
 		s.isoReqW, s.isoReqH = w, h
 		s.isoRTSettle = 0 // size just changed — restart the settle countdown
-		return
+		return false
 	}
 	if s.isoRT.ID != 0 && s.isoRTW == w && s.isoRTH == h {
-		return // already the right size
+		return false // already the right size
 	}
 	if s.isoRTSettle < isoRTSettleFrames {
 		s.isoRTSettle++
-		return // size is holding but hasn't settled long enough yet
+		return false // size is holding but hasn't settled long enough yet
 	}
 	s.freeIsoRT()
 	s.isoRT = rl.LoadRenderTexture(w, h)
 	s.isoRTW, s.isoRTH = w, h
+	// Initialize the fresh FBO to the background in its OWN texture-mode pass, decoupled
+	// from the world render the caller runs next frame.
+	rl.BeginTextureMode(s.isoRT)
+	rl.ClearBackground(isoBG)
+	rl.EndTextureMode()
+	return true
 }
 
 // areaLevelSpan returns the lowest+highest elevation level across every tile in ONE
@@ -412,8 +423,19 @@ func drawGridIso(s *State, font rl.Font) {
 	if w <= 0 || h <= 0 || s.area.Width == 0 || s.area.Height == 0 {
 		return
 	}
-	s.ensureIsoRT(w, h)
+	justAlloc := s.ensureIsoRT(w, h)
 	if s.isoRT.ID == 0 {
+		return
+	}
+	if justAlloc {
+		// The FBO was (re)created this frame and cleared to isoBG; blit it and render
+		// the world into it next frame (splitting alloc + first render — see ensureIsoRT).
+		rl.DrawTexturePro(s.isoRT.Texture,
+			rl.NewRectangle(0, 0, float32(s.isoRTW), -float32(s.isoRTH)),
+			rl.NewRectangle(grid.X, grid.Y, float32(w), float32(h)),
+			rl.NewVector2(0, 0), 0, rl.White)
+		drawIsoReadout(s, font, grid)
+		drawEditorCompass(s, font)
 		return
 	}
 	minL, maxL := s.cachedLevelSpan()

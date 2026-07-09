@@ -464,10 +464,12 @@ const (
 	focusDialogTrigTileX
 	focusDialogTrigTileZ
 	focusDialogTrigFoeKills
+	focusDialogTrigLevel
 	// Trigger-editor ACTION numeric foci.
 	focusTrigActTileX
 	focusTrigActTileZ
 	focusTrigActCount
+	focusTrigActLevel
 	// Trigger-editor text foci (routed via dialogTrigTextTarget, pumped with pumpFocusField):
 	// the condition's switch/counter/quest-id name, and the action's switch/counter/text/quest-id.
 	focusTrigCondText
@@ -704,8 +706,11 @@ type State struct {
 	modalFilename string
 	// openFilter is the Open-modal's live type-to-filter query (case-insensitive map-id
 	// substring); empty = show all. modalCursor indexes the FILTERED view, not modalPaths.
-	openFilter    string
-	modalRenaming string
+	openFilter string
+	// entityListFilter is the Objects-modal's live type-to-filter query (case-insensitive
+	// row-label substring); empty = show all. modalCursor indexes the FILTERED rows.
+	entityListFilter string
+	modalRenaming    string
 	// modalRenamingActive is the Open-modal rename sub-mode flag. Separate from the
 	// modalRenaming text so backspacing the field to empty doesn't silently exit rename
 	// (the text can't double as the mode sentinel).
@@ -730,6 +735,14 @@ type State struct {
 	// Triggers entry; -1 outside their flows.
 	modalDialogCondIdx    int
 	modalDialogTriggerIdx int
+	// trigCondSel / trigActSel select WHICH condition / action of the current trigger
+	// the edit form points at (the trigger editor authors a multi-entry AND-list of
+	// conditions + an ordered action list). Reset to 0 when the trigger editor opens.
+	trigCondSel int
+	trigActSel  int
+	// trigActItemSel is the spawnChest-action item slot the open ddTrigActItem dropdown
+	// targets: an index into the action's Items (or len(Items) for the "+ add" row).
+	trigActItemSel int
 	// modalWallFeatureIdx indexes the WallFeatures entry being edited; -1 outside the flow.
 	modalWallFeatureIdx int
 	// modalLocationIdx indexes the Locations entry being edited; -1 outside the flow.
@@ -739,7 +752,8 @@ type State struct {
 	// Jump-to-tile modal (modalGoto): gotoX/gotoZ are the edit buffers, gotoField picks
 	// the focused one (0=X,1=Z). bookmarks are session view marks (click to recenter).
 	gotoX, gotoZ   string
-	gotoField      int
+	gotoName       string // optional bookmark name buffer (modalGoto)
+	gotoField      int    // focused goto field: 0=X, 1=Z, 2=Name
 	bookmarks      []gotoBookmark
 	bookmarkCursor int // scroll anchor for the bookmark list (mouse-wheel scrolled)
 	// Prefab library modal (modalPrefabs): prefabName is the save-name buffer,
@@ -821,9 +835,13 @@ type State struct {
 
 	pending pendingAction
 
-	undo  []core.AreaDefinition
-	redo  []core.AreaDefinition
-	dirty bool
+	undo []core.AreaDefinition
+	redo []core.AreaDefinition
+	// undoTrimmed records that the undo window hit undoLimit and dropped its oldest
+	// snapshot(s), so "Nothing to undo" at the cap can distinguish a truncated history
+	// from a genuinely clean one. Reset on save / revert / fresh state.
+	undoTrimmed bool
+	dirty       bool
 	// baseline snapshots the area as last loaded/saved, so undo/redo can clear
 	// dirty when the working state matches disk again.
 	baseline core.AreaDefinition
@@ -1089,7 +1107,8 @@ func NewDefault() State {
 	if path := LastMapPath(); path != "" {
 		if area, err := core.LoadArea(path); err == nil {
 			s := NewFromArea(area)
-			surfaceAreaLevels(&s) // open with the map's full level range + start floor
+			surfaceAreaLevels(&s)               // open with the map's full level range + start floor
+			s.bookmarks = bookmarksForMap(path) // restore this map's persisted view bookmarks
 			return s
 		}
 	}

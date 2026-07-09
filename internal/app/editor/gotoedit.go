@@ -4,6 +4,7 @@ import (
 	"crawler/internal/app/core"
 	"crawler/internal/app/render"
 	"strconv"
+	"strings"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -12,8 +13,12 @@ import (
 // view on a large map, or save/recall session view bookmarks. Bookmarks are
 // in-session only (cleared on New/Open, not persisted to disk).
 
-// gotoBookmark is one saved view mark (a tile the view recenters on).
-type gotoBookmark struct{ x, z int }
+// gotoBookmark is one saved view mark (a tile the view recenters on) with an optional
+// name. Persisted per-map in editorprefs (see bookmarksForMap / saveBookmarksForMap).
+type gotoBookmark struct {
+	x, z int
+	name string
+}
 
 const (
 	gotoModalW     = float32(360)
@@ -24,15 +29,18 @@ const (
 // gotoLayout holds the modalGoto rects (draw + hit-test share it). bmRows covers
 // only the on-screen window [top,end); absolute index = top + local.
 type gotoLayout struct {
-	card, xField, zField, goBtn, markBtn rl.Rectangle
-	bmRows                               []gotoRowRects
-	top, end                             int
+	card, xField, zField, nameField, goBtn, markBtn rl.Rectangle
+	bmRows                                          []gotoRowRects
+	top, end                                        int
 }
 
 type gotoRowRects struct{ row, del rl.Rectangle }
 
+// gotoNameRowH is the extra height the optional-name field row adds (field + its label).
+const gotoNameRowH = textFieldH + 22
+
 func gotoModalH(bmCount int) float32 {
-	return listModalHeight(min(bmCount, gotoMaxBmShown), gotoRowH)
+	return listModalHeight(min(bmCount, gotoMaxBmShown), gotoRowH) + gotoNameRowH
 }
 
 func gotoLayoutFor(s *State) gotoLayout {
@@ -43,6 +51,8 @@ func gotoLayoutFor(s *State) gotoLayout {
 	l := gotoLayout{card: card}
 	l.xField = rl.NewRectangle(x, y, half, textFieldH)
 	l.zField = rl.NewRectangle(x+half+10, y, half, textFieldH)
+	y += gotoNameRowH
+	l.nameField = rl.NewRectangle(x, y, w, textFieldH)
 	y += textFieldH + 8
 	l.goBtn = rl.NewRectangle(x, y, half, textFieldH)
 	l.markBtn = rl.NewRectangle(x+half+10, y, half, textFieldH)
@@ -63,6 +73,7 @@ func openGotoModal(s *State) {
 	s.modal = modalGoto
 	s.gotoField = 0
 	s.bookmarkCursor = 0
+	s.gotoName = ""
 	tx, tz := s.hoverX, s.hoverZ
 	if !s.area.InBounds(tx, tz) {
 		tx, tz = s.area.StartTileX, s.area.StartTileZ
@@ -73,13 +84,16 @@ func openGotoModal(s *State) {
 
 func updateGotoModal(s *State) Action {
 	l := gotoLayoutFor(s)
-	if s.gotoField == 0 {
+	switch s.gotoField {
+	case 0:
 		pumpPrintableASCII(&s.gotoX, 5, acceptDigit, nil)
-	} else {
+	case 1:
 		pumpPrintableASCII(&s.gotoZ, 5, acceptDigit, nil)
+	default:
+		pumpPrintableASCII(&s.gotoName, defaultTextFieldMaxLen, acceptPrintable, nil)
 	}
 	if editorTabPressed() {
-		s.gotoField ^= 1
+		s.gotoField = (s.gotoField + 1) % 3 // X → Z → Name → X
 		return ActionNone
 	}
 	if editorCommitPressed() {
@@ -100,6 +114,8 @@ func updateGotoModal(s *State) Action {
 			s.gotoField = 0
 		case pointIn(mp, l.zField):
 			s.gotoField = 1
+		case pointIn(mp, l.nameField):
+			s.gotoField = 2
 		case pointIn(mp, l.goBtn):
 			gotoConfirm(s)
 		case pointIn(mp, l.markBtn):
@@ -112,6 +128,7 @@ func updateGotoModal(s *State) Action {
 				if pointIn(mp, r.del) {
 					s.bookmarks = removeModalListItem(s.bookmarks, i)
 					s.bookmarkCursor = clampCursor(s.bookmarkCursor, len(s.bookmarks))
+					saveBookmarksForMap(s.area.Path, s.bookmarks)
 					return ActionNone
 				}
 				if pointIn(mp, r.row) {
@@ -157,7 +174,9 @@ func bookmarkTypedTile(s *State) {
 			return
 		}
 	}
-	s.bookmarks = append(s.bookmarks, gotoBookmark{x, z})
+	s.bookmarks = append(s.bookmarks, gotoBookmark{x: x, z: z, name: strings.TrimSpace(s.gotoName)})
+	saveBookmarksForMap(s.area.Path, s.bookmarks) // persist per-map (no-op for an unsaved map)
+	s.gotoName = ""
 	s.flash("Bookmarked " + core.TileCoord(x, z))
 }
 
@@ -178,6 +197,8 @@ func drawGotoModal(s *State, font rl.Font, theme render.Theme) {
 	drawTextField(font, l.xField, s.gotoX, s.gotoField == 0)
 	drawLabel(font, "Z", labelAbove(l.zField))
 	drawTextField(font, l.zField, s.gotoZ, s.gotoField == 1)
+	drawLabel(font, "Bookmark name (optional)", labelAbove(l.nameField))
+	drawTextField(font, l.nameField, s.gotoName, s.gotoField == 2)
 
 	drawButton(font, l.goBtn, "Go (Enter)", false)
 	drawButton(font, l.markBtn, "★ Bookmark", false)
@@ -189,7 +210,11 @@ func drawGotoModal(s *State, font rl.Font, theme render.Theme) {
 	for i := l.top; i < l.end; i++ {
 		r := l.bmRows[i-l.top]
 		b := s.bookmarks[i]
-		render.DrawRichText(font, "Jump to "+core.TileCoord(b.x, b.z),
+		label := "Jump to " + core.TileCoord(b.x, b.z)
+		if b.name != "" {
+			label = b.name + "  —  " + core.TileCoord(b.x, b.z)
+		}
+		render.DrawRichText(font, label,
 			rl.NewVector2(r.row.X+6, r.row.Y+4), editorFontBody, 1, theme.TextPrimary)
 		drawButton(font, r.del, "X", false)
 	}

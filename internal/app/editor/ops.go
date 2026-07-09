@@ -1286,6 +1286,19 @@ func clearSelection(s *State) {
 	s.selActive = false
 }
 
+// dropSelectionIfOffMap clears the marquee when its bounds fall outside the current
+// area — the one case undoOne/redoOne must handle, since stepping ACROSS a resize
+// boundary leaves a selection sized for the other dimensions (a wider-than-map region
+// makes moveSelectionBy compute a negative Clamp max and corrupt the marquee).
+func dropSelectionIfOffMap(s *State) {
+	if !s.selActive {
+		return
+	}
+	if s.selX1 >= s.area.Width || s.selZ1 >= s.area.Height || s.selX0 < 0 || s.selZ0 < 0 {
+		s.selActive = false
+	}
+}
+
 // revealActiveLayer un-hides the layer being edited so a paint/erase/fill on a hidden
 // layer isn't invisible. Shared by applyTool, eraseAt, placeRamp, floodFill, and
 // fillEntireLayer so the reveal can't be forgotten on a new edit path.
@@ -1358,13 +1371,18 @@ func commitUndoSnapshot(s *State, before core.AreaDefinition) {
 			s.undo[i] = core.AreaDefinition{}
 		}
 		s.undo = s.undo[:undoLimit]
+		s.undoTrimmed = true // history exceeded the cap — oldest step(s) dropped
 	}
 	s.redo = nil
 }
 
 func undoOne(s *State) {
 	if len(s.undo) == 0 {
-		s.flash("Nothing to undo")
+		if s.undoTrimmed {
+			s.flashWarn("Undo limit (" + strconv.Itoa(undoLimit) + ") reached — older changes were dropped")
+		} else {
+			s.flash("Nothing to undo")
+		}
 		return
 	}
 	last := s.undo[len(s.undo)-1]
@@ -1372,6 +1390,7 @@ func undoOne(s *State) {
 	s.redo = append(s.redo, core.CloneArea(s.area))
 	s.area = last
 	invalidateContentCaches(s) // area replaced — rebuild reachability + epoch caches lazily
+	dropSelectionIfOffMap(s)   // undoing across a resize can shrink the map under the marquee
 	// Drop the dirty marker if we stepped back to the on-disk baseline.
 	s.dirty = !core.AreaContentEqual(s.area, s.baseline)
 	if !s.dirty {
@@ -1389,6 +1408,7 @@ func redoOne(s *State) {
 	s.undo = append(s.undo, core.CloneArea(s.area))
 	s.area = last
 	invalidateContentCaches(s) // area replaced — rebuild reachability + epoch caches lazily
+	dropSelectionIfOffMap(s)   // redoing across a resize can shrink the map under the marquee
 	s.dirty = !core.AreaContentEqual(s.area, s.baseline)
 	if !s.dirty {
 		clearRecovery() // stepped back onto the saved baseline — nothing unsaved to recover
@@ -1615,8 +1635,9 @@ func writeAreaTo(s *State, path string) error {
 	s.baseline = core.CloneArea(s.area)
 	s.dirty = false
 	s.autosaveTimer = 0
-	clearRecovery()       // persisted to disk — no pending crash-recovery snapshot
-	rememberLastMap(path) // reopen here next session (NewDefault)
+	clearRecovery()                        // persisted to disk — no pending crash-recovery snapshot
+	rememberLastMap(path)                  // reopen here next session (NewDefault)
+	saveBookmarksForMap(path, s.bookmarks) // persist any in-session bookmarks (e.g. first save)
 	return nil
 }
 
@@ -1659,7 +1680,7 @@ func saveCurrent(s *State) {
 		return
 	}
 	if err := writeAreaTo(s, s.area.Path); err != nil {
-		s.flash("Save failed: " + err.Error())
+		s.flashWarn("Save failed: " + err.Error())
 		return
 	}
 	// Reachability is an at-will check (Validate modal), not auto-flashed on save.
@@ -2135,6 +2156,44 @@ func activeGrid(s *State) *[]string {
 	return nil
 }
 
+// replaceLayers are the layers whose per-tile char maps DIRECTLY to the active grid
+// (no footprint / voxel-stack / per-floor override), so a whole-layer char swap is a
+// plain grid rewrite. Decor/Props (stack + footprint) and Elevation (voxel) are
+// excluded — a naive swap there would desync the stack/solids model.
+func canReplaceOnLayer(l Layer) bool {
+	return l == LayerFloor || l == LayerCeiling || l == LayerWalls
+}
+
+// replaceCharOnActiveGrid swaps every src cell on the active grid for dst in one undo
+// step (find-and-replace / global re-theme, e.g. all grass→dirt). No-op if src==dst or
+// nothing matched. Restricted to canReplaceOnLayer layers.
+func replaceCharOnActiveGrid(s *State, src, dst byte) {
+	if src == dst || !canReplaceOnLayer(s.layer) {
+		return
+	}
+	grid := activeGrid(s)
+	if grid == nil {
+		return
+	}
+	before := core.CloneArea(s.area)
+	count := 0
+	for z := 0; z < len(*grid); z++ {
+		for x := 0; x < len((*grid)[z]); x++ {
+			if (*grid)[z][x] == src {
+				setLayerCell(grid, x, z, dst)
+				count++
+			}
+		}
+	}
+	if count == 0 {
+		return
+	}
+	commitUndoSnapshot(s, before)
+	s.dirty = true
+	revealActiveLayer(s)
+	s.flash(fmt.Sprintf("Replaced %d tile(s) on %s", count, layerName(s.layer)))
+}
+
 // startTileBlocker returns the first "player can't spawn" warning, or "". Single
 // source for the playtest gate and the reachability start-tile preamble.
 func startTileBlocker(a core.AreaDefinition) string {
@@ -2491,6 +2550,7 @@ func performNewMap(s *State, w, h int, floor byte) {
 	s.baseline = core.CloneArea(s.area)
 	s.undo = nil
 	s.redo = nil
+	s.undoTrimmed = false
 	invalidateContentCaches(s) // fresh area — rebuild reachability + epoch caches lazily
 	s.dirty = false
 	s.autosaveTimer = 0
