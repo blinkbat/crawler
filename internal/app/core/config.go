@@ -439,7 +439,8 @@ const (
 	// (Rend/LacerateBleedChance) are with the cast chances.
 	BleedMinTurns = 3
 	BleedMaxTurns = 4
-	// (Burn min/max travel on SkillEffect.Burn per skill — no global default; only Firebolt sets it.)
+	// (Burn duration lives below as the shared FireBurnMin/MaxTurns default; skills with
+	// their own range — Immolate, Arc Bolt — set BurnMin/MaxTurns on their SkillEffect.)
 
 	// Skill / enemy proc chances — lifted out of the registry literals so a balance
 	// pass touches one file. The registry still owns the per-entry binding.
@@ -1052,8 +1053,9 @@ const (
 )
 
 // Ancestral Spirit (Warrior, Ancestral Call) tuning — a conjured shade that strikes
-// alongside the summoner each of its turns. Damage is a share of the summoner's
-// basic attack. AncestralSpiritTurns + 1 accounts for the cast turn's own drain.
+// alongside the summoner each of its turns. Damage is a share of the summoner's basic
+// attack. 4 already bakes in the cast turn's own end-of-turn drain (Vanish/Meteor
+// convention): the shade strikes on the cast turn plus the following three.
 const (
 	AncestralSpiritTurns      = 4
 	AncestralSpiritDamageMult = 0.6

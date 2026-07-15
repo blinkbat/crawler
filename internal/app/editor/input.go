@@ -1343,9 +1343,10 @@ var textFieldConfigs = map[focusField]textFieldConfig{
 	focusDialogNodeContinue: {defaultTextFieldMaxLen, acceptPrintable},
 	focusDialogChoiceLabel:  {dialogProseMaxLen, acceptPrintable},
 	focusDialogChoiceNext:   {defaultTextFieldMaxLen, acceptPrintableNoSpace},
-	focusDialogActionID:     {defaultTextFieldMaxLen, acceptPrintableNoSpace}, // quest/event-id key
 	focusDialogCondQuestID:  {defaultTextFieldMaxLen, acceptPrintableNoSpace},
 	focusDialogCondMessage:  {dialogProseMaxLen, acceptPrintable},
+	// Numeric foci — every field reachable from dialogNumericTarget must be here with
+	// acceptDigit, else it falls back to the printable/96-char default (init asserts this).
 	focusDialogCondGold:     {dialogNumFieldMaxLen, acceptDigit},
 	focusDialogCondFoeKills: {dialogNumFieldMaxLen, acceptDigit},
 	focusDialogCondTileX:    {dialogNumFieldMaxLen, acceptDigit},
@@ -1353,6 +1354,29 @@ var textFieldConfigs = map[focusField]textFieldConfig{
 	focusDialogTrigTileX:    {dialogNumFieldMaxLen, acceptDigit},
 	focusDialogTrigTileZ:    {dialogNumFieldMaxLen, acceptDigit},
 	focusDialogTrigFoeKills: {dialogNumFieldMaxLen, acceptDigit},
+	focusDialogTrigLevel:    {dialogNumFieldMaxLen, acceptDigit},
+	focusTrigActTileX:       {dialogNumFieldMaxLen, acceptDigit},
+	focusTrigActTileZ:       {dialogNumFieldMaxLen, acceptDigit},
+	focusTrigActCount:       {dialogNumFieldMaxLen, acceptDigit},
+	focusTrigActLevel:       {dialogNumFieldMaxLen, acceptDigit},
+}
+
+// dialogNumericFoci lists every focus dialogNumericTarget edits as an int; keep it in
+// lockstep with that switch. init asserts each has a numeric textFieldConfigs row so a
+// new numeric field can't silently inherit the printable/96-char text default.
+var dialogNumericFoci = []focusField{
+	focusDialogCondGold, focusDialogCondFoeKills, focusDialogCondTileX, focusDialogCondTileZ,
+	focusDialogTrigTileX, focusDialogTrigTileZ, focusDialogTrigFoeKills, focusDialogTrigLevel,
+	focusTrigActTileX, focusTrigActTileZ, focusTrigActCount, focusTrigActLevel,
+}
+
+func init() {
+	for _, f := range dialogNumericFoci {
+		cfg, ok := textFieldConfigs[f]
+		if !ok || cfg.MaxLen != dialogNumFieldMaxLen {
+			panic(fmt.Sprintf("editor: numeric focus %d missing acceptDigit textFieldConfigs row", f))
+		}
+	}
 }
 
 // dialogNumFieldMaxLen caps the shared numeric edit buffer (gold gates, coords).
@@ -1387,7 +1411,7 @@ func focusIsAreaText(f focusField) bool {
 		focusDoorName, focusDoorTargetMap, focusDoorTargetDoor,
 		focusDialogNodeText, focusDialogNodeNext, focusDialogNodeContinue,
 		focusDialogChoiceLabel, focusDialogChoiceNext,
-		focusDialogActionID, focusDialogCondQuestID, focusDialogCondMessage,
+		focusDialogCondQuestID, focusDialogCondMessage,
 		focusTrigCondText, focusTrigActText, focusWallFeatureSwitch:
 		return true
 	}

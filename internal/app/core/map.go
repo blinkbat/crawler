@@ -1547,11 +1547,6 @@ var crossLayerCharOverlaps = []crossLayerOverlap{
 		Reason: "archway-anchor decor and stone sarcophagus prop share the 'A' mnemonic.",
 	},
 	{
-		A: TileLayerDecor, B: TileLayerProps, Char: 'L',
-		NameA: "DecorLeafPile", NameB: "TileTable",
-		Reason: "leaf-pile decor and dungeon table prop share the 'L' mnemonic (L for Leaf and L for table-Leg).",
-	},
-	{
 		A: TileLayerDecor, B: TileLayerFloor, Char: 'c',
 		NameA: "DecorCandle", NameB: "FloorCobble",
 		Reason: "candle decor and cobblestone floor tile share the 'c' mnemonic.",

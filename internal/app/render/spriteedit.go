@@ -769,7 +769,7 @@ func deriveAdjustedTexture(pristine rl.Texture2D, ov core.EnemyVisualOverride, o
 	if tex.ID == 0 {
 		return rl.Texture2D{}, false
 	}
-	applySpriteDisplayFilter(tex, f)
+	applySpriteDisplayFilter(&tex, f)
 	if owned != nil {
 		*owned = append(*owned, tex)
 	}
@@ -778,14 +778,14 @@ func deriveAdjustedTexture(pristine rl.Texture2D, ov core.EnemyVisualOverride, o
 
 // applySpriteDisplayFilter sets GPU sampling: POINT when pixelating (crisp blocks),
 // else mipmapped trilinear; wrap always clamp. One source so boot/preview/reload match.
-func applySpriteDisplayFilter(tex rl.Texture2D, f SpriteFilter) {
+func applySpriteDisplayFilter(tex *rl.Texture2D, f SpriteFilter) {
 	if f.Pixelate > 1 {
-		rl.SetTextureFilter(tex, rl.FilterPoint)
+		rl.SetTextureFilter(*tex, rl.FilterPoint)
 	} else {
-		rl.GenTextureMipmaps(&tex)
-		rl.SetTextureFilter(tex, rl.FilterTrilinear)
+		rl.GenTextureMipmaps(tex) // updates tex.Mipmaps so the stored struct reflects the GPU state
+		rl.SetTextureFilter(*tex, rl.FilterTrilinear)
 	}
-	rl.SetTextureWrap(tex, rl.WrapClamp)
+	rl.SetTextureWrap(*tex, rl.WrapClamp)
 }
 
 // editorFXTextures holds display textures re-derived from pristine + live FX after
@@ -830,7 +830,7 @@ func displayTextureForSlug(slug string, pristine rl.Texture2D, ov core.EnemyVisu
 	if tex.ID == 0 {
 		return pristine
 	}
-	applySpriteDisplayFilter(tex, f)
+	applySpriteDisplayFilter(&tex, f)
 	editorFXTextures[slug] = tex
 	return tex
 }
@@ -903,7 +903,7 @@ func setAssetPreviewSlug(slug string, baseTex rl.Texture2D, f SpriteFilter) bool
 	if tex.ID == 0 {
 		return false
 	}
-	applySpriteDisplayFilter(tex, f)
+	applySpriteDisplayFilter(&tex, f)
 	// Free only the prior preview TEXTURE, not the cached base (that cache is what
 	// makes a drag a cheap ImageCopy); ClearAssetPreview drops both.
 	if assetPreviewLoaded {

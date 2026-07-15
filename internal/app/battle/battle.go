@@ -486,8 +486,7 @@ func startActorTurn(g *core.GameState) {
 			}
 			// The burning actor is skipped, not acting — zero the per-turn tallies so its
 			// burn/Meteor kills don't leak into the next actor's Bloodthirst / Killing Spree.
-			g.Battle.PhysDamageThisTurn = 0
-			g.Battle.EnemyKillsThisTurn = 0
+			clearTurnTallies(&g.Battle)
 			g.Battle.QueueCursor++
 			continue
 		}
@@ -546,8 +545,7 @@ func advanceSkippedTurn(g *core.GameState, actor core.ActorRef) bool {
 	// Zero the per-turn tallies (symmetry with finishActorTurn) so no stale figure
 	// leaks into the next actor's Bloodthirst / Killing Spree — a DoT/Meteor kill on
 	// this skipped turn must not credit the next actor with a kill it never made.
-	g.Battle.PhysDamageThisTurn = 0
-	g.Battle.EnemyKillsThisTurn = 0
+	clearTurnTallies(&g.Battle)
 	// Party wipe FIRST (matches finishActorTurn/Update): if a skipped turn downs the
 	// last member AND a DoT/Meteor kills the last enemy in the same tick, it's a loss,
 	// never a zero-survivor victory — winBattle would set Phase=BattleWon and Update's
@@ -721,8 +719,7 @@ func finishActorTurn(g *core.GameState) {
 	resolveMeteorIfDue(g)
 	// Zero the per-turn tallies now they're banked, so reflect/counter damage can't
 	// leak into the next member's Bloodthirst / Killing Spree.
-	g.Battle.PhysDamageThisTurn = 0
-	g.Battle.EnemyKillsThisTurn = 0
+	clearTurnTallies(&g.Battle)
 	// Party wipe FIRST: a killing blow whose own end-of-turn tick (poison,
 	// Overcharge recoil) also fells the last member must read as a loss — winning
 	// with zero living members would exit to explore in an unrecoverable state.
@@ -933,20 +930,25 @@ func updateAttackTiming(g *core.GameState, dt float32) {
 	resolveTimingBar(g, func() { applyPendingAction(g, g.Battle.Timing.Quality) })
 }
 
+// Per-band input cues: one "landed" cue shared by the lower grades (Nice/Good) and one
+// "great" cue shared by the top grades (Great/Excellent). Named so retuning a band is a
+// single edit that keeps both of its gradeSounds cells in lockstep by construction.
+const (
+	landedCue = audio.SoundInputHit
+	greatCue  = audio.SoundInputGreat
+)
+
 // gradeSounds is the per-grade audio cue table — all bars dispatch off it so the same
-// grade sounds the same. Three cues across three bands by design: a Miss cue, one
-// "landed" cue shared by the lower grades (Nice/Good), and one "great" cue shared by
-// the top grades (Great/Excellent). The shared value within a band is intentional —
-// retuning the landed or great band means changing BOTH of its cells (unenforced;
-// keep the pair in sync).
+// grade sounds the same. Three cues across three bands by design (Miss, landed, great);
+// the two band cells each read from one named constant so a half-edit is impossible.
 var gradeSounds = [...]audio.Sound{
 	core.TimingQualityMiss: audio.SoundInputMiss,
 	// Landed band.
-	core.TimingQualityNice: audio.SoundInputHit,
-	core.TimingQualityGood: audio.SoundInputHit,
+	core.TimingQualityNice: landedCue,
+	core.TimingQualityGood: landedCue,
 	// Great band.
-	core.TimingQualityGreat:     audio.SoundInputGreat,
-	core.TimingQualityExcellent: audio.SoundInputGreat,
+	core.TimingQualityGreat:     greatCue,
+	core.TimingQualityExcellent: greatCue,
 }
 
 // init asserts gradeSounds covers every timing grade.
@@ -1499,6 +1501,14 @@ func resetBattleAction(g *core.GameState) {
 	g.Battle.ItemMenuIndex = 0
 }
 
+// clearTurnTallies zeroes the per-turn kill/damage tallies. Every "turn slot consumed"
+// site calls it so a DoT/Meteor/reflect kill on one turn can't leak into the next
+// actor's Bloodthirst / Killing Spree. One home so a new per-turn tally is zeroed once.
+func clearTurnTallies(b *core.Battle) {
+	b.PhysDamageThisTurn = 0
+	b.EnemyKillsThisTurn = 0
+}
+
 // resetBattleTransients zeroes every per-fight transient. Both Start and
 // clearBattleResidual call it so a new transient can't be cleared on one path and
 // leaked on the other. EnemyIndex / ActivePack / Splash / PartyTarget are NOT
@@ -1517,8 +1527,7 @@ func resetBattleTransients(b *core.Battle) {
 	b.EnemyAttackCursor = core.NoIndex
 	b.EnemyPendingSkill = core.SkillNone
 	b.EnemyAttackMisses = false
-	b.PhysDamageThisTurn = 0
-	b.EnemyKillsThisTurn = 0
+	clearTurnTallies(b)
 	b.MeteorFuse = 0
 	b.MeteorDamage = 0
 	b.Queue = nil

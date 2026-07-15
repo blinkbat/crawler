@@ -249,17 +249,8 @@ func SynthShapeParams(p ShapeParams) []int16 {
 	tremDepth := clamp01(p.TremoloDepth)
 	drive := clamp01(p.Drive)
 	crush := clamp01(p.Crush)
-	vibDepth := p.VibDepth
-	if vibDepth < 0 {
-		vibDepth = 0
-	}
-	pulse := p.PulseWidth
-	if pulse < 0.01 {
-		pulse = 0.01
-	}
-	if pulse > 0.99 {
-		pulse = 0.99
-	}
+	vibDepth := math.Max(0, p.VibDepth)
+	pulse := clampF64(p.PulseWidth, 0.01, 0.99)
 	holdLen := 1 + int(crush*crushMaxHold+0.5) // 1 = no crush
 	releaseStart := p.Duration - p.Release
 	if releaseStart < 0 {

@@ -450,9 +450,6 @@ const (
 	focusDialogNodeContinue
 	focusDialogChoiceLabel
 	focusDialogChoiceNext
-	// focusDialogActionID edits the action editor's quest-id / event-id
-	// (modalDialogActionEdit), routed by action kind via dialogActionIDTarget.
-	focusDialogActionID
 	// Condition-editor foci (modalDialogCondEdit); numerics route through dialogNumBuf.
 	focusDialogCondQuestID
 	focusDialogCondMessage

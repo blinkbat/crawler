@@ -956,7 +956,9 @@ func turnEntryFor(g *GameState, actor ActorRef) (TurnEntry, bool) {
 		if !actor.ValidPartyIndex(g.Party) || g.Party[actor.Index].HP <= 0 {
 			return TurnEntry{}, false
 		}
-		p := g.Party[actor.Index]
+		// Pointer, not a copy: PartyMember is a wide struct (Stats/HitAnim/Buffs/…) and
+		// this runs per queue entry every battle frame — mirrors the enemy branch below.
+		p := &g.Party[actor.Index]
 		return TurnEntry{Label: p.Name, Class: p.Class, Index: actor.Index}, true
 	}
 	members := BattleMembers(g)

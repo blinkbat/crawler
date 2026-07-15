@@ -2351,6 +2351,31 @@ func refreshElevGrid(s *State) {
 // refreshElevGrid must have run this frame.
 func columnTopLevel(x, z int) int { return elevGridCache[z*elevGridW+x] }
 
+// visibleTileWindow returns the [xMin,xMax)×[zMin,zMax) tile range currently inside the
+// grid panel, clamped to the area. Per-cell draw loops iterate this instead of the whole
+// grid so a 200×200 map (40k cells) doesn't issue tens of thousands of off-screen draws.
+// Assumes s.rect.cellPx > 0.
+func (s *State) visibleTileWindow() (xMin, xMax, zMin, zMax int) {
+	cell := s.rect.cellPx
+	xMin = int((s.rect.grid.X - s.rect.gridX) / cell)
+	xMax = int((s.rect.grid.X+s.rect.grid.Width-s.rect.gridX)/cell) + 1
+	zMin = int((s.rect.grid.Y - s.rect.gridY) / cell)
+	zMax = int((s.rect.grid.Y+s.rect.grid.Height-s.rect.gridY)/cell) + 1
+	if xMin < 0 {
+		xMin = 0
+	}
+	if zMin < 0 {
+		zMin = 0
+	}
+	if xMax > s.area.Width {
+		xMax = s.area.Width
+	}
+	if zMax > s.area.Height {
+		zMax = s.area.Height
+	}
+	return
+}
+
 func drawGrid(s *State, font rl.Font) {
 	rl.DrawRectangleRec(s.rect.grid, bgFieldInset)
 	// Iso preview takes over the whole canvas (read-only — see iso.go), sizing
@@ -2373,24 +2398,7 @@ func drawGrid(s *State, font rl.Font) {
 
 	// Frustum-cull tiles outside the visible grid panel (a 200×200 map is 40k
 	// cells × ~6 draws otherwise). Compute the visible [xMin,xMax)×[zMin,zMax) window.
-	panelX0, panelY0 := s.rect.grid.X, s.rect.grid.Y
-	panelX1, panelY1 := s.rect.grid.X+s.rect.grid.Width, s.rect.grid.Y+s.rect.grid.Height
-	xMin := int((panelX0 - s.rect.gridX) / cell)
-	xMax := int((panelX1-s.rect.gridX)/cell) + 1
-	zMin := int((panelY0 - s.rect.gridY) / cell)
-	zMax := int((panelY1-s.rect.gridY)/cell) + 1
-	if xMin < 0 {
-		xMin = 0
-	}
-	if zMin < 0 {
-		zMin = 0
-	}
-	if xMax > s.area.Width {
-		xMax = s.area.Width
-	}
-	if zMax > s.area.Height {
-		zMax = s.area.Height
-	}
+	xMin, xMax, zMin, zMax := s.visibleTileWindow()
 	// inCullWindow: is a tile inside the visible window (entity loops skip off-screen).
 	inCullWindow := func(tx, tz int) bool {
 		return tx >= xMin && tx < xMax && tz >= zMin && tz < zMax
@@ -3864,8 +3872,11 @@ func drawHeatmapOverlay(s *State, font rl.Font, theme render.Theme) {
 	refreshHeatField(s)
 	g := s.rect.grid
 	rl.BeginScissorMode(int32(g.X), int32(g.Y), int32(g.Width), int32(g.Height))
-	for z := 0; z < s.area.Height; z++ {
-		for x := 0; x < s.area.Width; x++ {
+	// Only the on-screen tile window — off-screen rects are scissor-clipped anyway, so
+	// issuing them is pure wasted CGo (matches drawGrid's cull).
+	xMin, xMax, zMin, zMax := s.visibleTileWindow()
+	for z := zMin; z < zMax; z++ {
+		for x := xMin; x < xMax; x++ {
 			if s.area.WallAt(x, z) {
 				continue // walls carry no coverage meaning
 			}

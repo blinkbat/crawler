@@ -179,6 +179,24 @@ var (
 	uniformFloatBuf [1]float32
 )
 
+// setShaderFloat / setShaderVec2 / setShaderVec3 upload one uniform through the shared
+// reuse buffers (no per-call slice alloc). One home for the buf-fill + SetShaderValue
+// pair so a wrong buffer or uniform-type can't be mistyped across the ~20 upload sites.
+func setShaderFloat(sh rl.Shader, loc int32, v float32) {
+	uniformFloatBuf[0] = v
+	rl.SetShaderValue(sh, loc, uniformFloatBuf[:], rl.ShaderUniformFloat)
+}
+
+func setShaderVec2(sh rl.Shader, loc int32, x, y float32) {
+	uniformVec2Buf[0], uniformVec2Buf[1] = x, y
+	rl.SetShaderValue(sh, loc, uniformVec2Buf[:], rl.ShaderUniformVec2)
+}
+
+func setShaderVec3(sh rl.Shader, loc int32, v rl.Vector3) {
+	uniformVec3Buf[0], uniformVec3Buf[1], uniformVec3Buf[2] = v.X, v.Y, v.Z
+	rl.SetShaderValue(sh, loc, uniformVec3Buf[:], rl.ShaderUniformVec3)
+}
+
 // billboardFog* memoize the last fog-uniform upload to skip redundant ones (the
 // uniforms only shift on a phase crossing). Keyed on shader ID so a reload re-primes.
 var (
@@ -200,14 +218,10 @@ func (s billboardFogShaderPipe) applyUniforms(camera rl.Camera3D, profile lighti
 	billboardFogShaderID = s.shader.ID
 	billboardFogViewPos = camera.Position
 	billboardFogProfile = profile
-	uniformVec3Buf[0], uniformVec3Buf[1], uniformVec3Buf[2] = camera.Position.X, camera.Position.Y, camera.Position.Z
-	rl.SetShaderValue(s.shader, s.locViewPos, uniformVec3Buf[:], rl.ShaderUniformVec3)
-	uniformVec3Buf[0], uniformVec3Buf[1], uniformVec3Buf[2] = profile.FogColor.X, profile.FogColor.Y, profile.FogColor.Z
-	rl.SetShaderValue(s.shader, s.locFogColor, uniformVec3Buf[:], rl.ShaderUniformVec3)
-	uniformFloatBuf[0] = profile.FogDensity
-	rl.SetShaderValue(s.shader, s.locFogDensity, uniformFloatBuf[:], rl.ShaderUniformFloat)
-	uniformFloatBuf[0] = profile.Mood
-	rl.SetShaderValue(s.shader, s.locNightMood, uniformFloatBuf[:], rl.ShaderUniformFloat)
+	setShaderVec3(s.shader, s.locViewPos, camera.Position)
+	setShaderVec3(s.shader, s.locFogColor, profile.FogColor)
+	setShaderFloat(s.shader, s.locFogDensity, profile.FogDensity)
+	setShaderFloat(s.shader, s.locNightMood, profile.Mood)
 }
 
 // Lighting is a single forward pass: sun + hemisphere ambient + pseudo-AO + fog.
@@ -431,8 +445,7 @@ func (l lightingShader) uploadTorches(torches []torchLight) {
 	}
 	// torchRange never changes — upload once (re-primes if the shader reloads).
 	if !torchRangePrimed || torchRangeShaderID != l.shader.ID {
-		uniformFloatBuf[0] = torchRangeWorld
-		rl.SetShaderValue(l.shader, l.locTorchRange, uniformFloatBuf[:], rl.ShaderUniformFloat)
+		setShaderFloat(l.shader, l.locTorchRange, torchRangeWorld)
 		torchRangePrimed = true
 		torchRangeShaderID = l.shader.ID
 		torchSlotsZeroed = false // force a fresh slot upload after a reload
@@ -484,8 +497,7 @@ func (l lightingShader) applyUniforms(camera rl.Camera3D, ambient lightingProfil
 	if l.shader.ID == 0 {
 		return
 	}
-	uniformVec3Buf[0], uniformVec3Buf[1], uniformVec3Buf[2] = camera.Position.X, camera.Position.Y, camera.Position.Z
-	rl.SetShaderValue(l.shader, l.locViewPos, uniformVec3Buf[:], rl.ShaderUniformVec3)
+	setShaderVec3(l.shader, l.locViewPos, camera.Position)
 	// Remaining uniforms are constant or profile-derived; skip when profile + shader unchanged.
 	if lightingUniformPrimed && lightingUniformShaderID == l.shader.ID && ambient == lightingUniformProfile {
 		return
@@ -493,22 +505,14 @@ func (l lightingShader) applyUniforms(camera rl.Camera3D, ambient lightingProfil
 	lightingUniformProfile = ambient
 	lightingUniformShaderID = l.shader.ID
 	lightingUniformPrimed = true
-	uniformVec3Buf[0], uniformVec3Buf[1], uniformVec3Buf[2] = sunDir.X, sunDir.Y, sunDir.Z
-	rl.SetShaderValue(l.shader, l.locSunDirection, uniformVec3Buf[:], rl.ShaderUniformVec3)
-	uniformVec3Buf[0], uniformVec3Buf[1], uniformVec3Buf[2] = ambient.SunColor.X, ambient.SunColor.Y, ambient.SunColor.Z
-	rl.SetShaderValue(l.shader, l.locSunColor, uniformVec3Buf[:], rl.ShaderUniformVec3)
-	uniformVec3Buf[0], uniformVec3Buf[1], uniformVec3Buf[2] = ambient.AmbientColor.X, ambient.AmbientColor.Y, ambient.AmbientColor.Z
-	rl.SetShaderValue(l.shader, l.locAmbientColor, uniformVec3Buf[:], rl.ShaderUniformVec3)
-	uniformVec3Buf[0], uniformVec3Buf[1], uniformVec3Buf[2] = ambient.FogColor.X, ambient.FogColor.Y, ambient.FogColor.Z
-	rl.SetShaderValue(l.shader, l.locFogColor, uniformVec3Buf[:], rl.ShaderUniformVec3)
-	uniformFloatBuf[0] = ambient.FogDensity
-	rl.SetShaderValue(l.shader, l.locFogDensity, uniformFloatBuf[:], rl.ShaderUniformFloat)
-	uniformFloatBuf[0] = ambient.SpecularStrength
-	rl.SetShaderValue(l.shader, l.locSpecStrength, uniformFloatBuf[:], rl.ShaderUniformFloat)
-	uniformFloatBuf[0] = ambient.ShadowStrength
-	rl.SetShaderValue(l.shader, l.locShadowStrength, uniformFloatBuf[:], rl.ShaderUniformFloat)
-	uniformFloatBuf[0] = ambient.Mood
-	rl.SetShaderValue(l.shader, l.locNightMood, uniformFloatBuf[:], rl.ShaderUniformFloat)
+	setShaderVec3(l.shader, l.locSunDirection, sunDir)
+	setShaderVec3(l.shader, l.locSunColor, ambient.SunColor)
+	setShaderVec3(l.shader, l.locAmbientColor, ambient.AmbientColor)
+	setShaderVec3(l.shader, l.locFogColor, ambient.FogColor)
+	setShaderFloat(l.shader, l.locFogDensity, ambient.FogDensity)
+	setShaderFloat(l.shader, l.locSpecStrength, ambient.SpecularStrength)
+	setShaderFloat(l.shader, l.locShadowStrength, ambient.ShadowStrength)
+	setShaderFloat(l.shader, l.locNightMood, ambient.Mood)
 }
 
 type lightingProfile struct {

@@ -2376,10 +2376,7 @@ func damageEnemyCrit(g *core.GameState, slot, rawDamage, quality int, tag core.S
 // (Thief's Plague capstone). No-stack: only un-poisoned foes catch it; a fixed
 // rolled duration. deadSlot is the foe that just died (skipped — already a corpse).
 func spreadPlague(g *core.GameState, deadSlot int) {
-	dur := core.PlagueSpreadMinTurns
-	if span := core.PlagueSpreadMaxTurns - core.PlagueSpreadMinTurns; span > 0 {
-		dur += g.Rand().Intn(span + 1)
-	}
+	dur := core.RandRangeI(g.Rand(), core.PlagueSpreadMinTurns, core.PlagueSpreadMaxTurns)
 	spread := 0
 	forEachLivingEnemy(g, func(slot int, e *core.Enemy) {
 		if slot == deadSlot || e.PoisonTurns > 0 {

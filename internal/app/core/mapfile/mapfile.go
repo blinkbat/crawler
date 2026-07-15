@@ -1057,6 +1057,19 @@ func (mf *MapFile) ValidateEntityBounds() error {
 	return nil
 }
 
+// ValidateFaceBounds checks every per-tile face override sits in-bounds. Single home
+// for that check: validate() calls it on the load path and core.AreaFromMapFile — the
+// editor's direct build path, which skips validate() — calls it too (mirrors
+// ValidateEntityBounds), so an off-map face is rejected identically on both paths.
+func (mf *MapFile) ValidateFaceBounds() error {
+	for _, f := range mf.Faces {
+		if !InBoundsWH(f.X, f.Z, mf.Width, mf.Height) {
+			return fmt.Errorf("faces entry (%d,%d) outside map", f.X, f.Z)
+		}
+	}
+	return nil
+}
+
 // MaxFloorLevel is the highest floor an entity's @N section may name — the level
 // MaxLevelChar ('K') encodes (0..20), the same alphabet as elevation/prop levels.
 const MaxFloorLevel = 20
@@ -1163,11 +1176,8 @@ func (mf *MapFile) validate() error {
 	if err := mf.ValidateGrids(); err != nil {
 		return err
 	}
-	// faces: bounds-check each so a stray line can't feed an off-map index.
-	for _, f := range mf.Faces {
-		if !InBoundsWH(f.X, f.Z, mf.Width, mf.Height) {
-			return fmt.Errorf("faces entry (%d,%d) outside map", f.X, f.Z)
-		}
+	if err := mf.ValidateFaceBounds(); err != nil {
+		return err
 	}
 	if !InBoundsWH(mf.StartX, mf.StartZ, mf.Width, mf.Height) {
 		return fmt.Errorf("start (%d,%d) outside map", mf.StartX, mf.StartZ)

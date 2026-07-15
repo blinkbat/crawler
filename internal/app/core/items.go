@@ -402,23 +402,18 @@ func ItemIsRestorative(def ItemDefinition) bool {
 	return def.HealAmount > 0 || def.MPAmount > 0 || def.SatietyGain > 0
 }
 
-// ItemHelpsTarget reports whether using a restorative on m would do anything
-// (restores HP and m isn't full, or MP and m isn't full). A non-restorative
-// returns true (a deliberate action). Both use paths gate on this.
+// ItemHelpsTarget reports whether using a restorative on m would do anything. A
+// non-restorative returns true (a deliberate action). Delegates to restorativeDeltas —
+// the SAME source ApplyRestorative applies — so the "helps" verdict can never drift
+// from what the item actually delivers (downed/ingested members gain nothing from a
+// heal but can still be fed; feeding lifts Starving so a combo item's heal then lands).
+// Both use paths gate on this.
 func ItemHelpsTarget(def ItemDefinition, m PartyMember) bool {
 	if !ItemIsRestorative(def) {
 		return true
 	}
-	// A starving member can't gain HP by any means but food, so a pure HP-heal does
-	// NOT help them — but food still does (satietyUseful), and feeding lifts Starving
-	// so the same item's heal lands afterward.
-	// HP/MP restore require partyAvailable (mirrors restorativeDeltas' gates), so the
-	// "helps" verdict matches what ApplyRestorative can actually deliver — a downed /
-	// ingested member gains nothing from a heal. Feeding has no availability gate.
-	hpUseful := def.HealAmount > 0 && m.HP < m.MaxHP && partyAvailable(m) && !MemberStarving(m)
-	mpUseful := def.MPAmount > 0 && m.MP < m.MaxMP && partyAvailable(m)
-	satietyUseful := def.SatietyGain > 0 && m.Hunger > 0
-	return hpUseful || mpUseful || satietyUseful
+	r := restorativeDeltas(m, def)
+	return r.HP > 0 || r.MP > 0 || r.Satiety > 0
 }
 
 // RestorativeResult reports what a consumed restorative actually applied

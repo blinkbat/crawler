@@ -93,20 +93,15 @@ func (s cloudWarpShaderPipe) unload() {
 // with rl.EndShaderMode(); set each plane via layer() before its draw.
 func (s cloudWarpShaderPipe) begin(screenW, screenH, now float32) {
 	rl.BeginShaderMode(s.shader)
-	uniformFloatBuf[0] = now
-	rl.SetShaderValue(s.shader, s.locTime, uniformFloatBuf[:], rl.ShaderUniformFloat)
-	uniformVec2Buf[0], uniformVec2Buf[1] = screenW, screenH
-	rl.SetShaderValue(s.shader, s.locResolution, uniformVec2Buf[:], rl.ShaderUniformVec2)
+	setShaderFloat(s.shader, s.locTime, now)
+	setShaderVec2(s.shader, s.locResolution, screenW, screenH)
 }
 
 // layer uploads one plane's warp params. The caller MUST flush the batch
 // (rl.DrawRenderBatchActive) between the two planes' draws — else this second
 // upload retroactively applies to the first plane's still-batched vertices.
 func (s cloudWarpShaderPipe) layer(l cloudWarpLayer) {
-	uniformFloatBuf[0] = l.amp
-	rl.SetShaderValue(s.shader, s.locWarpAmp, uniformFloatBuf[:], rl.ShaderUniformFloat)
-	uniformFloatBuf[0] = l.scale
-	rl.SetShaderValue(s.shader, s.locWarpScale, uniformFloatBuf[:], rl.ShaderUniformFloat)
-	uniformFloatBuf[0] = l.phase
-	rl.SetShaderValue(s.shader, s.locPhase, uniformFloatBuf[:], rl.ShaderUniformFloat)
+	setShaderFloat(s.shader, s.locWarpAmp, l.amp)
+	setShaderFloat(s.shader, s.locWarpScale, l.scale)
+	setShaderFloat(s.shader, s.locPhase, l.phase)
 }

@@ -120,8 +120,8 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 // SaveVolumes writes music + SFX volume + mute to maps/sounds/volumes.txt (creating
 // the dir if needed). Volumes clamped to [0,1] so a stray value can't persist out of range.
 func SaveVolumes(music, sfx float32, muted bool) error {
-	dir := SoundsDir()
-	if err := os.MkdirAll(dir, core.AssetDirMode); err != nil {
+	dir, err := ensureSoundsDir()
+	if err != nil {
 		return err
 	}
 	body := fmt.Sprintf("music=%.3f\nsfx=%.3f\nmute=%t\n", core.Clamp(music, 0, 1), core.Clamp(sfx, 0, 1), muted)
@@ -184,6 +184,16 @@ func ListSounds() []string {
 	return out
 }
 
+// ensureSoundsDir returns the sounds dir, creating it if missing. One home for the
+// "make maps/sounds before writing into it" scaffold every writer here shares.
+func ensureSoundsDir() (string, error) {
+	dir := SoundsDir()
+	if err := os.MkdirAll(dir, core.AssetDirMode); err != nil {
+		return dir, err
+	}
+	return dir, nil
+}
+
 // WriteWAV writes a PCM cue's WAV bytes to maps/sounds/<name>.wav (name
 // sanitized). Returns the sanitized filename. Overwrites; errors on empty name.
 func WriteWAV(name string, pcm []int16) (string, error) {
@@ -191,13 +201,14 @@ func WriteWAV(name string, pcm []int16) (string, error) {
 	if clean == "" {
 		return "", fmt.Errorf("sound name required")
 	}
-	dir := SoundsDir()
-	if err := os.MkdirAll(dir, core.AssetDirMode); err != nil {
+	dir, err := ensureSoundsDir()
+	if err != nil {
 		return clean, err
 	}
 	wav := wavsynth.BuildWAV(pcm)
-	path := filepath.Join(dir, clean+WavExt)
-	if err := atomicWriteFile(path, wav, core.AssetFileMode); err != nil {
+	// Atomic (temp + rename): a crash mid-write must not leave a truncated .wav that
+	// decodes to a dead Sound (see atomicWriteFile doc).
+	if err := atomicWriteFile(filepath.Join(dir, clean+WavExt), wav, core.AssetFileMode); err != nil {
 		return clean, err
 	}
 	return clean, nil
@@ -206,20 +217,13 @@ func WriteWAV(name string, pcm []int16) (string, error) {
 // WriteSound writes <name>.wav plus a <name>.snd sidecar (synth knobs). Returns
 // the sanitized stem. Sidecar write is best-effort — failing it doesn't fail the save.
 func WriteSound(name string, p wavsynth.ShapeParams) (string, error) {
-	clean := SanitizeName(name)
-	if clean == "" {
-		return "", fmt.Errorf("sound name required")
-	}
-	dir := SoundsDir()
-	if err := os.MkdirAll(dir, core.AssetDirMode); err != nil {
-		return clean, err
-	}
-	wav := wavsynth.BuildWAV(wavsynth.SynthShapeParams(p))
-	if err := os.WriteFile(filepath.Join(dir, clean+WavExt), wav, core.AssetFileMode); err != nil {
+	// Delegate the .wav to WriteWAV so the atomic-write path lives in exactly one place.
+	clean, err := WriteWAV(name, wavsynth.SynthShapeParams(p))
+	if err != nil {
 		return clean, err
 	}
 	if data, err := json.MarshalIndent(p, "", "  "); err == nil {
-		_ = os.WriteFile(filepath.Join(dir, clean+ParamsExt), data, core.AssetFileMode)
+		_ = os.WriteFile(filepath.Join(SoundsDir(), clean+ParamsExt), data, core.AssetFileMode)
 	}
 	return clean, nil
 }
@@ -291,8 +295,8 @@ func LoadAssignments() map[string]string {
 // SaveAssignments writes the cue=name map in sorted key order (clean diffs).
 // Creates the sounds directory if missing.
 func SaveAssignments(assigns map[string]string) error {
-	dir := SoundsDir()
-	if err := os.MkdirAll(dir, core.AssetDirMode); err != nil {
+	dir, err := ensureSoundsDir()
+	if err != nil {
 		return err
 	}
 	var b strings.Builder

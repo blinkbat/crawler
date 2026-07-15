@@ -108,6 +108,11 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	if err := mf.ValidateEntityBounds(); err != nil {
 		return AreaDefinition{}, err
 	}
+	// Face overrides likewise — an off-map face key would otherwise pass here yet fail
+	// on the next Save (validate()), so mirror the disk-load check on this path too.
+	if err := mf.ValidateFaceBounds(); err != nil {
+		return AreaDefinition{}, err
+	}
 	spawns := make([]PackSpawn, 0, len(mf.Packs))
 	for _, p := range mf.Packs {
 		if len(p.Members) == 0 {
@@ -230,7 +235,7 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		// authored level drops to the ground surface); the blocked check AND the dedup key
 		// both key off this so validation matches placement.
 		level := area.resolveEntityLevel(c.TileX, c.TileZ, c.Level)
-		if len(area.Solids) > 0 {
+		if area.IsVoxel() {
 			if area.columnBlockedForEntity(c.TileX, c.TileZ, level) {
 				return AreaDefinition{}, fmt.Errorf("crystal at (%d,%d) floor %d sits on a blocked spot (prop/deep water)", c.TileX, c.TileZ, c.Level)
 			}
@@ -843,21 +848,25 @@ func SanitizeFilename(name, fallback string) string {
 	return string(cleaned)
 }
 
+// stripMapExt removes a single trailing .map (case-insensitive) — the one definition
+// of "drop the map extension", shared by MapPath and MapIDFromPath so an id containing
+// an unrelated dot (e.g. "cave.v2") keeps it instead of one path stripping it.
+func stripMapExt(s string) string {
+	if n := len(mapfile.Ext); len(s) >= n && strings.EqualFold(s[len(s)-n:], mapfile.Ext) {
+		return s[:len(s)-n]
+	}
+	return s
+}
+
 // MapPath returns the save path for a map ID under MapsDir, stripping a trailing
 // .map first so "test.map" writes to maps/test.map, not maps/test.map.map.
 func MapPath(id string) string {
-	// Case-insensitive ext strip via TrimSuffix on the actual-case suffix, so
-	// "test.MAP" trims too (matches the old EqualFold compare).
-	if n := len(mapfile.Ext); len(id) >= n && strings.EqualFold(id[len(id)-n:], mapfile.Ext) {
-		id = strings.TrimSuffix(id, id[len(id)-n:])
-	}
-	return filepath.Join(MapsDir(), id+mapfile.Ext)
+	return filepath.Join(MapsDir(), stripMapExt(id)+mapfile.Ext)
 }
 
 // MapIDFromPath strips the directory and .map extension off a map path.
 func MapIDFromPath(path string) string {
-	base := filepath.Base(path)
-	return strings.TrimSuffix(base, filepath.Ext(base))
+	return stripMapExt(filepath.Base(path))
 }
 
 // IsSelfPortal reports whether a door's TargetMap refers to area `a` itself
