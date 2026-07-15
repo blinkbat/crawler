@@ -182,6 +182,13 @@ func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(-0.17, 2.06, 0.74), scale: rl.NewVector3(0.78, 0.70, 0.78), tint: leafDeep},
 			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(0.60, 2.22, -0.17), scale: rl.NewVector3(0.72, 0.66, 0.72), tint: leafMid},
 			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(-0.05, 1.94, -0.27), scale: rl.NewVector3(0.55, 0.50, 0.55), tint: leafDeep},
+
+			// Low skirt lumps — widen the canopy base so the crown reads as a
+			// layered mass from the player's low angle, not a lollipop. Appended
+			// (like the form pass) so earlier parts keep their per-index variance;
+			// dropIdx only ever culls the FIRST two side lumps, so the skirt stays.
+			{modelIdx: treeMeshCanopySide, offset: rl.NewVector3(0.32, 2.30, -0.54), scale: rl.NewVector3(1.12, 0.84, 1.12), tint: leafDeep},
+			{modelIdx: treeMeshCanopySide, offset: rl.NewVector3(-0.36, 2.36, 0.50), scale: rl.NewVector3(1.06, 0.82, 1.06), tint: leafMid},
 		},
 	}
 }
@@ -676,15 +683,18 @@ func loadArchwayDecor(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 	}
 }
 
-// loadBushProp builds a leaf-cluster bush with flower blooms across the top.
-// Scale 1.0 = large (blocks); ~0.5 = small.
+// loadBushProp builds a leaf-cluster bush with flower blooms across the top,
+// berry clusters tucked at the lump seams, and bare twigs breaking the
+// silhouette. Scale 1.0 = large (blocks); ~0.5 = small.
 func loadBushProp(shader rl.Shader, leafTex rl.Texture2D) propModel {
 	leafLump := rl.LoadModelFromMesh(rl.GenMeshSphere(0.62, 12, 16))
 	leafLumpSm := rl.LoadModelFromMesh(rl.GenMeshSphere(0.46, 10, 14))
 	bloom := rl.LoadModelFromMesh(rl.GenMeshSphere(0.085, 8, 10))
 	// Twig core — visible in the gaps between low lumps, sells a woody heart.
 	twig := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.07, 0.34, 7))
-	models := []rl.Model{leafLump, leafLumpSm, bloom, twig}
+	berry := rl.LoadModelFromMesh(rl.GenMeshSphere(0.042, 6, 8))
+	poke := rl.LoadModelFromMesh(rl.GenMeshCone(0.018, 0.30, 5))
+	models := []rl.Model{leafLump, leafLumpSm, bloom, twig, berry, poke}
 	setModelTexture(&models[0], leafTex)
 	setModelTexture(&models[1], leafTex)
 	shadeAll(models, shader)
@@ -697,6 +707,8 @@ func loadBushProp(shader rl.Shader, leafTex rl.Texture2D) propModel {
 	bloomYellow := color.RGBA{R: 242, G: 216, B: 122, A: 255}
 	bloomWhite := color.RGBA{R: 244, G: 240, B: 226, A: 255}
 	bloomPink := color.RGBA{R: 238, G: 176, B: 198, A: 255}
+	berryRed := color.RGBA{R: 196, G: 74, B: 70, A: 255}
+	berryDeep := color.RGBA{R: 152, G: 52, B: 56, A: 255}
 	return propModel{
 		models: models,
 		parts: []treePart{
@@ -715,6 +727,16 @@ func loadBushProp(shader rl.Shader, leafTex rl.Texture2D) propModel {
 			{modelIdx: 2, offset: rl.NewVector3(0.08, 0.96, 0.10), scale: rl.NewVector3(1, 1, 1), tint: bloomYellow, sway: 0.85},
 			{modelIdx: 2, offset: rl.NewVector3(-0.22, 0.84, 0.04), scale: rl.NewVector3(1, 1, 1), tint: bloomWhite, sway: 0.85},
 			{modelIdx: 2, offset: rl.NewVector3(0.20, 0.88, -0.18), scale: rl.NewVector3(1, 1, 1), tint: bloomPink, sway: 0.85},
+			// Berry clusters tucked into the seams between lumps — ripe red with a
+			// deep partner so each cluster reads as several fruits.
+			{modelIdx: 4, offset: rl.NewVector3(0.44, 0.66, 0.24), scale: rl.NewVector3(1, 1, 1), tint: berryRed, sway: 0.6},
+			{modelIdx: 4, offset: rl.NewVector3(0.40, 0.60, 0.30), scale: rl.NewVector3(0.85, 0.85, 0.85), tint: berryDeep, sway: 0.6},
+			{modelIdx: 4, offset: rl.NewVector3(-0.40, 0.56, -0.28), scale: rl.NewVector3(1, 1, 1), tint: berryRed, sway: 0.6},
+			{modelIdx: 4, offset: rl.NewVector3(-0.34, 0.50, -0.33), scale: rl.NewVector3(0.8, 0.8, 0.8), tint: berryDeep, sway: 0.6},
+			{modelIdx: 4, offset: rl.NewVector3(-0.06, 0.90, -0.26), scale: rl.NewVector3(0.9, 0.9, 0.9), tint: berryRed, sway: 0.7},
+			// Bare twigs poking past the foliage — the unclipped hedge look.
+			{modelIdx: 5, offset: rl.NewVector3(0.16, 0.72, 0.08), scale: rl.NewVector3(1, 1, 1), rotation: -22, rotationAxis: rl.NewVector3(0, 0, 1), tint: twigBrown, sway: 0.8},
+			{modelIdx: 5, offset: rl.NewVector3(-0.14, 0.68, -0.10), scale: rl.NewVector3(1, 0.85, 1), rotation: 18, rotationAxis: rl.NewVector3(1, 0, 0.5), tint: twigBrown, sway: 0.8},
 		},
 	}
 }
@@ -946,8 +968,9 @@ func loadStalagmiteProp(shader rl.Shader, stoneTex rl.Texture2D) propModel {
 }
 
 // loadPillarProp builds a Doric-ish column: base, cylindrical shaft, capital,
-// abacus slab. Marble texture; tint walks base→capital (dust settles low).
-func loadPillarProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
+// abacus slab. Marble texture with a FLUTED shaft skin; tint walks base→capital
+// (dust settles low).
+func loadPillarProp(shader rl.Shader, marbleTex, flutedTex rl.Texture2D) propModel {
 	models := []rl.Model{
 		rl.LoadModelFromMesh(rl.GenMeshCube(0.72, 0.18, 0.72)),   // plinth
 		rl.LoadModelFromMesh(rl.GenMeshCube(0.62, 0.10, 0.62)),   // base
@@ -956,6 +979,7 @@ func loadPillarProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 		rl.LoadModelFromMesh(rl.GenMeshCube(0.74, 0.08, 0.74)),   // abacus
 	}
 	textureAndShade(models, shader, marbleTex)
+	setModelTexture(&models[2], flutedTex) // shaft carries the fluting
 	baseTint := rl.NewColor(206, 200, 184, 255)
 	shaftTint := marblePaleBody
 	capTint := marblePaleCap
@@ -972,14 +996,15 @@ func loadPillarProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 }
 
 // loadBrokenPillarProp builds a broken pillar stub: same plinth as the intact
-// pillar, shaft cut chest-high, topped with an off-axis rubble cube.
-func loadBrokenPillarProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
+// pillar, fluted shaft cut chest-high, topped with an off-axis rubble cube.
+func loadBrokenPillarProp(shader rl.Shader, marbleTex, flutedTex rl.Texture2D) propModel {
 	models := []rl.Model{
 		rl.LoadModelFromMesh(rl.GenMeshCube(0.72, 0.18, 0.72)),
 		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.26, 0.90, 18)),
 		rl.LoadModelFromMesh(rl.GenMeshCube(0.40, 0.18, 0.34)),
 	}
 	textureAndShade(models, shader, marbleTex)
+	setModelTexture(&models[1], flutedTex) // shaft carries the fluting
 	baseTint := rl.NewColor(196, 188, 170, 255)
 	shaftTint := rl.NewColor(214, 206, 188, 255)
 	rubbleTint := rl.NewColor(168, 160, 144, 255)
@@ -1082,24 +1107,48 @@ func loadFountainProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 // --- Soft decor (non-blocking) --------------------------------------------
 // Small (sub-tile), passable, cheapest primitives. Author-placed via the decor layer.
 
-// loadTallGrassProp builds a clump of five thin tall cubes tilted outward.
+// loadTallGrassProp builds a clump of tapered grass blades — cones pivoting at
+// the root so each blade rises to a point and tilts outward from the clump —
+// crowned by two nodding seed heads.
 func loadTallGrassProp(shader rl.Shader) propModel {
-	blade := rl.LoadModelFromMesh(rl.GenMeshCube(0.04, 0.34, 0.04))
-	attachShader(&blade, shader)
-	models := []rl.Model{blade}
-	// Muted grass-blade tints to match the new ground palette.
-	light := rl.NewColor(148, 184, 112, 255)
+	blade := rl.LoadModelFromMesh(rl.GenMeshCone(0.026, 0.40, 5))
+	bladeTall := rl.LoadModelFromMesh(rl.GenMeshCone(0.020, 0.54, 5))
+	seedStem := rl.LoadModelFromMesh(rl.GenMeshCone(0.011, 0.50, 4))
+	seedHead := rl.LoadModelFromMesh(rl.GenMeshSphere(0.032, 6, 8))
+	models := []rl.Model{blade, bladeTall, seedStem, seedHead}
+	shadeAll(models, shader)
+	// Muted grass-blade tints to match the ground palette.
+	light := rl.NewColor(150, 188, 112, 255)
 	mid := rl.NewColor(112, 158, 96, 255)
 	deep := rl.NewColor(80, 124, 78, 255)
-	gold := rl.NewColor(196, 196, 134, 255)
+	gold := rl.NewColor(198, 196, 134, 255)
+	seedGold := rl.NewColor(216, 192, 120, 255)
+	zAxis := rl.NewVector3(0, 0, 1)
+	xAxis := rl.NewVector3(1, 0, 0)
 	return propModel{
 		models: models,
 		parts: []treePart{
-			{modelIdx: 0, offset: rl.NewVector3(0, 0.17, 0), scale: rl.NewVector3(1, 1, 1), rotation: 6, rotationAxis: rl.NewVector3(0, 0, 1), tint: light, sway: 1.0},
-			{modelIdx: 0, offset: rl.NewVector3(0.14, 0.16, 0.08), scale: rl.NewVector3(1, 0.92, 1), rotation: -10, rotationAxis: rl.NewVector3(1, 0, 0), tint: mid, sway: 1.0},
-			{modelIdx: 0, offset: rl.NewVector3(-0.12, 0.15, 0.10), scale: rl.NewVector3(1, 0.86, 1), rotation: 14, rotationAxis: rl.NewVector3(1, 0, 1), tint: deep, sway: 1.0},
-			{modelIdx: 0, offset: rl.NewVector3(0.08, 0.18, -0.14), scale: rl.NewVector3(1, 1.05, 1), rotation: -16, rotationAxis: rl.NewVector3(0, 0, 1), tint: mid, sway: 1.0},
-			{modelIdx: 0, offset: rl.NewVector3(-0.10, 0.16, -0.06), scale: rl.NewVector3(1, 0.95, 1), rotation: 22, rotationAxis: rl.NewVector3(1, 0, 0), tint: gold, sway: 1.0},
+			// Blades lean AWAY from the clump center (cones rotate at the base, so
+			// a tilt fans the tips outward). Around Z: +rot leans -X; around X:
+			// +rot leans +Z.
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.005, 0), scale: rl.NewVector3(1, 1.05, 1), rotation: 5, rotationAxis: zAxis, tint: light, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(0.13, 0, 0.05), scale: rl.NewVector3(1, 0.92, 1), rotation: -20, rotationAxis: zAxis, tint: mid, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(-0.12, 0, 0.07), scale: rl.NewVector3(1, 0.88, 1), rotation: 22, rotationAxis: zAxis, tint: deep, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(0.06, 0, -0.12), scale: rl.NewVector3(1, 0.95, 1), rotation: -18, rotationAxis: xAxis, tint: mid, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(-0.05, 0, -0.10), scale: rl.NewVector3(1, 0.85, 1), rotation: -14, rotationAxis: xAxis, tint: deep, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(0.02, 0, 0.12), scale: rl.NewVector3(1, 0.98, 1), rotation: 20, rotationAxis: xAxis, tint: light, sway: 1.0},
+			// Dry outer blades — gold, leaning hardest.
+			{modelIdx: 0, offset: rl.NewVector3(0.14, 0, -0.03), scale: rl.NewVector3(1, 0.82, 1), rotation: -27, rotationAxis: zAxis, tint: gold, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(-0.14, 0, -0.05), scale: rl.NewVector3(1, 0.85, 1), rotation: 25, rotationAxis: zAxis, tint: gold, sway: 1.0},
+			// Taller center blades rising through the clump.
+			{modelIdx: 1, offset: rl.NewVector3(0.03, 0, 0.02), scale: rl.NewVector3(1, 1, 1), rotation: -8, rotationAxis: zAxis, tint: light, sway: 1.0},
+			{modelIdx: 1, offset: rl.NewVector3(-0.05, 0, -0.03), scale: rl.NewVector3(1, 0.92, 1), rotation: 10, rotationAxis: xAxis, tint: mid, sway: 1.0},
+			// Two seed stalks with nodding gold heads at their tips (head offset
+			// hand-matches the stem's tilt).
+			{modelIdx: 2, offset: rl.NewVector3(0.08, 0, 0.02), scale: rl.NewVector3(1, 1, 1), rotation: -8, rotationAxis: zAxis, tint: mid, sway: 0.9},
+			{modelIdx: 3, offset: rl.NewVector3(0.15, 0.49, 0.02), scale: rl.NewVector3(1, 1.5, 1), tint: seedGold, sway: 1.0},
+			{modelIdx: 2, offset: rl.NewVector3(-0.07, 0, -0.04), scale: rl.NewVector3(1, 0.94, 1), rotation: 10, rotationAxis: zAxis, tint: deep, sway: 0.9},
+			{modelIdx: 3, offset: rl.NewVector3(-0.15, 0.46, -0.04), scale: rl.NewVector3(1, 1.5, 1), tint: seedGold, sway: 1.0},
 		},
 	}
 }
@@ -1159,14 +1208,18 @@ func loadFlowerProp(shader rl.Shader) propModel {
 	}
 }
 
-// loadCloverProp builds a ground-hugging clover patch: six flattened spheres.
+// loadCloverProp builds a ground-hugging clover patch: six flattened spheres
+// with three tiny clover blooms nodding above the pads.
 func loadCloverProp(shader rl.Shader) propModel {
 	leaf := rl.LoadModelFromMesh(rl.GenMeshSphere(0.10, 8, 10))
-	models := []rl.Model{leaf}
-	attachShader(&models[0], shader)
+	bloom := rl.LoadModelFromMesh(rl.GenMeshSphere(0.032, 6, 8))
+	models := []rl.Model{leaf, bloom}
+	shadeAll(models, shader)
 	leafA := rl.NewColor(124, 186, 102, 255)
 	leafB := rl.NewColor(96, 156, 84, 255)
 	leafC := rl.NewColor(148, 200, 116, 255)
+	bloomWhite := rl.NewColor(238, 240, 226, 255)
+	bloomPink := rl.NewColor(230, 198, 210, 255)
 	return propModel{
 		models: models,
 		parts: []treePart{
@@ -1176,32 +1229,50 @@ func loadCloverProp(shader rl.Shader) propModel {
 			{modelIdx: 0, offset: rl.NewVector3(-0.12, 0.04, -0.04), scale: rl.NewVector3(1, 0.45, 1), tint: leafA},
 			{modelIdx: 0, offset: rl.NewVector3(0.14, 0.04, -0.08), scale: rl.NewVector3(1, 0.45, 1), tint: leafB},
 			{modelIdx: 0, offset: rl.NewVector3(-0.02, 0.04, -0.16), scale: rl.NewVector3(1, 0.45, 1), tint: leafC},
+			// Clover blooms — white puffballs (one blushed pink) above the pads.
+			{modelIdx: 1, offset: rl.NewVector3(0.05, 0.105, -0.02), scale: rl.NewVector3(1, 0.9, 1), tint: bloomWhite, sway: 0.5},
+			{modelIdx: 1, offset: rl.NewVector3(-0.09, 0.10, 0.05), scale: rl.NewVector3(0.85, 0.8, 0.85), tint: bloomPink, sway: 0.5},
+			{modelIdx: 1, offset: rl.NewVector3(0.09, 0.095, 0.09), scale: rl.NewVector3(0.8, 0.75, 0.8), tint: bloomWhite, sway: 0.5},
 		},
 	}
 }
 
-// loadReedProp builds a cluster of tall water reeds. Cooler olive tints than
-// the warmer tall grass; for water tiles and damp edges.
+// loadReedProp builds a cluster of cattail reeds: tapered stems, brown catkin
+// pods with a pale spike above, and two arching leaf blades. Cooler olive tints
+// than the warmer tall grass; for water tiles and damp edges.
 func loadReedProp(shader rl.Shader) propModel {
-	reed := rl.LoadModelFromMesh(rl.GenMeshCube(0.025, 0.62, 0.025))
-	tip := rl.LoadModelFromMesh(rl.GenMeshCube(0.04, 0.07, 0.04))
-	models := []rl.Model{reed, tip}
+	stemMesh := rl.LoadModelFromMesh(rl.GenMeshCone(0.017, 0.66, 5))
+	podMesh := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.030, 0.13, 8))
+	spikeMesh := rl.LoadModelFromMesh(rl.GenMeshCone(0.007, 0.11, 4))
+	leafMesh := rl.LoadModelFromMesh(rl.GenMeshCone(0.045, 0.50, 5))
+	models := []rl.Model{stemMesh, podMesh, spikeMesh, leafMesh}
 	shadeAll(models, shader)
 	stem := rl.NewColor(110, 132, 90, 255)
 	stemDark := rl.NewColor(82, 102, 70, 255)
-	pod := rl.NewColor(132, 96, 56, 255)
+	pod := rl.NewColor(126, 90, 54, 255)
+	podLit := rl.NewColor(148, 108, 66, 255)
+	spike := rl.NewColor(206, 196, 142, 255)
+	zAxis := rl.NewVector3(0, 0, 1)
+	xAxis := rl.NewVector3(1, 0, 0)
 	return propModel{
 		models: models,
 		parts: []treePart{
-			{modelIdx: 0, offset: rl.NewVector3(0.10, 0.31, 0.04), scale: rl.NewVector3(1, 1, 1), tint: stem},
-			{modelIdx: 1, offset: rl.NewVector3(0.10, 0.65, 0.04), scale: rl.NewVector3(1, 1, 1), tint: pod},
-			{modelIdx: 0, offset: rl.NewVector3(-0.06, 0.30, 0.12), scale: rl.NewVector3(1, 0.95, 1), tint: stemDark},
-			{modelIdx: 1, offset: rl.NewVector3(-0.06, 0.62, 0.12), scale: rl.NewVector3(1, 1, 1), tint: pod},
-			{modelIdx: 0, offset: rl.NewVector3(0.02, 0.31, -0.10), scale: rl.NewVector3(1, 1.05, 1), tint: stem},
-			{modelIdx: 1, offset: rl.NewVector3(0.02, 0.66, -0.10), scale: rl.NewVector3(1, 1, 1), tint: pod},
-			{modelIdx: 0, offset: rl.NewVector3(-0.12, 0.30, -0.04), scale: rl.NewVector3(1, 0.92, 1), tint: stemDark},
-			{modelIdx: 0, offset: rl.NewVector3(0.12, 0.31, -0.08), scale: rl.NewVector3(1, 1, 1), tint: stem},
-			{modelIdx: 0, offset: rl.NewVector3(-0.02, 0.31, 0.14), scale: rl.NewVector3(1, 1.02, 1), tint: stem},
+			// Three pod-bearing stems (near-vertical; catkin at the tip, spike above).
+			{modelIdx: 0, offset: rl.NewVector3(0.10, 0, 0.04), scale: rl.NewVector3(1, 1, 1), rotation: -4, rotationAxis: zAxis, tint: stem, sway: 0.7},
+			{modelIdx: 1, offset: rl.NewVector3(0.145, 0.60, 0.04), scale: rl.NewVector3(1, 1, 1), tint: pod, sway: 0.8},
+			{modelIdx: 2, offset: rl.NewVector3(0.145, 0.73, 0.04), scale: rl.NewVector3(1, 1, 1), tint: spike, sway: 0.8},
+			{modelIdx: 0, offset: rl.NewVector3(-0.06, 0, 0.12), scale: rl.NewVector3(1, 0.92, 1), rotation: 5, rotationAxis: zAxis, tint: stemDark, sway: 0.7},
+			{modelIdx: 1, offset: rl.NewVector3(-0.113, 0.55, 0.12), scale: rl.NewVector3(0.95, 0.9, 0.95), tint: podLit, sway: 0.8},
+			{modelIdx: 2, offset: rl.NewVector3(-0.113, 0.67, 0.12), scale: rl.NewVector3(1, 1, 1), tint: spike, sway: 0.8},
+			{modelIdx: 0, offset: rl.NewVector3(0.02, 0, -0.10), scale: rl.NewVector3(1, 1.06, 1), rotation: 4, rotationAxis: xAxis, tint: stem, sway: 0.7},
+			{modelIdx: 1, offset: rl.NewVector3(0.02, 0.63, -0.051), scale: rl.NewVector3(1, 1, 1), tint: pod, sway: 0.8},
+			{modelIdx: 2, offset: rl.NewVector3(0.02, 0.77, -0.051), scale: rl.NewVector3(1, 1, 1), tint: spike, sway: 0.8},
+			// Two bare stems.
+			{modelIdx: 0, offset: rl.NewVector3(-0.12, 0, -0.04), scale: rl.NewVector3(1, 0.85, 1), rotation: 7, rotationAxis: zAxis, tint: stemDark, sway: 0.7},
+			{modelIdx: 0, offset: rl.NewVector3(-0.02, 0, 0.14), scale: rl.NewVector3(1, 0.95, 1), rotation: 6, rotationAxis: xAxis, tint: stem, sway: 0.7},
+			// Arching leaf blades at the waterline.
+			{modelIdx: 3, offset: rl.NewVector3(0.06, 0, -0.02), scale: rl.NewVector3(1.3, 1, 0.45), rotation: -30, rotationAxis: zAxis, tint: stemDark, sway: 0.8},
+			{modelIdx: 3, offset: rl.NewVector3(-0.05, 0, 0.05), scale: rl.NewVector3(0.45, 0.9, 1.3), rotation: 32, rotationAxis: xAxis, tint: stem, sway: 0.8},
 		},
 	}
 }
@@ -1242,55 +1313,85 @@ func loadExoticFlowerProp(shader rl.Shader) propModel {
 	}
 }
 
-// loadTallFernProp builds a clump of arching fronds (flat boxes fanned at varied
-// tilts). Cool layered greens, gentle sway. Non-blocking.
+// loadTallFernProp builds a rosette of arching fronds: flattened cones pivoting
+// at the crown, each frond wide across its arc and tapering to a tip, inner
+// fronds upright and pale, outer fronds arched low and deep. Non-blocking.
 func loadTallFernProp(shader rl.Shader) propModel {
-	frond := rl.LoadModelFromMesh(rl.GenMeshCube(0.05, 0.55, 0.16))
-	models := []rl.Model{frond}
-	attachShader(&models[0], shader)
-	deep := rl.NewColor(58, 108, 58, 255)
+	frond := rl.LoadModelFromMesh(rl.GenMeshCone(0.085, 0.62, 6))
+	crown := rl.LoadModelFromMesh(rl.GenMeshSphere(0.055, 6, 8))
+	models := []rl.Model{frond, crown}
+	shadeAll(models, shader)
+	deep := rl.NewColor(56, 106, 58, 255)
 	mid := rl.NewColor(82, 140, 76, 255)
-	light := rl.NewColor(120, 170, 98, 255)
+	light := rl.NewColor(122, 172, 98, 255)
+	crownBrown := rl.NewColor(96, 82, 54, 255)
 	zAxis := rl.NewVector3(0, 0, 1)
 	xAxis := rl.NewVector3(1, 0, 0)
 	return propModel{
 		models: models,
 		parts: []treePart{
-			{modelIdx: 0, offset: rl.NewVector3(0, 0.28, 0), scale: rl.NewVector3(0.9, 1.08, 0.9), rotation: 6, rotationAxis: zAxis, tint: light, sway: 0.9},
-			{modelIdx: 0, offset: rl.NewVector3(0.12, 0.26, 0.05), scale: rl.NewVector3(1, 0.92, 1), rotation: 26, rotationAxis: zAxis, tint: deep, sway: 0.9},
-			{modelIdx: 0, offset: rl.NewVector3(-0.12, 0.25, 0.06), scale: rl.NewVector3(1, 0.9, 1), rotation: -28, rotationAxis: zAxis, tint: deep, sway: 0.9},
-			{modelIdx: 0, offset: rl.NewVector3(0.05, 0.27, -0.12), scale: rl.NewVector3(1, 1.02, 1), rotation: 20, rotationAxis: xAxis, tint: light, sway: 0.9},
-			{modelIdx: 0, offset: rl.NewVector3(-0.06, 0.26, 0.12), scale: rl.NewVector3(1, 0.95, 1), rotation: -22, rotationAxis: xAxis, tint: mid, sway: 0.9},
-			{modelIdx: 0, offset: rl.NewVector3(0.02, 0.27, -0.02), scale: rl.NewVector3(1, 1, 1), rotation: 10, rotationAxis: zAxis, tint: mid, sway: 0.9},
+			// Woody crown heart the fronds rise from.
+			{modelIdx: 1, offset: rl.NewVector3(0, 0.03, 0), scale: rl.NewVector3(1.2, 0.7, 1.2), tint: crownBrown},
+			// Outer ring — arched hard (model-space scale flattens the cone into a
+			// blade whose WIDE axis lies perpendicular to its tilt). +rot on X
+			// arches toward +Z; +rot on Z arches toward -X.
+			{modelIdx: 0, offset: rl.NewVector3(0, 0, 0.03), scale: rl.NewVector3(1.6, 1, 0.5), rotation: 48, rotationAxis: xAxis, tint: deep, sway: 0.9},
+			{modelIdx: 0, offset: rl.NewVector3(0, 0, -0.03), scale: rl.NewVector3(1.6, 0.95, 0.5), rotation: -50, rotationAxis: xAxis, tint: deep, sway: 0.9},
+			{modelIdx: 0, offset: rl.NewVector3(0.03, 0, 0), scale: rl.NewVector3(0.5, 0.97, 1.6), rotation: -46, rotationAxis: zAxis, tint: mid, sway: 0.9},
+			{modelIdx: 0, offset: rl.NewVector3(-0.03, 0, 0), scale: rl.NewVector3(0.5, 1.02, 1.6), rotation: 47, rotationAxis: zAxis, tint: deep, sway: 0.9},
+			// Diagonal fronds — slightly rounder blades filling the quadrants.
+			{modelIdx: 0, offset: rl.NewVector3(0.02, 0, 0.02), scale: rl.NewVector3(1.15, 0.9, 1.15), rotation: 44, rotationAxis: rl.NewVector3(1, 0, -1), tint: mid, sway: 0.9},
+			{modelIdx: 0, offset: rl.NewVector3(-0.02, 0, -0.02), scale: rl.NewVector3(1.15, 0.93, 1.15), rotation: 44, rotationAxis: rl.NewVector3(-1, 0, 1), tint: mid, sway: 0.9},
+			{modelIdx: 0, offset: rl.NewVector3(-0.02, 0, 0.02), scale: rl.NewVector3(1.1, 0.88, 1.1), rotation: 42, rotationAxis: rl.NewVector3(1, 0, 1), tint: deep, sway: 0.9},
+			{modelIdx: 0, offset: rl.NewVector3(0.02, 0, -0.02), scale: rl.NewVector3(1.1, 0.9, 1.1), rotation: 42, rotationAxis: rl.NewVector3(-1, 0, -1), tint: light, sway: 0.9},
+			// Inner pair — young fronds, nearly upright, palest.
+			{modelIdx: 0, offset: rl.NewVector3(0.01, 0, 0.01), scale: rl.NewVector3(1.2, 1.08, 0.6), rotation: 14, rotationAxis: xAxis, tint: light, sway: 0.9},
+			{modelIdx: 0, offset: rl.NewVector3(-0.01, 0, -0.01), scale: rl.NewVector3(0.6, 1.02, 1.2), rotation: -12, rotationAxis: zAxis, tint: light, sway: 0.9},
 		},
 	}
 }
 
-// loadGrassTuftProp builds a tall grass tuft: a fan of blades in warm greens
-// with gold tips, full sway. A placeable cousin of the tall-grass scatter.
-// Non-blocking.
+// loadGrassTuftProp builds a tall grass tuft: a fan of tapered cone blades in
+// warm greens with dry gold outliers and three seed stalks, full sway. A
+// placeable cousin of the tall-grass scatter. Non-blocking.
 func loadGrassTuftProp(shader rl.Shader) propModel {
-	blade := rl.LoadModelFromMesh(rl.GenMeshCube(0.045, 0.5, 0.045))
-	models := []rl.Model{blade}
-	attachShader(&models[0], shader)
+	blade := rl.LoadModelFromMesh(rl.GenMeshCone(0.030, 0.55, 5))
+	bladeTall := rl.LoadModelFromMesh(rl.GenMeshCone(0.022, 0.72, 5))
+	seedStem := rl.LoadModelFromMesh(rl.GenMeshCone(0.012, 0.62, 4))
+	seedHead := rl.LoadModelFromMesh(rl.GenMeshSphere(0.036, 6, 8))
+	models := []rl.Model{blade, bladeTall, seedStem, seedHead}
+	shadeAll(models, shader)
 	light := rl.NewColor(150, 186, 110, 255)
 	mid := rl.NewColor(116, 162, 98, 255)
 	deep := rl.NewColor(84, 128, 80, 255)
 	gold := rl.NewColor(198, 196, 132, 255)
+	seedGold := rl.NewColor(218, 196, 124, 255)
 	zAxis := rl.NewVector3(0, 0, 1)
 	xAxis := rl.NewVector3(1, 0, 0)
 	return propModel{
 		models: models,
 		parts: []treePart{
-			{modelIdx: 0, offset: rl.NewVector3(0, 0.25, 0), scale: rl.NewVector3(1, 1.05, 1), rotation: 5, rotationAxis: zAxis, tint: light, sway: 1.0},
-			{modelIdx: 0, offset: rl.NewVector3(0.10, 0.24, 0.05), scale: rl.NewVector3(1, 0.95, 1), rotation: 18, rotationAxis: zAxis, tint: mid, sway: 1.0},
-			{modelIdx: 0, offset: rl.NewVector3(-0.10, 0.24, 0.06), scale: rl.NewVector3(1, 0.92, 1), rotation: -20, rotationAxis: zAxis, tint: mid, sway: 1.0},
-			{modelIdx: 0, offset: rl.NewVector3(0.06, 0.25, -0.10), scale: rl.NewVector3(1, 1.02, 1), rotation: 16, rotationAxis: xAxis, tint: deep, sway: 1.0},
-			{modelIdx: 0, offset: rl.NewVector3(-0.07, 0.24, -0.08), scale: rl.NewVector3(1, 0.9, 1), rotation: -22, rotationAxis: xAxis, tint: deep, sway: 1.0},
-			{modelIdx: 0, offset: rl.NewVector3(0.13, 0.23, -0.04), scale: rl.NewVector3(1, 0.88, 1), rotation: 26, rotationAxis: zAxis, tint: gold, sway: 1.0},
-			{modelIdx: 0, offset: rl.NewVector3(-0.13, 0.24, 0.02), scale: rl.NewVector3(1, 0.9, 1), rotation: -26, rotationAxis: zAxis, tint: gold, sway: 1.0},
-			{modelIdx: 0, offset: rl.NewVector3(0.0, 0.26, 0.12), scale: rl.NewVector3(1, 1.08, 1), rotation: 12, rotationAxis: xAxis, tint: light, sway: 1.0},
-			{modelIdx: 0, offset: rl.NewVector3(0.02, 0.25, -0.02), scale: rl.NewVector3(0.9, 1, 0.9), rotation: -8, rotationAxis: zAxis, tint: mid, sway: 1.0},
+			// Blades pivot at the root and lean away from center (+rot on Z leans
+			// -X, +rot on X leans +Z).
+			{modelIdx: 0, offset: rl.NewVector3(0, 0, 0), scale: rl.NewVector3(1, 1.05, 1), rotation: 5, rotationAxis: zAxis, tint: light, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(0.10, 0, 0.05), scale: rl.NewVector3(1, 0.95, 1), rotation: -18, rotationAxis: zAxis, tint: mid, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(-0.10, 0, 0.06), scale: rl.NewVector3(1, 0.92, 1), rotation: 20, rotationAxis: zAxis, tint: mid, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(0.06, 0, -0.10), scale: rl.NewVector3(1, 1.0, 1), rotation: -16, rotationAxis: xAxis, tint: deep, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(-0.07, 0, -0.08), scale: rl.NewVector3(1, 0.9, 1), rotation: -20, rotationAxis: xAxis, tint: deep, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(0.0, 0, 0.12), scale: rl.NewVector3(1, 1.02, 1), rotation: 18, rotationAxis: xAxis, tint: light, sway: 1.0},
+			// Dry gold outliers, leaning hardest.
+			{modelIdx: 0, offset: rl.NewVector3(0.13, 0, -0.04), scale: rl.NewVector3(1, 0.85, 1), rotation: -27, rotationAxis: zAxis, tint: gold, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(-0.13, 0, 0.02), scale: rl.NewVector3(1, 0.88, 1), rotation: 26, rotationAxis: zAxis, tint: gold, sway: 1.0},
+			// Tall center blades.
+			{modelIdx: 1, offset: rl.NewVector3(0.02, 0, -0.02), scale: rl.NewVector3(1, 1, 1), rotation: -7, rotationAxis: zAxis, tint: light, sway: 1.0},
+			{modelIdx: 1, offset: rl.NewVector3(-0.04, 0, 0.03), scale: rl.NewVector3(1, 0.9, 1), rotation: 9, rotationAxis: xAxis, tint: mid, sway: 1.0},
+			// Three seed stalks, heads hand-placed at the tilted tips.
+			{modelIdx: 2, offset: rl.NewVector3(0.09, 0, 0.03), scale: rl.NewVector3(1, 1, 1), rotation: -9, rotationAxis: zAxis, tint: mid, sway: 0.9},
+			{modelIdx: 3, offset: rl.NewVector3(0.19, 0.61, 0.03), scale: rl.NewVector3(1, 1.6, 1), tint: seedGold, sway: 1.0},
+			{modelIdx: 2, offset: rl.NewVector3(-0.08, 0, -0.05), scale: rl.NewVector3(1, 0.92, 1), rotation: 11, rotationAxis: zAxis, tint: deep, sway: 0.9},
+			{modelIdx: 3, offset: rl.NewVector3(-0.19, 0.56, -0.05), scale: rl.NewVector3(1, 1.6, 1), tint: seedGold, sway: 1.0},
+			{modelIdx: 2, offset: rl.NewVector3(0.01, 0, -0.09), scale: rl.NewVector3(1, 0.96, 1), rotation: -10, rotationAxis: xAxis, tint: mid, sway: 0.9},
+			{modelIdx: 3, offset: rl.NewVector3(0.01, 0.58, -0.19), scale: rl.NewVector3(1, 1.6, 1), tint: seedGold, sway: 1.0},
 		},
 	}
 }
@@ -1380,52 +1481,129 @@ func loadCobwebProp(shader rl.Shader) propModel {
 	}
 }
 
-// loadStumpProp builds a tree stump: a fat cylinder trunk with a cut-ring disc
-// on top. Bark texture shares the wood family with the trees.
+// loadStumpProp builds a tree stump: a bark cylinder gripped by root flares,
+// a cut face with concentric growth rings and a dark heart, proud bark ridges,
+// and a pair of shelf fungi. Bark texture shares the wood family with the trees.
 func loadStumpProp(shader rl.Shader, barkTex rl.Texture2D) propModel {
-	body := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.34, 0.34, 14))
-	face := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.32, 0.04, 14))
-	models := []rl.Model{body, face}
-	setModelTexture(&models[0], barkTex)
+	const (
+		stumpMeshBody = iota
+		stumpMeshFace
+		stumpMeshRing
+		stumpMeshRing2
+		stumpMeshHeart
+		stumpMeshRoot
+		stumpMeshRidge
+		stumpMeshShelf
+	)
+	models := []rl.Model{
+		stumpMeshBody:  rl.LoadModelFromMesh(rl.GenMeshCylinder(0.34, 0.34, 14)),
+		stumpMeshFace:  rl.LoadModelFromMesh(rl.GenMeshCylinder(0.32, 0.04, 14)),
+		stumpMeshRing:  rl.LoadModelFromMesh(rl.GenMeshCylinder(0.22, 0.045, 12)),
+		stumpMeshRing2: rl.LoadModelFromMesh(rl.GenMeshCylinder(0.13, 0.05, 10)),
+		stumpMeshHeart: rl.LoadModelFromMesh(rl.GenMeshCylinder(0.05, 0.055, 8)),
+		stumpMeshRoot:  rl.LoadModelFromMesh(rl.GenMeshCone(0.10, 0.30, 6)),
+		stumpMeshRidge: rl.LoadModelFromMesh(rl.GenMeshCube(0.05, 0.30, 0.05)),
+		stumpMeshShelf: rl.LoadModelFromMesh(rl.GenMeshSphere(0.09, 8, 10)),
+	}
+	setModelTexture(&models[stumpMeshBody], barkTex)
+	setModelTexture(&models[stumpMeshRoot], barkTex)
 	shadeAll(models, shader)
 	// Pastel pecan stump with pale-cream cut-face rings.
 	bark := rl.NewColor(172, 132, 96, 255)
-	rings := rl.NewColor(214, 184, 144, 255)
+	barkDark := rl.NewColor(134, 100, 72, 255)
+	face := rl.NewColor(214, 184, 144, 255)
+	ringTone := rl.NewColor(186, 152, 112, 255)
+	heart := rl.NewColor(140, 104, 74, 255)
+	shelfCream := rl.NewColor(216, 190, 150, 255)
+	shelfApricot := rl.NewColor(206, 162, 126, 255)
+	zAxis := rl.NewVector3(0, 0, 1)
+	xAxis := rl.NewVector3(1, 0, 0)
 	return propModel{
 		models: models,
 		parts: []treePart{
-			{modelIdx: 0, offset: rl.NewVector3(0, 0.01, 0), scale: rl.NewVector3(1, 1, 1), tint: bark},
-			{modelIdx: 1, offset: rl.NewVector3(0, 0.34, 0), scale: rl.NewVector3(1, 1, 1), tint: rings},
+			{modelIdx: stumpMeshBody, offset: rl.NewVector3(0, 0.01, 0), scale: rl.NewVector3(1, 1, 1), tint: bark},
+			// Cut face — alternating pale/dark growth rings down to the heartwood.
+			{modelIdx: stumpMeshFace, offset: rl.NewVector3(0, 0.34, 0), scale: rl.NewVector3(1, 1, 1), tint: face},
+			{modelIdx: stumpMeshRing, offset: rl.NewVector3(0.015, 0.345, 0.01), scale: rl.NewVector3(1, 1, 1), tint: ringTone},
+			{modelIdx: stumpMeshRing2, offset: rl.NewVector3(0.025, 0.35, 0.02), scale: rl.NewVector3(1, 1, 1), tint: face},
+			{modelIdx: stumpMeshHeart, offset: rl.NewVector3(0.03, 0.353, 0.025), scale: rl.NewVector3(1, 1, 1), tint: heart},
+			// Root flares gripping the soil at the compass points (cones pivot at
+			// the base: -rot on Z leans +X, +rot on X leans +Z).
+			{modelIdx: stumpMeshRoot, offset: rl.NewVector3(0.24, 0.01, 0.03), scale: rl.NewVector3(1, 0.9, 1), rotation: -62, rotationAxis: zAxis, tint: bark},
+			{modelIdx: stumpMeshRoot, offset: rl.NewVector3(-0.23, 0.01, -0.04), scale: rl.NewVector3(1, 0.85, 1), rotation: 60, rotationAxis: zAxis, tint: barkDark},
+			{modelIdx: stumpMeshRoot, offset: rl.NewVector3(-0.03, 0.01, 0.24), scale: rl.NewVector3(1, 0.88, 1), rotation: 64, rotationAxis: xAxis, tint: barkDark},
+			{modelIdx: stumpMeshRoot, offset: rl.NewVector3(0.04, 0.01, -0.23), scale: rl.NewVector3(1, 0.8, 1), rotation: -58, rotationAxis: xAxis, tint: bark},
+			// Bark ridges proud of the trunk wall.
+			{modelIdx: stumpMeshRidge, offset: rl.NewVector3(0.325, 0.16, 0.06), scale: rl.NewVector3(1, 1, 1), tint: barkDark},
+			{modelIdx: stumpMeshRidge, offset: rl.NewVector3(-0.27, 0.15, -0.20), scale: rl.NewVector3(1, 0.9, 1), tint: barkDark},
+			{modelIdx: stumpMeshRidge, offset: rl.NewVector3(0.05, 0.16, 0.33), scale: rl.NewVector3(1, 0.95, 1), tint: barkDark},
+			// Shelf fungi stepped down the shaded side.
+			{modelIdx: stumpMeshShelf, offset: rl.NewVector3(-0.30, 0.24, 0.10), scale: rl.NewVector3(1.2, 0.38, 1.0), tint: shelfCream},
+			{modelIdx: stumpMeshShelf, offset: rl.NewVector3(-0.32, 0.15, 0.04), scale: rl.NewVector3(0.85, 0.30, 0.72), tint: shelfApricot},
 		},
 	}
 }
 
 // loadLogProp builds a fallen log on its side: cylinder tipped 90° around X so
-// its long axis runs along world Z, with end-cap discs and moss patches.
+// its long axis runs along world Z, with growth-ringed end caps, a sprouting
+// branch stub, proud bark ridges, and moss patches.
 func loadLogProp(shader rl.Shader, barkTex, leafTex rl.Texture2D) propModel {
-	trunk := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.20, 1.05, 14))
-	cap := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.20, 0.02, 14))
-	moss := rl.LoadModelFromMesh(rl.GenMeshSphere(0.16, 8, 10))
-	models := []rl.Model{trunk, cap, moss}
-	setModelTexture(&models[0], barkTex)
-	setModelTexture(&models[2], leafTex)
+	const (
+		logMeshTrunk = iota
+		logMeshCap
+		logMeshRing
+		logMeshHeart
+		logMeshMoss
+		logMeshStub
+		logMeshShoot
+		logMeshRidge
+	)
+	models := []rl.Model{
+		logMeshTrunk: rl.LoadModelFromMesh(rl.GenMeshCylinder(0.20, 1.05, 14)),
+		logMeshCap:   rl.LoadModelFromMesh(rl.GenMeshCylinder(0.20, 0.02, 14)),
+		logMeshRing:  rl.LoadModelFromMesh(rl.GenMeshCylinder(0.13, 0.025, 12)),
+		logMeshHeart: rl.LoadModelFromMesh(rl.GenMeshCylinder(0.05, 0.03, 8)),
+		logMeshMoss:  rl.LoadModelFromMesh(rl.GenMeshSphere(0.16, 8, 10)),
+		logMeshStub:  rl.LoadModelFromMesh(rl.GenMeshCone(0.055, 0.24, 6)),
+		logMeshShoot: rl.LoadModelFromMesh(rl.GenMeshSphere(0.065, 8, 10)),
+		logMeshRidge: rl.LoadModelFromMesh(rl.GenMeshCube(0.045, 0.045, 0.92)),
+	}
+	setModelTexture(&models[logMeshTrunk], barkTex)
+	setModelTexture(&models[logMeshStub], barkTex)
+	setModelTexture(&models[logMeshMoss], leafTex)
+	setModelTexture(&models[logMeshShoot], leafTex)
 	shadeAll(models, shader)
 	// Pastel pecan log with pale cut faces + soft mint moss.
 	bark := rl.NewColor(170, 130, 94, 255)
+	barkDark := rl.NewColor(132, 98, 70, 255)
 	cut := rl.NewColor(210, 178, 138, 255)
+	ringTone := rl.NewColor(182, 148, 110, 255)
+	heart := rl.NewColor(138, 102, 72, 255)
 	mossTint := rl.NewColor(156, 192, 140, 255)
+	shootMint := rl.NewColor(146, 196, 118, 255)
+	sideways := rl.NewVector3(1, 0, 0)
 	return propModel{
 		models: models,
 		parts: []treePart{
 			// Trunk on its side: 90° around +X tips the +Y cylinder onto -Z, so
 			// its length runs along z, center ~half its radius above ground.
-			{modelIdx: 0, offset: rl.NewVector3(0, 0.20, 0), scale: rl.NewVector3(1, 1, 1), rotation: 90, rotationAxis: rl.NewVector3(1, 0, 0), tint: bark},
-			// End caps at z = ±half-length.
-			{modelIdx: 1, offset: rl.NewVector3(0, 0.20, 0.52), scale: rl.NewVector3(1, 1, 1), rotation: 90, rotationAxis: rl.NewVector3(1, 0, 0), tint: cut},
-			{modelIdx: 1, offset: rl.NewVector3(0, 0.20, -0.52), scale: rl.NewVector3(1, 1, 1), rotation: 90, rotationAxis: rl.NewVector3(1, 0, 0), tint: cut},
+			{modelIdx: logMeshTrunk, offset: rl.NewVector3(0, 0.20, 0), scale: rl.NewVector3(1, 1, 1), rotation: 90, rotationAxis: sideways, tint: bark},
+			// End caps at z = ±half-length, each with a growth ring + dark heart.
+			{modelIdx: logMeshCap, offset: rl.NewVector3(0, 0.20, 0.52), scale: rl.NewVector3(1, 1, 1), rotation: 90, rotationAxis: sideways, tint: cut},
+			{modelIdx: logMeshRing, offset: rl.NewVector3(0.01, 0.21, 0.525), scale: rl.NewVector3(1, 1, 1), rotation: 90, rotationAxis: sideways, tint: ringTone},
+			{modelIdx: logMeshHeart, offset: rl.NewVector3(0.02, 0.215, 0.53), scale: rl.NewVector3(1, 1, 1), rotation: 90, rotationAxis: sideways, tint: heart},
+			{modelIdx: logMeshCap, offset: rl.NewVector3(0, 0.20, -0.52), scale: rl.NewVector3(1, 1, 1), rotation: 90, rotationAxis: sideways, tint: cut},
+			{modelIdx: logMeshRing, offset: rl.NewVector3(-0.01, 0.21, -0.525), scale: rl.NewVector3(1, 1, 1), rotation: 90, rotationAxis: sideways, tint: ringTone},
+			{modelIdx: logMeshHeart, offset: rl.NewVector3(-0.015, 0.215, -0.53), scale: rl.NewVector3(1, 1, 1), rotation: 90, rotationAxis: sideways, tint: heart},
+			// Bark ridges running the trunk's length, embedded at the flanks.
+			{modelIdx: logMeshRidge, offset: rl.NewVector3(0.175, 0.27, 0), scale: rl.NewVector3(1, 1, 1), rotation: 12, rotationAxis: rl.NewVector3(0, 0, 1), tint: barkDark},
+			{modelIdx: logMeshRidge, offset: rl.NewVector3(-0.16, 0.29, 0.04), scale: rl.NewVector3(1, 1, 0.9), rotation: -14, rotationAxis: rl.NewVector3(0, 0, 1), tint: barkDark},
+			// Snapped branch stub sprouting a mint shoot — new life on dead wood.
+			{modelIdx: logMeshStub, offset: rl.NewVector3(0.04, 0.37, 0.14), scale: rl.NewVector3(1, 1, 1), rotation: -24, rotationAxis: rl.NewVector3(0, 0, 1), tint: barkDark},
+			{modelIdx: logMeshShoot, offset: rl.NewVector3(0.14, 0.58, 0.14), scale: rl.NewVector3(1, 0.85, 1), tint: shootMint, sway: 0.5},
 			// Moss patches squashed on top of the trunk.
-			{modelIdx: 2, offset: rl.NewVector3(0.05, 0.34, 0.18), scale: rl.NewVector3(0.85, 0.40, 0.85), tint: mossTint},
-			{modelIdx: 2, offset: rl.NewVector3(-0.04, 0.34, -0.22), scale: rl.NewVector3(0.70, 0.35, 0.70), tint: mossTint},
+			{modelIdx: logMeshMoss, offset: rl.NewVector3(0.05, 0.34, 0.18), scale: rl.NewVector3(0.85, 0.40, 0.85), tint: mossTint},
+			{modelIdx: logMeshMoss, offset: rl.NewVector3(-0.04, 0.34, -0.22), scale: rl.NewVector3(0.70, 0.35, 0.70), tint: mossTint},
 		},
 	}
 }
@@ -1598,21 +1776,38 @@ func loadLilypadProp(shader rl.Shader) propModel {
 }
 
 // loadLeafPileProp builds a leaf pile: a flat cylinder heap with two domes on
-// top. Shares the tree's leaf texture.
+// top, single blown-loose leaves scattered around the skirt, and a fallen twig.
+// Shares the tree's leaf texture.
 func loadLeafPileProp(shader rl.Shader, leafTex rl.Texture2D) propModel {
 	base := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.48, 0.10, 16))
 	mound := rl.LoadModelFromMesh(rl.GenMeshSphere(0.22, 10, 12))
-	models := []rl.Model{base, mound}
-	textureAndShade(models, shader, leafTex)
+	leaf := rl.LoadModelFromMesh(rl.GenMeshCube(0.07, 0.012, 0.095))
+	twig := rl.LoadModelFromMesh(rl.GenMeshCube(0.028, 0.02, 0.34))
+	models := []rl.Model{base, mound, leaf, twig}
+	setModelTexture(&models[0], leafTex)
+	setModelTexture(&models[1], leafTex)
+	shadeAll(models, shader)
 	leafA := rl.NewColor(196, 142, 80, 255)
 	leafB := rl.NewColor(168, 110, 64, 255)
 	leafC := rl.NewColor(220, 178, 96, 255)
+	leafRust := rl.NewColor(178, 96, 58, 255)
+	twigBrown := rl.NewColor(118, 88, 60, 255)
 	return propModel{
 		models: models,
 		parts: []treePart{
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.02, 0), scale: rl.NewVector3(1, 1, 1), tint: leafA},
 			{modelIdx: 1, offset: rl.NewVector3(0.08, 0.16, 0.06), scale: rl.NewVector3(1, 0.55, 1), tint: leafB},
 			{modelIdx: 1, offset: rl.NewVector3(-0.10, 0.14, -0.08), scale: rl.NewVector3(1, 0.45, 1), tint: leafC},
+			// Blown-loose leaves ringing the pile at scattered yaws; the outermost
+			// ones sway a touch, still catching the breeze.
+			{modelIdx: 2, offset: rl.NewVector3(0.52, 0.012, 0.16), scale: rl.NewVector3(1, 1, 1), rotation: 35, tint: leafB},
+			{modelIdx: 2, offset: rl.NewVector3(-0.48, 0.012, 0.28), scale: rl.NewVector3(0.9, 1, 0.9), rotation: -60, tint: leafC, sway: 0.3},
+			{modelIdx: 2, offset: rl.NewVector3(0.30, 0.012, -0.50), scale: rl.NewVector3(1.1, 1, 1.1), rotation: 105, tint: leafRust},
+			{modelIdx: 2, offset: rl.NewVector3(-0.24, 0.012, -0.54), scale: rl.NewVector3(0.85, 1, 0.85), rotation: 160, tint: leafA, sway: 0.3},
+			{modelIdx: 2, offset: rl.NewVector3(-0.58, 0.012, -0.10), scale: rl.NewVector3(1, 1, 1), rotation: 80, tint: leafRust},
+			{modelIdx: 2, offset: rl.NewVector3(0.14, 0.012, 0.55), scale: rl.NewVector3(0.9, 1, 0.9), rotation: -25, tint: leafB},
+			// Fallen twig half-buried in the skirt.
+			{modelIdx: 3, offset: rl.NewVector3(0.32, 0.03, 0.30), scale: rl.NewVector3(1, 1, 1), rotation: 40, tint: twigBrown},
 		},
 	}
 }

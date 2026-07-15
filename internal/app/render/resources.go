@@ -19,6 +19,11 @@ var uiFontTTF []byte
 type Resources struct {
 	materials  map[core.MaterialSet]worldMaterialResources
 	skyTexture rl.Texture2D
+	// cloudFarTexture / cloudNearTexture: transparent cumulus planes drawn over
+	// the sky gradient at parallax drift speeds (DrawSkyBackground). Repeat-
+	// wrapped in x so the scrolling source rect never shows a seam.
+	cloudFarTexture  rl.Texture2D
+	cloudNearTexture rl.Texture2D
 	// starTexture: night overlay; alpha follows time-of-day (timeProfile.StarAlpha).
 	starTexture rl.Texture2D
 	// enemyVisuals: kind→billboard, dense slice indexed by EnemyKind. Aliases textures, so
@@ -33,7 +38,10 @@ type Resources struct {
 
 	lighting     lightingShader
 	billboardFog billboardFogShaderPipe
-	tree         treeModel
+	// cloudWarp domain-warps the drifting cloud planes so they slowly billow /
+	// change shape (DrawSkyBackground). Zero shader.ID ⇒ compile failed, draw plain.
+	cloudWarp cloudWarpShaderPipe
+	tree      treeModel
 
 	// Field-only props, scattered as blockers (large) or decoration (small).
 	rockProp     propModel
@@ -74,6 +82,40 @@ type Resources struct {
 	doorProps [core.DoorStyleCount]propModel
 }
 
+// faceBand indexes worldMaterialResources.faceBands — banded per-level cliff-face
+// variants so a cliff's vertical structure (turf crest, mossy foot) lands once per
+// cliff instead of repeating per level. Picked by cliffBandIndex.
+const (
+	faceBandSoloGrass = iota // single-level face: grass crest + foot
+	faceBandSoloBare         // single-level face: bare lit crest + foot
+	faceBandTopGrass         // top level of a multi-level cliff, turf above
+	faceBandTopBare          // top level, bare crest (dirt/water floor above)
+	faceBandMid              // interior level
+	faceBandBase             // bottom level: foot moss + ground occlusion
+	faceBandCount
+)
+
+// cliffBandIndex picks the face band for a cliff quad from its position in the
+// exposed run (top/bottom flags) and whether a turf floor sits above it.
+func cliffBandIndex(top, bottom, grassy bool) int {
+	switch {
+	case top && bottom:
+		if grassy {
+			return faceBandSoloGrass
+		}
+		return faceBandSoloBare
+	case top:
+		if grassy {
+			return faceBandTopGrass
+		}
+		return faceBandTopBare
+	case bottom:
+		return faceBandBase
+	default:
+		return faceBandMid
+	}
+}
+
 type worldMaterialResources struct {
 	// Each model owns its diffuse texture via its material; Unload via UnloadModel only.
 	faceModel    rl.Model // per-material plain-rock cliff-face quad
@@ -83,6 +125,10 @@ type worldMaterialResources struct {
 	floorDirtModel  rl.Model
 	floorDarkModel  rl.Model
 	hasFloorVariant bool
+	// Field-only banded cliff faces (see faceBand consts). Dungeon keeps the
+	// single stretched faceModel — its brick skin has no vertical gradient.
+	faceBands    [faceBandCount]rl.Model
+	hasFaceBands bool
 }
 
 // LoadResources builds every procedural texture/model/font/shader. Each handle is committed to
@@ -102,6 +148,7 @@ func LoadResources() (r Resources) {
 
 	r.lighting = loadLightingShader()
 	r.billboardFog = loadBillboardFogShader()
+	r.cloudWarp = loadCloudWarpShader()
 
 	// Commit each material the instant it's built so the recover-path Unload finds earlier models on a later panic.
 	dungeonMat := loadWorldMaterial(makeStoneBrickPixels(tileTexDim, tileTexDim), makeStoneFloorPixels(tileTexDim, tileTexDim), r.lighting.shader)
@@ -116,13 +163,53 @@ func LoadResources() (r Resources) {
 	fieldMat.floorDarkModel = loadFloorModel(makeDarkGrassPixels(tileTexDim, tileTexDim), r.lighting.shader)
 	fieldMat.hasFloorVariant = true
 	r.materials[core.MaterialField] = fieldMat
+	// Banded cliff faces (crest / mid / foot; see faceBand consts) so a cliff's
+	// vertical structure paints once per cliff, not once per level. Commit after
+	// EACH so a later panic unloads the ones already built.
+	fieldFaceBandOpts := [faceBandCount]rockFaceOpts{
+		faceBandSoloGrass: {crest: rockCrestGrass, foot: true},
+		faceBandSoloBare:  {crest: rockCrestLit, foot: true},
+		faceBandTopGrass:  {crest: rockCrestGrass},
+		faceBandTopBare:   {crest: rockCrestLit},
+		faceBandMid:       {},
+		faceBandBase:      {foot: true},
+	}
+	for band, opt := range fieldFaceBandOpts {
+		fieldMat.faceBands[band] = buildFaceQuadModel(paintRockFace(tileTexDim, tileTexDim, opt), r.lighting.shader)
+		r.materials[core.MaterialField] = fieldMat
+	}
+	fieldMat.hasFaceBands = true
+	r.materials[core.MaterialField] = fieldMat
 	// Every core.MaterialSet must have a loaded worldMaterial, else worldMaterial() falls back to Field.
 	assertMaterialCoverage(r.materials)
 
-	r.skyTexture = loadTexture(makeSkyPixels(skyTexW, skyTexH), skyTexW, skyTexH, rl.FilterTrilinear)
+	r.skyTexture = loadTexture(makeSkyGradientPixels(skyTexW, skyTexH), skyTexW, skyTexH, rl.FilterTrilinear)
 	rl.GenTextureMipmaps(&r.skyTexture)
 	rl.SetTextureFilter(r.skyTexture, rl.FilterTrilinear)
 	rl.SetTextureWrap(r.skyTexture, rl.WrapClamp)
+
+	// Cloud planes — transparent cumulus layers DrawSkyBackground drifts at
+	// parallax speeds. Repeat wrap so the scrolling source rect wraps in x
+	// (vertical UVs stay within [0,1], so y-wrap never shows). The FAR plane is
+	// smaller, lower, hazier — reads as distance; the NEAR plane carries the big
+	// crisp cumulus and drifts fastest.
+	loadCloudLayer := func(spec cloudLayerSpec) rl.Texture2D {
+		tex := loadTexture(makeCloudLayerPixels(skyTexW, skyTexH, spec), skyTexW, skyTexH, rl.FilterTrilinear)
+		rl.GenTextureMipmaps(&tex)
+		rl.SetTextureFilter(tex, rl.FilterTrilinear)
+		rl.SetTextureWrap(tex, rl.WrapRepeat)
+		return tex
+	}
+	r.cloudFarTexture = loadCloudLayer(cloudLayerSpec{
+		seed: 91, clouds: 5, wisps: 4,
+		cyMin: 185, cyVar: 75,
+		sizeMin: 0.36, alphaCap: 0.72, hazeMix: 0.35, shadeMax: 0.55,
+	})
+	r.cloudNearTexture = loadCloudLayer(cloudLayerSpec{
+		seed: 1409, clouds: 5, wisps: 0,
+		cyMin: 92, cyVar: 100,
+		sizeMin: 0.80, alphaCap: 0.94, hazeMix: 0, shadeMax: 0.85,
+	})
 
 	// Star overlay: same dims as the sky (shared source-rect math); point-filtered so stars don't blur.
 	r.starTexture = loadTexture(makeStarPixels(skyTexW, skyTexH), skyTexW, skyTexH, rl.FilterPoint)
@@ -221,8 +308,11 @@ func LoadResources() (r Resources) {
 	r.propModels[core.TileBarrel] = loadBarrelProp(r.lighting.shader, barrelWoodTex)
 	r.propModels[core.TileUrn] = loadUrnProp(r.lighting.shader, terracottaTex)
 	r.propModels[core.TileStalagmite] = loadStalagmiteProp(r.lighting.shader, marbleTex)
-	r.propModels[core.TilePillar] = loadPillarProp(r.lighting.shader, marbleTex)
-	r.propModels[core.TileBrokenPillar] = loadBrokenPillarProp(r.lighting.shader, marbleTex)
+	// Fluted shaft skin shared by the intact + broken pillars (safe: UnloadModel
+	// never frees bound textures, same as the shared marbleTex).
+	flutedTex := loadTiledTexture(makeFlutedMarblePixels(tileTexDim, tileTexDim))
+	r.propModels[core.TilePillar] = loadPillarProp(r.lighting.shader, marbleTex, flutedTex)
+	r.propModels[core.TileBrokenPillar] = loadBrokenPillarProp(r.lighting.shader, marbleTex, flutedTex)
 	r.propModels[core.TileStatue] = loadStatueProp(r.lighting.shader, marbleTex)
 	r.propModels[core.TileObelisk] = loadObeliskProp(r.lighting.shader, graniteTex)
 	r.propModels[core.TileFountain] = loadFountainProp(r.lighting.shader, marbleTex)
@@ -478,8 +568,13 @@ func (r Resources) Unload() {
 		// and a partial init (one variant built, the second panicking) still frees the one that loaded.
 		rl.UnloadModel(material.floorDirtModel)
 		rl.UnloadModel(material.floorDarkModel)
+		for _, band := range material.faceBands {
+			rl.UnloadModel(band) // zero-ID slots (non-banded materials) skip cleanly
+		}
 	}
 	rl.UnloadTexture(r.skyTexture)
+	rl.UnloadTexture(r.cloudFarTexture)
+	rl.UnloadTexture(r.cloudNearTexture)
 	rl.UnloadTexture(r.starTexture)
 	// Walk enemyTextures (the owning list), NOT enemyVisuals — that slice aliases handles and would double-free.
 	for _, tex := range r.enemyTextures {
@@ -526,6 +621,7 @@ func (r Resources) Unload() {
 	}
 	r.lighting.unload()
 	r.billboardFog.unload()
+	r.cloudWarp.unload()
 	if r.hudFontOwned {
 		rl.UnloadFont(r.hudFont)
 	}

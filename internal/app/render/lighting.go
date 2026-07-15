@@ -175,6 +175,7 @@ func (s billboardFogShaderPipe) unload() {
 // per-frame paths don't allocate fresh slice literals. Renderer is single-threaded.
 var (
 	uniformVec3Buf  [3]float32
+	uniformVec2Buf  [2]float32
 	uniformFloatBuf [1]float32
 )
 

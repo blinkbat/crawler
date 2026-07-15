@@ -84,6 +84,18 @@ func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets 
 	}
 
 	drawn := 0
+	// grassTop gates the turf-crest band where a face meets the AUTHORED ground
+	// surface; upper decks always draw the (grass) generic floor, so their crests
+	// are turf regardless. groundL is that lowest standable level.
+	grassTop := floorIsGrassy(m.Floor[z][x])
+	groundL := -1
+	for L := 0; L < h; L++ {
+		if solid[L] && (L+1 >= h || !solid[L+1]) {
+			groundL = L
+			break
+		}
+	}
+	tint := cliffFaceTint(x, z)
 	// Side faces, per visible edge.
 	for _, d := range core.CardinalDirs {
 		dx, dz := core.FacingVector(d)
@@ -94,8 +106,10 @@ func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets 
 		}
 		nx, nz := x+dx, z+dz
 		yaw := southFacingYaw(d)
-		// Per-direction skin (FaceSkinForDir falls back to base), resolved lazily so a fully-buried edge pays no lookup.
-		skin := material.faceModel
+		// Per-direction skin (FaceSkinForDir falls back to base band/face), resolved
+		// lazily so a fully-buried edge pays no lookup.
+		var skin rl.Model
+		hasSkin := false
 		skinResolved := false
 		// One quad PER LEVEL (one cube tall) so the texture tiles per voxel instead of stretching across a multi-level run.
 		for L := 0; L < h; L++ {
@@ -108,10 +122,22 @@ func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets 
 			if !skinResolved {
 				skinResolved = true
 				if sc := m.FaceSkinForDir(x, z, d); assets.faceVariantTable.present[sc] {
-					skin = assets.faceVariantTable.model[sc]
+					skin, hasSkin = assets.faceVariantTable.model[sc], true
 				}
 			}
-			drawCliffFace(skin, cx, core.ElevationWorldY(L-1), cz, yaw, 1)
+			model := material.faceModel
+			switch {
+			case hasSkin:
+				model = skin
+			case material.hasFaceBands:
+				// Band pick: crest where the cube's top is a standable surface,
+				// foot where the quad's base meets the neighbour's ground.
+				top := L+1 >= h || !solid[L+1]
+				bottom := L == 0 || (solid[L-1] && voxelNeighborSolid(m, nx, nz, L-1))
+				grassy := grassTop || (top && L != groundL)
+				model = material.faceBands[cliffBandIndex(top, bottom, grassy)]
+			}
+			drawCliffFace(model, cx, core.ElevationWorldY(L-1), cz, yaw, 1, tint)
 			drawn++
 		}
 	}

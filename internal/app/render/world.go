@@ -426,6 +426,29 @@ func DrawSkyBackground(assets Resources, g *core.GameState) {
 	profile := timeProfileAt(g.StepCount)
 	tint := skyColor(profile.SkyTint)
 	rl.DrawTexturePro(assets.skyTexture, source, dest, rl.NewVector2(0, 0), 0, tint)
+	// Cloud planes drift on the wind at parallax speeds — the base animation is
+	// two extra textured quads whose SOURCE rect slides in x (repeat wrap makes
+	// the offset seamless). Mod by texW keeps the offset small over long sessions.
+	now := rl.GetTime()
+	farSrc := source
+	farSrc.X = srcX + float32(math.Mod(now*float64(cloudDriftFar), float64(texW)))
+	nearSrc := source
+	nearSrc.X = srcX + float32(math.Mod(now*float64(cloudDriftNear), float64(texW)))
+	// On top of the drift, the warp shader (cloudwarp.go) domain-warps each plane
+	// through a slow flow field so the cumulus billow and reshape as they cross —
+	// subtle, trippy, ~free. Fall back to a plain draw if the shader didn't compile.
+	if assets.cloudWarp.shader.ID != 0 {
+		assets.cloudWarp.begin(screenW, screenH, float32(now))
+		assets.cloudWarp.layer(cloudWarpFar)
+		rl.DrawTexturePro(assets.cloudFarTexture, farSrc, dest, rl.NewVector2(0, 0), 0, tint)
+		rl.DrawRenderBatchActive() // flush FAR with its params before NEAR overwrites them
+		assets.cloudWarp.layer(cloudWarpNear)
+		rl.DrawTexturePro(assets.cloudNearTexture, nearSrc, dest, rl.NewVector2(0, 0), 0, tint)
+		rl.EndShaderMode()
+	} else {
+		rl.DrawTexturePro(assets.cloudFarTexture, farSrc, dest, rl.NewVector2(0, 0), 0, tint)
+		rl.DrawTexturePro(assets.cloudNearTexture, nearSrc, dest, rl.NewVector2(0, 0), 0, tint)
+	}
 	// Star layer rides the same source/dest. Alpha = StarAlpha * per-pixel alpha
 	// (sparse pinpoints).
 	if profile.StarAlpha > 0 {
@@ -433,6 +456,14 @@ func DrawSkyBackground(assets Resources, g *core.GameState) {
 		rl.DrawTexturePro(assets.starTexture, source, dest, rl.NewVector2(0, 0), 0, colorWithAlpha(rl.White, alpha))
 	}
 }
+
+// Cloud drift speeds in texture px/sec: the near plane outruns the far one, so
+// the bank reads as depth, not a sliding painting. A near cloud crosses the
+// full panorama in ~4 minutes — present but never distracting.
+const (
+	cloudDriftFar  = float32(1.7)
+	cloudDriftNear = float32(4.4)
+)
 
 // behindCullSlack is how far behind the camera a tile center can project before
 // it's skipped. Generous so the tile underfoot and half-behind tiles stay drawn
@@ -775,6 +806,15 @@ type tileElev struct {
 	// rescan that would otherwise run per visible tile per frame.
 	decorLevel int
 	propLevel  int
+	// grassTop: the tile's floor reads as turf — gates the grass-crest face band
+	// on the cliff below it.
+	grassTop bool
+}
+
+// floorIsGrassy reports whether a floor char reads as turf (the auto variant
+// resolves to grass-family in the field material).
+func floorIsGrassy(c byte) bool {
+	return c == core.FloorAuto || c == core.FloorGrass || c == core.FloorDarkGrass
 }
 
 // elevGridBuf is reused across frames + passes to avoid an allocation per draw.
@@ -879,6 +919,7 @@ func elevGrid(m *core.AreaDefinition, w, h int, token uint64) []tileElev {
 				faceSkins:  faces,
 				decorLevel: m.DecorLevelAt(x, z),
 				propLevel:  m.PropLevelAt(x, z),
+				grassTop:   floorIsGrassy(m.Floor[z][x]),
 			}
 		}
 	}
@@ -894,6 +935,7 @@ func drawCliffFaces(camPos rl.Vector3, material worldMaterialResources, assets R
 		return 0 // the ramp wedge supplies its own faces
 	}
 	drawn := 0
+	tint := cliffFaceTint(x, z)
 	for _, d := range core.CardinalDirs {
 		dx, dz := core.FacingVector(d)
 		// CPU backface cull: a face is only visible from its outward side, and a
@@ -918,15 +960,53 @@ func drawCliffFaces(camPos rl.Vector3, material worldMaterialResources, assets R
 		if myLevel <= nLevel {
 			continue
 		}
+		yaw := southFacingYaw(d)
 		// Per-direction skin from the prebuilt grid (override or base).
-		skin := material.faceModel
 		if sc := grid[z*w+x].faceSkins[d]; assets.faceVariantTable.present[sc] {
-			skin = assets.faceVariantTable.model[sc]
+			// Skinned faces draw one quad PER LEVEL (their textures tile
+			// vertically), matching the voxel path's density.
+			skin := assets.faceVariantTable.model[sc]
+			for L := nLevel; L < myLevel; L++ {
+				drawCliffFace(skin, cx, core.ElevationWorldY(L), cz, yaw, 1, tint)
+				drawn++
+			}
+			continue
 		}
-		drawCliffFace(skin, cx, core.ElevationWorldY(nLevel), cz, southFacingYaw(d), float32(myLevel-nLevel))
+		if material.hasFaceBands {
+			// Banded plain rock: turf crest on the top level, mossy foot on the
+			// bottom, neutral mids — the cliff's vertical structure lands once.
+			grassy := grid[z*w+x].grassTop
+			for L := nLevel; L < myLevel; L++ {
+				band := material.faceBands[cliffBandIndex(L == myLevel-1, L == nLevel, grassy)]
+				drawCliffFace(band, cx, core.ElevationWorldY(L), cz, yaw, 1, tint)
+				drawn++
+			}
+			continue
+		}
+		drawCliffFace(material.faceModel, cx, core.ElevationWorldY(nLevel), cz, yaw, float32(myLevel-nLevel), tint)
 		drawn++
 	}
 	return drawn
+}
+
+// cliffTintTable holds the subtle warm/cool multiplier tints drawCliffFace mixes
+// per tile — enough tonal drift to break the repeat across a long cliff wall,
+// far too little to read as painted color.
+var cliffTintTable = [8]rl.Color{
+	rl.NewColor(255, 251, 244, 255), // faint warm
+	rl.NewColor(244, 248, 255, 255), // faint cool
+	rl.NewColor(255, 255, 255, 255), // neutral
+	rl.NewColor(240, 235, 226, 255), // dim warm
+	rl.NewColor(252, 248, 240, 255),
+	rl.NewColor(236, 239, 246, 255), // dim cool
+	rl.NewColor(247, 247, 247, 255),
+	rl.NewColor(255, 249, 238, 255),
+}
+
+// cliffFaceTint picks a tile's cliff tint. One tint per tile (not per level) so
+// a whole column stays coherent while neighbouring columns drift apart.
+func cliffFaceTint(x, z int) rl.Color {
+	return cliffTintTable[(tileHash(x, z)>>7)&7]
 }
 
 // faceYaw maps the dropping-edge direction to the Y-rotation orienting the
@@ -950,9 +1030,12 @@ func southFacingYaw(d int) float32 {
 
 // drawCliffFace draws one face-quad at tile center (cx,cz) with its base at
 // baseY, yaw-rotated to the dropping edge and scaled vertically by the level
-// delta so the single LevelStep-tall model covers the whole cliff.
-func drawCliffFace(model rl.Model, cx, baseY, cz, yaw, levels float32) {
-	drawYawedModel(model, cx, baseY, cz, yaw, rl.NewVector3(1, levels, 1))
+// delta. tint is the per-tile repetition-breaking wash (cliffFaceTint).
+func drawCliffFace(model rl.Model, cx, baseY, cz, yaw, levels float32, tint rl.Color) {
+	rl.DrawModelEx(model,
+		rl.NewVector3(cx, baseY, cz),
+		worldUp, yaw,
+		rl.NewVector3(1, levels, 1), tint)
 }
 
 // triNormal returns the unit normal of triangle (a,b,c) by the right-hand rule

@@ -37,149 +37,306 @@ func makeSoftShadowPixels(size int) []color.RGBA {
 	return pixels
 }
 
-func makeRockWallPixels(w, h int) []color.RGBA {
+// rockCrest selects the top-edge treatment of a painted rock face band.
+type rockCrest int
+
+const (
+	rockCrestNone  rockCrest = iota // interior band — bare rock runs to the edge
+	rockCrestLit                    // exposed lip catching the sky
+	rockCrestGrass                  // overhanging turf fringe (grass floor above)
+)
+
+// rockFaceOpts tunes paintRockFace's band overlays. The base rock field is
+// toroidal (seamless in x AND y) and identical across every band, so stacked and
+// adjacent cliff quads meet without seams; only the crest/foot overlays differ,
+// and both fade out before the shared edges.
+type rockFaceOpts struct {
+	crest rockCrest
+	foot  bool // foot occlusion + moss creep (the band meets the ground below)
+}
+
+// paintRockFace paints one cliff-face band: domain-warped weathering folds,
+// warped sedimentary strata, mineral staining, fracture veins with lit lips, and
+// the per-band crest/foot overlays. Shared by the plain wall, the band variants,
+// and (as an untreated mid band) the ivy/cracked/crumbling skins.
+func paintRockFace(w, h int, o rockFaceOpts) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	// Pastel cream-stone wall. The dungeon mood comes from the lighting profile
+	// Pastel cream-stone. The dungeon mood comes from the lighting profile
 	// (cool ambient + heavy shadow), not from the texture going grey.
 	base := color.RGBA{R: 188, G: 178, B: 160, A: 255}
-	shadow := color.RGBA{R: 120, G: 112, B: 102, A: 255}
-	highlight := color.RGBA{R: 226, G: 218, B: 198, A: 255}
+	shadow := color.RGBA{R: 118, G: 110, B: 100, A: 255}
+	highlight := color.RGBA{R: 228, G: 220, B: 200, A: 255}
+	warmStain := color.RGBA{R: 208, G: 182, B: 146, A: 255}
+	coolStain := color.RGBA{R: 160, G: 168, B: 182, A: 255}
+	crackDark := color.RGBA{R: 88, G: 80, B: 70, A: 255}
 	moss := color.RGBA{R: 158, G: 192, B: 148, A: 255}
 	mossDeep := color.RGBA{R: 124, G: 168, B: 124, A: 255}
 
+	fw, fh := float64(w), float64(h)
+	// wrapNoise samples fbm toroidally: four corner samples blended by the
+	// UNwarped u/v so opposite edges match exactly. dx/dy carry seed offsets and
+	// domain warp (warp fields are themselves toroidal, so wrapping survives it).
+	wrapNoise := func(x, y int, dx, dy, freq float64, octaves int) float64 {
+		u := float64(x) / fw
+		v := float64(y) / fh
+		fx := float64(x) + dx
+		fy := float64(y) + dy
+		n00 := fbmNoise(fx, fy, freq, octaves)
+		n10 := fbmNoise(fx-fw, fy, freq, octaves)
+		n01 := fbmNoise(fx, fy-fh, freq, octaves)
+		n11 := fbmNoise(fx-fw, fy-fh, freq, octaves)
+		return (n00*(1-u)+n10*u)*(1-v) + (n01*(1-u)+n11*u)*v
+	}
+	// Five beds per band, frequency periodic in h so stacked bands continue the strata.
+	strataFreq := 2 * math.Pi * 5 / fh
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			// Two-octave noise: broad band = weathering patches, fine = grain.
-			broad := fbmNoise(float64(x), float64(y), 0.012, 3)
-			fine := fbmNoise(float64(x)*1.4+97, float64(y)*1.4-211, 0.046, 4)
-			n := broad*0.55 + fine*0.45
-			c := base
-			c = noiseShade(c, highlight, shadow, n, 0.72, 0.55)
+			// Domain warp so folds and strata flow instead of reading as flat noise.
+			warpX := wrapNoise(x, y, 137, -71, 0.020, 2) * 14
+			warpY := wrapNoise(x, y, -613, 421, 0.020, 2) * 10
+			broad := wrapNoise(x, y, 257+warpX, warpY, 0.016, 3)
+			fine := wrapNoise(x, y, 97+warpX*0.5, -211+warpY*0.5, 0.055, 4)
+			stain := wrapNoise(x, y, 512, 733, 0.010, 2)
+			n := broad*0.60 + fine*0.40
+			c := noiseShade(base, highlight, shadow, n, 0.72, 0.58)
 
-			// Crack scatter as soft pits, each with a lit lower lip so it reads concave.
-			pit := hashByteXY(x/3, y/3)
-			if pit%64 == 0 {
+			// Sedimentary strata — warped horizontal beds, lit crests, shaded partings.
+			s := math.Sin(float64(y)*strataFreq + warpY*0.55 + warpX*0.20)
+			c = core.MixColor(c, shadow, math.Max(0, -s)*0.15)
+			c = core.MixColor(c, highlight, math.Max(0, s)*0.08)
+
+			// Mineral staining in broad patches — warm iron seep / cool damp shade.
+			if stain > 0.10 {
+				c = core.MixColor(c, warmStain, math.Min(0.55, (stain-0.10)*1.4))
+			} else if stain < -0.10 {
+				c = core.MixColor(c, coolStain, math.Min(0.45, (-stain-0.10)*1.2))
+			}
+
+			// Fracture veins where the two noise fields cross zero — dark seam
+			// wrapped in a faint caught-light halo so it reads carved, not drawn.
+			vt := math.Abs(fine*0.9 + broad*0.5)
+			if vt < 0.045 {
+				c = core.MixColor(c, crackDark, math.Min(0.42, (0.045-vt)*9.0))
+			} else if vt < 0.085 {
+				c = core.MixColor(c, highlight, (0.085-vt)*2.6)
+			}
+
+			// Pit scatter, each with a lit lower lip so it reads concave.
+			if hashByteXY(x/3, y/3)%64 == 0 {
 				c = core.MixColor(c, shadow, 0.38)
 			} else if y >= 3 && hashByteXY(x/3, (y-3)/3)%64 == 0 {
 				c = core.MixColor(c, highlight, 0.30)
 			}
-			// Block seams only where broad noise is low, so cracks follow the
-			// rock's folds rather than a tiled grid.
-			cellX, cellY := x/28, y/28
-			seam := hashByteXY(cellX, cellY) % 6
-			if ((x+seam)%28 == 0 || (y+seam)%28 == 0) && broad < 0.05 {
-				c = core.MixColor(c, shadow, 0.42)
-			}
-			// Moss creeps up the bottom third in patches (bright + deep) so it
-			// reads as 3D growth, not a flat wash.
-			if y > h*9/16 {
-				dy := float64(y-h*9/16) / float64(h)
-				mossNoise := fbmNoise(float64(x)+13, float64(y)*0.7+71, 0.05, 3)
-				strength := math.Max(0, mossNoise+dy*0.5-0.18)
+
+			vy := float64(y) / fh
+			if o.foot && vy > 0.60 {
+				// Moss creeps up from the ground in patches (bright + deep), and the
+				// rock settles into shadow where it meets the soil.
+				dyv := vy - 0.60
+				mossNoise := wrapNoise(x, y, 13, 71, 0.05, 3)
+				strength := math.Max(0, mossNoise+dyv*1.1-0.16)
 				if strength > 0 {
-					c = core.MixColor(c, moss, strength*0.65)
-					if mossNoise > 0.35 {
-						c = core.MixColor(c, mossDeep, (mossNoise-0.35)*0.4)
+					c = core.MixColor(c, moss, math.Min(0.70, strength*0.75))
+					if mossNoise > 0.32 {
+						c = core.MixColor(c, mossDeep, (mossNoise-0.32)*0.5)
 					}
 				}
+				c = core.MixColor(c, shadow, dyv*0.45)
 			}
-			// Vertical form: occlusion at the foot, sky kiss at the top — large-
-			// scale value structure so the wall reads as standing.
-			vy := float64(y) / float64(h)
-			if vy > 0.66 {
-				c = core.MixColor(c, shadow, (vy-0.66)*0.50)
-			} else if vy < 0.14 {
+			if o.crest == rockCrestLit && vy < 0.14 {
 				c = core.MixColor(c, highlight, (0.14-vy)*0.55)
 			}
 			pixels[y*w+x] = c
 		}
 	}
+	if o.crest == rockCrestGrass {
+		paintTurfFringe(pixels, w, h)
+	}
 	return pixels
 }
 
-// makeRockIvyPixels paints the rock wall, then grows ivy leaves along wandering vine cords. `heavy` adds more/larger leaves.
-func makeRockIvyPixels(w, h int, heavy bool) []color.RGBA {
-	pixels := makeRockWallPixels(w, h)
-	// Layered ivy palette — several greens plus a woody vine.
-	vine := color.RGBA{R: 78, G: 84, B: 54, A: 255}
-	leafA := color.RGBA{R: 74, G: 122, B: 60, A: 255}
-	leafB := color.RGBA{R: 92, G: 142, B: 70, A: 255}
-	leafLit := color.RGBA{R: 132, G: 178, B: 92, A: 255}
-	leafDark := color.RGBA{R: 46, G: 90, B: 50, A: 255}
-
-	strands := 4
-	leafEvery := 10
-	leafR := 2.7
-	if heavy {
-		strands = 8
-		leafEvery = 6
-		leafR = 3.3
+// paintTurfFringe hangs an overgrown grass lip over the top edge of a cliff
+// face: a wandering band of blades in the meadow palette over a humus line,
+// with an occlusion shadow on the rock beneath and sparse dangling blades.
+// Depth noise is x-wrapped so adjacent faces share one continuous fringe.
+func paintTurfFringe(pixels []color.RGBA, w, h int) {
+	soil := color.RGBA{R: 96, G: 74, B: 52, A: 255}
+	shade := color.RGBA{R: 88, G: 84, B: 76, A: 255}
+	gLight := color.RGBA{R: 158, G: 204, B: 116, A: 255}
+	gMid := color.RGBA{R: 118, G: 172, B: 98, A: 255}
+	gDeep := color.RGBA{R: 84, G: 134, B: 86, A: 255}
+	tones := [4]color.RGBA{gMid, gLight, gDeep, gMid}
+	// Fringe rows scale with texture height (128 → ~4..10px).
+	unit := float64(h) / 128.0
+	for x := 0; x < w; x++ {
+		u := float64(x) / float64(w)
+		dn := fbmNoise(float64(x), 3.7, 0.09, 2)*(1-u) + fbmNoise(float64(x)-float64(w), 3.7, 0.09, 2)*u
+		depth := int((6.5 + dn*3.5) * unit)
+		if depth < 2 {
+			depth = 2
+		}
+		hb := hashByteXY(x, 11)
+		tone := tones[hb%4]
+		for y := 0; y < depth && y < h; y++ {
+			t := float64(y) / float64(depth)
+			c := tone
+			// Blades darken toward their hanging tips; the very lip stays lit.
+			c = core.MixColor(c, gDeep, t*0.55)
+			if y == 0 {
+				c = core.MixColor(c, gLight, 0.35)
+			}
+			pixels[y*w+x] = core.MixColor(pixels[y*w+x], c, 0.92)
+		}
+		// Humus line under the turf, then a soft occlusion fading down the rock.
+		for k := 0; k < 2; k++ {
+			y := depth + k
+			if y < h {
+				pixels[y*w+x] = core.MixColor(pixels[y*w+x], soil, 0.55-float64(k)*0.22)
+			}
+		}
+		for k := 2; k < 6; k++ {
+			y := depth + k
+			if y < h {
+				pixels[y*w+x] = core.MixColor(pixels[y*w+x], shade, 0.28-float64(k)*0.045)
+			}
+		}
+		// Sparse dangling blade past the fringe.
+		if hb%11 == 0 {
+			hang := depth + 3 + hashByteXY(x, 29)%int(5*unit+1)
+			for y := depth; y < hang && y < h; y++ {
+				pixels[y*w+x] = core.MixColor(pixels[y*w+x], gDeep, 0.75)
+			}
+		}
 	}
-	// plotLeaf stamps one near-oval leaf at (cx,cy), wrapping in x (texture tiles).
-	plotLeaf := func(cx, cy int, r float64, base color.RGBA) {
-		ri := int(r) + 1
+}
+
+// makeRockWallPixels is the full standalone rock skin (lit crest + mossy foot) —
+// the boulder/cairn/well/gravestone props, the cave door, and the field ceiling
+// all wrap this one.
+func makeRockWallPixels(w, h int) []color.RGBA {
+	return paintRockFace(w, h, rockFaceOpts{crest: rockCrestLit, foot: true})
+}
+
+// makeRockIvyPixels grows ivy over an untreated rock band: wandering woody cords
+// (y-periodic, so stacked cliff levels chain seamlessly) carrying clustered
+// tip-lit leaves. `heavy` adds strands, cluster size, and side shoots.
+func makeRockIvyPixels(w, h int, heavy bool) []color.RGBA {
+	// Mid band (no crest/foot) — the vines supply the vertical structure, and the
+	// texture tiles cleanly when a tall cliff repeats it per level.
+	pixels := paintRockFace(w, h, rockFaceOpts{})
+	vine := color.RGBA{R: 92, G: 78, B: 52, A: 255}
+	vineShade := color.RGBA{R: 54, G: 48, B: 36, A: 255}
+	leafDark := color.RGBA{R: 50, G: 94, B: 54, A: 255}
+	leafMid := color.RGBA{R: 82, G: 136, B: 68, A: 255}
+	leafBright := color.RGBA{R: 118, G: 174, B: 86, A: 255}
+	leafLit := color.RGBA{R: 160, G: 206, B: 104, A: 255}
+	leafGold := color.RGBA{R: 198, G: 216, B: 122, A: 255}
+	tones := [6]color.RGBA{leafDark, leafMid, leafMid, leafBright, leafBright, leafGold}
+
+	// plotLeaf stamps one oriented oval leaf, wrapping BOTH axes (the skin tiles
+	// horizontally across faces and vertically up multi-level cliffs).
+	plotLeaf := func(cx, cy int, r, ang float64, tone color.RGBA) {
+		ca, sa := math.Cos(ang), math.Sin(ang)
+		ri := int(r*1.5) + 1
 		for dy := -ri; dy <= ri; dy++ {
 			for dx := -ri; dx <= ri; dx++ {
-				fx := float64(dx) / r
-				fy := float64(dy) / (r * 1.35) // taller than wide
-				if fx*fx+fy*fy > 1 {
-					continue
-				}
-				y := cy + dy
-				if y < 0 || y >= h {
+				lx := (float64(dx)*ca + float64(dy)*sa) / r
+				ly := (-float64(dx)*sa + float64(dy)*ca) / (r * 1.4)
+				if lx*lx+ly*ly > 1 {
 					continue
 				}
 				x := ((cx+dx)%w + w) % w
-				c := base
-				// Lit upper-left, shadowed lower-right.
-				switch s := fx + fy; {
-				case s < -0.35:
+				y := ((cy+dy)%h + h) % h
+				c := tone
+				// Tip-lit blade: bright toward the tip, deep at the stalk.
+				switch {
+				case ly < -0.30:
 					c = core.MixColor(c, leafLit, 0.55)
-				case s > 0.45:
-					c = core.MixColor(c, leafDark, 0.55)
+				case ly > 0.42:
+					c = core.MixColor(c, leafDark, 0.60)
 				}
-				// Midrib.
-				if dx == 0 {
-					c = core.MixColor(c, leafDark, 0.3)
+				if math.Abs(lx) < 0.15 {
+					c = core.MixColor(c, leafDark, 0.28) // midrib
 				}
-				pixels[y*w+x] = core.MixColor(pixels[y*w+x], c, 0.94)
+				pixels[y*w+x] = core.MixColor(pixels[y*w+x], c, 0.95)
 			}
 		}
 	}
-	for s := 0; s < strands; s++ {
-		x := float64(int(hashByteXY(s*23+5, 7)) % w)
-		for y := 0; y < h; y++ {
-			// Gentle wander: sine plus per-row hash jitter.
-			x += math.Sin(float64(y)*0.07+float64(s)*1.7)*0.45 + (float64(int(hashByteXY(s, y))%3)-1)*0.28
-			cx := ((int(x))%w + w) % w
-			// Woody vine cord (2px, soft).
-			pixels[y*w+cx] = core.MixColor(pixels[y*w+cx], vine, 0.65)
-			if cx+1 < w {
-				pixels[y*w+cx+1] = core.MixColor(pixels[y*w+cx+1], vine, 0.32)
+	// plotCluster stamps 2..n leaves fanned around a node.
+	plotCluster := func(cx, cy, seed, n int, baseR float64) {
+		for i := 0; i < n; i++ {
+			lh := hashByteXY(seed*131+i*17, cy*3+i)
+			side := 1
+			if (lh+i)%2 == 0 {
+				side = -1
 			}
+			r := baseR + float64(lh%12)*0.09
+			off := 2 + (lh>>3)%4
+			ang := (float64(lh%7) - 3) * 0.33
+			plotLeaf(cx+side*off, cy+(lh>>5)%5-2, r, ang, tones[lh%6])
+		}
+	}
+
+	strands := 5
+	if heavy {
+		strands = 9
+	}
+	for s := 0; s < strands; s++ {
+		hs := hashByteXY(s*37+11, 5) + s
+		x0 := float64((hs * 53) % w)
+		amp1 := 4.0 + float64(hs%5)
+		amp2 := 2.0 + float64((hs>>2)%4)
+		p1 := float64(hs%17) * 0.37
+		p2 := float64(hs%23) * 0.29
+		leafEvery := 9 - hs%3
+		clusterN := 2
+		baseR := 2.5
+		if heavy {
+			leafEvery = 6 - hs%2
+			clusterN = 3
+			baseR = 3.0
+		}
+		for y := 0; y < h; y++ {
+			// Periodic wander (whole sine cycles over h) so the cord re-enters at
+			// the same x it left — stacked levels read as one climbing vine.
+			t := float64(y) / float64(h) * 2 * math.Pi
+			fx := x0 + math.Sin(t+p1)*amp1 + math.Sin(2*t+p2)*amp2
+			cx := ((int(fx))%w + w) % w
+			// Woody cord with a cast shadow so it stands off the rock.
+			pixels[y*w+(cx+1)%w] = core.MixColor(pixels[y*w+(cx+1)%w], vineShade, 0.35)
+			pixels[y*w+cx] = core.MixColor(pixels[y*w+cx], vine, 0.80)
+			left := ((cx-1)%w + w) % w
+			pixels[y*w+left] = core.MixColor(pixels[y*w+left], vine, 0.35)
 			if y%leafEvery == 0 {
-				// Big leaf to one alternating side, smaller one half a step down.
-				side := 1.0
-				if (y/leafEvery)%2 == 0 {
-					side = -1.0
+				plotCluster(cx, y, s*7+y, clusterN+hashByteXY(s, y)%2, baseR)
+			}
+			// Heavy ivy sprouts short side shoots between clusters.
+			if heavy && y%16 == 8 && hashByteXY(s*3, y)%3 == 0 {
+				dir := 1
+				if hashByteXY(s*5, y)%2 == 0 {
+					dir = -1
 				}
-				base := leafA
-				if hashByteXY(s, y)%2 == 0 {
-					base = leafB
+				bx := cx
+				for k := 0; k < 7; k++ {
+					bx = ((bx+dir)%w + w) % w
+					by := (y + k/2) % h
+					pixels[by*w+bx] = core.MixColor(pixels[by*w+bx], vine, 0.6)
 				}
-				plotLeaf(cx+int(side*(leafR+1)), y, leafR, base)
-				plotLeaf(cx, y+leafEvery/2, leafR*0.66, leafDark)
+				plotCluster(bx, (y+3)%h, s*13+y, 2, baseR*0.85)
 			}
 		}
 	}
 	return pixels
 }
 
-// makeRockCrackedPixels paints the rock wall with a couple of wandering near-vertical cracks + a faint caught-light lip.
+// makeRockCrackedPixels paints the rock face split by wandering near-vertical
+// cracks: a dark core that bulges mid-height, a caught-light lip on the sunward
+// edge, branch fissures, and chips shed along the seam.
 func makeRockCrackedPixels(w, h int) []color.RGBA {
-	pixels := makeRockWallPixels(w, h)
-	crack := color.RGBA{R: 104, G: 98, B: 88, A: 255} // mid-tone
-	lip := color.RGBA{R: 208, G: 200, B: 182, A: 255}
+	pixels := paintRockFace(w, h, rockFaceOpts{crest: rockCrestLit, foot: true})
+	crack := color.RGBA{R: 84, G: 78, B: 68, A: 255}
+	crackDeep := color.RGBA{R: 52, G: 48, B: 42, A: 255}
+	lip := color.RGBA{R: 216, G: 208, B: 188, A: 255}
 
 	plot := func(x, y int, depth float64) {
 		if x < 0 || x >= w || y < 0 || y >= h {
@@ -187,37 +344,66 @@ func makeRockCrackedPixels(w, h int) []color.RGBA {
 		}
 		pixels[y*w+x] = core.MixColor(pixels[y*w+x], crack, depth)
 		if x+1 < w {
-			pixels[y*w+x+1] = core.MixColor(pixels[y*w+x+1], lip, depth*0.2)
+			pixels[y*w+x+1] = core.MixColor(pixels[y*w+x+1], lip, depth*0.35)
 		}
 	}
-	walkCrack := func(startX, startY, endY, seed int) {
+	walkCrack := func(startX, startY, endY, seed int, mainline bool) {
 		x := float64(startX)
+		span := float64(endY - startY)
 		for y := startY; y < endY; y++ {
 			x += fbmNoise(float64(y)*0.5+float64(seed)*31, float64(seed)*7, 0.4, 3) * 1.1
-			plot(int(x), y, 0.45)
-			if hashByteXY(int(x), y)%52 == 0 {
+			// Bulge: widest / deepest mid-run, hairline at the tips.
+			bulge := math.Sin(float64(y-startY) / span * math.Pi)
+			plot(int(x), y, 0.30+bulge*0.35)
+			if mainline && bulge > 0.55 {
+				// Second column of dark core where the split gapes.
+				if xi := int(x) - 1; xi >= 0 && xi < w {
+					pixels[y*w+xi] = core.MixColor(pixels[y*w+xi], crackDeep, bulge*0.40)
+				}
+			}
+			// Branch fissures peeling off the main split.
+			if mainline && hashByteXY(int(x), y)%44 == 0 {
 				bx := x
+				dir := 1.0
+				if hashByteXY(int(x)*3, y)%2 == 0 {
+					dir = -1.0
+				}
 				for by := y; by < y+h/8 && by < endY; by++ {
-					bx += 1.0
-					plot(int(bx), by, 0.32)
+					bx += dir * (0.7 + fbmNoise(float64(by)*0.7, float64(seed)*13, 0.5, 2)*0.5)
+					plot(int(bx), by, 0.26)
+				}
+			}
+			// Chips shed beside the crack.
+			if mainline && hashByteXY(int(x)*7, y)%60 == 0 {
+				cxx := int(x) + 2 + hashByteXY(int(x), y*3)%3
+				for dy := 0; dy < 2; dy++ {
+					for dx := 0; dx < 2; dx++ {
+						if px, py := cxx+dx, y+dy; px >= 0 && px < w && py < h {
+							pixels[py*w+px] = core.MixColor(pixels[py*w+px], crack, 0.30)
+						}
+					}
 				}
 			}
 		}
 	}
 	for i := 0; i < 2; i++ {
-		sx := int(hashByteXY(i*17+5, 3)) % w
-		walkCrack(sx, 0, h, i+1)
+		sx := hashByteXY(i*17+5, 3) % w
+		walkCrack(sx, 0, h, i+1, true)
 	}
+	// One short hairline that doesn't span the face.
+	walkCrack(hashByteXY(41, 9)%w, h/5, h*3/4, 5, false)
 	return pixels
 }
 
-// makeRockCrumblingPixels paints weathered/chipped stone: soft shadow in low
-// noise patches, a pale lit edge above each, rubble specks near the base.
+// makeRockCrumblingPixels paints weathered, spalling stone: recessed decay
+// patches with pale chipped edges above, flaked-off facets, and rubble
+// accumulating toward the base.
 func makeRockCrumblingPixels(w, h int) []color.RGBA {
-	pixels := makeRockWallPixels(w, h)
-	shadow := color.RGBA{R: 104, G: 98, B: 88, A: 255}
-	chipLit := color.RGBA{R: 206, G: 198, B: 180, A: 255}
+	pixels := paintRockFace(w, h, rockFaceOpts{crest: rockCrestLit, foot: true})
+	shadow := color.RGBA{R: 100, G: 94, B: 84, A: 255}
+	chipLit := color.RGBA{R: 212, G: 204, B: 184, A: 255}
 	rubble := color.RGBA{R: 168, G: 158, B: 142, A: 255}
+	rubbleDark := color.RGBA{R: 128, G: 118, B: 104, A: 255}
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			n := fbmNoise(float64(x)*0.9+41, float64(y)*0.9+17, 0.03, 4)
@@ -225,11 +411,49 @@ func makeRockCrumblingPixels(w, h int) []color.RGBA {
 				pixels[y*w+x] = core.MixColor(pixels[y*w+x], shadow, math.Min(0.5, (-0.18-n)*2))
 			} else if y >= 2 {
 				if above := fbmNoise(float64(x)*0.9+41, float64(y-2)*0.9+17, 0.03, 4); above < -0.18 {
-					pixels[y*w+x] = core.MixColor(pixels[y*w+x], chipLit, 0.26)
+					pixels[y*w+x] = core.MixColor(pixels[y*w+x], chipLit, 0.30)
 				}
 			}
-			if y > h*3/4 && hashByteXY(x, y)%6 == 0 {
-				pixels[y*w+x] = core.MixColor(pixels[y*w+x], rubble, 0.4)
+			// Rubble talus: sparse high up, dense at the foot.
+			if y > h/2 {
+				density := 24 - (y-h/2)*36/h // ~24 → ~6
+				if density < 5 {
+					density = 5
+				}
+				if hashByteXY(x, y)%density == 0 {
+					tone := rubble
+					if hashByteXY(x*3, y)%2 == 0 {
+						tone = rubbleDark
+					}
+					pixels[y*w+x] = core.MixColor(pixels[y*w+x], tone, 0.45)
+				}
+			}
+		}
+	}
+	// Flaked-off facets: small angular spall scars, dark with a lit top edge.
+	for i := 0; i < w*h/640; i++ {
+		hp := mix32(uint32(i)*hashSalt + 977)
+		fx := int(hp) % w
+		if fx < 0 {
+			fx += w
+		}
+		fy := int(hp>>8) % h
+		if fy < 0 {
+			fy += h
+		}
+		fw := 3 + int(hp>>16)%4
+		fhh := 2 + int(hp>>20)%3
+		for dy := 0; dy < fhh; dy++ {
+			for dx := 0; dx < fw-dy; dx++ { // taper → angular scar
+				px, py := (fx+dx)%w, fy+dy
+				if py >= h {
+					continue
+				}
+				if dy == 0 {
+					pixels[py*w+px] = core.MixColor(pixels[py*w+px], chipLit, 0.35)
+				} else {
+					pixels[py*w+px] = core.MixColor(pixels[py*w+px], shadow, 0.32)
+				}
 			}
 		}
 	}
@@ -352,55 +576,100 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-func makeGrassPixels(w, h int) []color.RGBA {
-	pixels := make([]color.RGBA, w*h)
-	// Pastel meadow — calm mint wash; blooms are very sparse (the flower props carry the floral detail).
-	base := color.RGBA{R: 132, G: 196, B: 102, A: 255}
-	light := color.RGBA{R: 186, G: 224, B: 134, A: 255}
-	dark := color.RGBA{R: 98, G: 162, B: 92, A: 255}
-	dirt := color.RGBA{R: 184, G: 150, B: 100, A: 255}
-	bloomYellow := color.RGBA{R: 244, G: 218, B: 120, A: 255}
-	bloomWhite := color.RGBA{R: 244, G: 240, B: 224, A: 255}
-	bloomPink := color.RGBA{R: 238, G: 174, B: 196, A: 255}
+// meadowParams tunes paintMeadowPixels per grass family: the value ramp, the
+// warm/cool hue-drift extremes, the accent patch (dirt scuff or moss), and the
+// bloom scatter. seedX/seedY decorrelate the two grasses' noise fields.
+type meadowParams struct {
+	base, light, dark     color.RGBA
+	warmDrift, coolDrift  color.RGBA
+	accent                color.RGBA
+	accentCut, accentGain float64
+	dapple                color.RGBA
+	dappleOn              bool
+	blooms                [3]color.RGBA
+	seedX, seedY          float64
+}
 
-	dapple := color.RGBA{R: 214, G: 234, B: 148, A: 255}
+// paintMeadowPixels is the shared grass-floor painter: clump-shaded turf with a
+// broad warm/cool hue drift, canopy dapple, an accent patch layer, dense paired
+// blade strokes (dark root + lit tip), and sparse wildflower blooms.
+func paintMeadowPixels(w, h int, p meadowParams) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			broad := fbmNoise(float64(x), float64(y), 0.020, 3)
-			c := base
-			c = noiseShade(c, light, dark, broad, 0.55, 0.40)
+			fx, fy := float64(x)+p.seedX, float64(y)+p.seedY
+			broad := fbmNoise(fx, fy, 0.020, 3)
+			clump := fbmNoise(fx+77, fy-141, 0.055, 3)
+			drift := fbmNoise(fx-512, fy+331, 0.009, 2)
+			c := p.base
+			c = noiseShade(c, p.light, p.dark, broad*0.7+clump*0.3, 0.55, 0.42)
+			// Clump valleys sink into shade so the turf reads tufted, not flat.
+			c = core.MixColor(c, p.dark, math.Max(0, -clump)*0.22)
+			// Broad hue drift — warm sun-dried sweeps vs cool damp hollows.
+			if drift > 0.08 {
+				c = core.MixColor(c, p.warmDrift, math.Min(0.5, (drift-0.08)*1.3))
+			} else if drift < -0.08 {
+				c = core.MixColor(c, p.coolDrift, math.Min(0.5, (-drift-0.08)*1.3))
+			}
 			// Canopy dapple — broad warm-lemon pools for large-scale light structure.
-			dap := fbmNoise(float64(x)-340, float64(y)+209, 0.008, 2)
-			if dap > 0.28 {
-				c = core.MixColor(c, dapple, (dap-0.28)*0.45)
+			if p.dappleOn {
+				if dap := fbmNoise(fx-340, fy+209, 0.008, 2); dap > 0.28 {
+					c = core.MixColor(c, p.dapple, (dap-0.28)*0.45)
+				}
 			}
-			// Dirt scuff — large patches.
-			m := fbmNoise(float64(x)+512, float64(y)-271, 0.014, 2)
-			if m > 0.50 {
-				c = core.MixColor(c, dirt, (m-0.50)*0.65)
+			// Accent patches — dirt scuff (meadow) or moss (dark grass).
+			if m := fbmNoise(fx+512, fy-271, 0.014, 2); m > p.accentCut {
+				c = core.MixColor(c, p.accent, (m-p.accentCut)*p.accentGain)
 			}
-			// Sparse paired blade strokes — dark rooted dash + lit dash on the sun side, on a 4-px grain.
-			if hashByteXY(x*3, y/4)%140 < 2 {
-				c = core.MixColor(c, dark, 0.55)
-			} else if x > 0 && hashByteXY((x-1)*3, y/4)%140 < 2 {
-				c = core.MixColor(c, light, 0.50)
-			}
-			// Very sparse bloom scatter — just a hint of wildflowers.
+			// Very sparse bloom scatter — a hint of wildflowers.
 			seed := hashByteXY(x*7, y*11)
 			if seed%520 < 3 {
-				switch seed % 3 {
-				case 0:
-					c = core.MixColor(c, bloomYellow, 0.70)
-				case 1:
-					c = core.MixColor(c, bloomWhite, 0.62)
-				case 2:
-					c = core.MixColor(c, bloomPink, 0.66)
-				}
+				c = core.MixColor(c, p.blooms[seed%3], 0.62)
 			}
 			pixels[y*w+x] = c
 		}
 	}
+	// Blade strokes — short leaning dashes, dark at the root rising to a lit tip.
+	// Stamped (not per-pixel gated) so each blade is a connected stroke; wrapped
+	// on both axes so the texture still tiles.
+	root := core.MixColor(p.dark, color.RGBA{R: 40, G: 70, B: 46, A: 255}, 0.35)
+	tip := core.MixColor(p.light, color.RGBA{R: 240, G: 248, B: 200, A: 255}, 0.30)
+	for i := 0; i < w*h/30; i++ {
+		hp := mix32(uint32(i)*hashSalt + uint32(p.seedX) + 51)
+		sx := int(hp % uint32(w))
+		sy := int((hp >> 10) % uint32(h))
+		ln := 2 + int((hp>>20)&3) // 2..5 px tall
+		lean := int((hp>>22)&3) - 1
+		strength := 0.34 + float64((hp>>24)&7)*0.03
+		for k := 0; k <= ln; k++ {
+			xx := ((sx + k*lean/2) % w + w) % w
+			yy := ((sy - k) % h + h) % h
+			t := float64(k) / float64(ln)
+			c := core.MixColor(root, tip, t*t)
+			pixels[yy*w+xx] = core.MixColor(pixels[yy*w+xx], c, strength+t*0.22)
+		}
+	}
 	return pixels
+}
+
+func makeGrassPixels(w, h int) []color.RGBA {
+	// Pastel meadow — calm spring green; blooms very sparse (the flower props
+	// carry the floral detail).
+	return paintMeadowPixels(w, h, meadowParams{
+		base:      color.RGBA{R: 132, G: 196, B: 102, A: 255},
+		light:     color.RGBA{R: 186, G: 224, B: 134, A: 255},
+		dark:      color.RGBA{R: 96, G: 158, B: 90, A: 255},
+		warmDrift: color.RGBA{R: 172, G: 208, B: 96, A: 255},
+		coolDrift: color.RGBA{R: 104, G: 182, B: 118, A: 255},
+		accent:    color.RGBA{R: 184, G: 150, B: 100, A: 255}, // dirt scuff
+		accentCut: 0.50, accentGain: 0.65,
+		dapple: color.RGBA{R: 214, G: 234, B: 148, A: 255}, dappleOn: true,
+		blooms: [3]color.RGBA{
+			{R: 244, G: 218, B: 120, A: 255},
+			{R: 244, G: 240, B: 224, A: 255},
+			{R: 238, G: 174, B: 196, A: 255},
+		},
+	})
 }
 
 func makeStoneFloorPixels(w, h int) []color.RGBA {
@@ -480,54 +749,65 @@ func makeDirtPixels(w, h int) []color.RGBA {
 			if broad > 0.18 && brush > 0.28 {
 				c = core.MixColor(c, light, 0.18)
 			}
-			seed := hashByteXY(x*7, y*11)
-			if seed%180 < 3 {
-				c = core.MixColor(c, pebble, 0.72)
-			} else if seed%420 < 2 {
+			if seed := hashByteXY(x*7, y*11); seed%420 < 2 {
 				// Rare grass sprout.
 				c = core.MixColor(c, sprout, 0.65)
 			}
 			pixels[y*w+x] = c
 		}
 	}
-	return pixels
-}
-
-// makeDarkGrassPixels paints forest-mint grass for shaded patches — like makeGrassPixels but differing in HUE, not value.
-func makeDarkGrassPixels(w, h int) []color.RGBA {
-	pixels := make([]color.RGBA, w*h)
-	base := color.RGBA{R: 96, G: 162, B: 116, A: 255}
-	light := color.RGBA{R: 150, G: 200, B: 138, A: 255}
-	dark := color.RGBA{R: 64, G: 124, B: 92, A: 255}
-	moss := color.RGBA{R: 120, G: 184, B: 152, A: 255}
-	bloomBlue := color.RGBA{R: 158, G: 196, B: 234, A: 255}
-	bloomWhite := color.RGBA{R: 234, G: 238, B: 230, A: 255}
-	bloomMagenta := color.RGBA{R: 216, G: 166, B: 208, A: 255}
-
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			broad := fbmNoise(float64(x)+411, float64(y)+97, 0.020, 3)
-			m := fbmNoise(float64(x)-227, float64(y)+311, 0.014, 2)
-			c := base
-			c = noiseShade(c, light, dark, broad, 0.55, 0.40)
-			if m > 0.46 {
-				c = core.MixColor(c, moss, (m-0.46)*0.60)
-			}
-			seed := hashByteXY(x*5, y*9)
-			if seed%520 < 3 {
-				switch seed % 3 {
-				case 0:
-					c = core.MixColor(c, bloomBlue, 0.62)
-				case 1:
-					c = core.MixColor(c, bloomWhite, 0.58)
-				case 2:
-					c = core.MixColor(c, bloomMagenta, 0.60)
+	// Embedded stones — 2×2 flecks with a lit top row so they sit IN the path
+	// instead of floating on it — plus sparse twig litter.
+	pebbleLit := color.RGBA{R: 222, G: 214, B: 194, A: 255}
+	twig := color.RGBA{R: 110, G: 82, B: 56, A: 255}
+	for i := 0; i < w*h/230; i++ {
+		hp := mix32(uint32(i)*hashSalt + 733)
+		sx := int(hp % uint32(w))
+		sy := int((hp >> 9) % uint32(h))
+		if (hp>>18)&7 < 6 { // stone
+			for dy := 0; dy < 2; dy++ {
+				for dx := 0; dx < 2; dx++ {
+					px, py := (sx+dx)%w, (sy+dy)%h
+					tone := pebble
+					if dy == 0 {
+						tone = pebbleLit
+					}
+					pixels[py*w+px] = core.MixColor(pixels[py*w+px], tone, 0.70)
 				}
 			}
-			pixels[y*w+x] = c
+			// Contact shadow under the stone.
+			py := (sy + 2) % h
+			pixels[py*w+sx] = core.MixColor(pixels[py*w+sx], dark, 0.35)
+		} else { // twig — short leaning dash
+			ln := 3 + int((hp>>21)&3)
+			lean := int((hp>>24)&1)
+			for k := 0; k < ln; k++ {
+				px, py := (sx+k)%w, (sy+k*lean/2)%h
+				pixels[py*w+px] = core.MixColor(pixels[py*w+px], twig, 0.60)
+			}
 		}
 	}
 	return pixels
+}
+
+// makeDarkGrassPixels paints forest-mint grass for shaded patches — like
+// makeGrassPixels but differing in HUE, not value.
+func makeDarkGrassPixels(w, h int) []color.RGBA {
+	return paintMeadowPixels(w, h, meadowParams{
+		base:      color.RGBA{R: 96, G: 162, B: 116, A: 255},
+		light:     color.RGBA{R: 150, G: 200, B: 138, A: 255},
+		dark:      color.RGBA{R: 64, G: 124, B: 92, A: 255},
+		warmDrift: color.RGBA{R: 122, G: 176, B: 104, A: 255},
+		coolDrift: color.RGBA{R: 82, G: 152, B: 136, A: 255},
+		accent:    color.RGBA{R: 120, G: 184, B: 152, A: 255}, // moss pools
+		accentCut: 0.46, accentGain: 0.60,
+		blooms: [3]color.RGBA{
+			{R: 158, G: 196, B: 234, A: 255},
+			{R: 234, G: 238, B: 230, A: 255},
+			{R: 216, G: 166, B: 208, A: 255},
+		},
+		seedX: 411, seedY: 97,
+	})
 }
 
 // makeCobblePixels paints a mortared cobblestone path: hash-nudged rounded stones with mossy gaps and wet-spot highlights.
@@ -675,6 +955,10 @@ type waterParams struct {
 	weedMod, weedHit       int        // weed scatter: hashByteXY(x/2,y*3)%weedMod < weedHit
 	weedMix                float64
 	sunGlints              bool
+	// caustics: bright interlocking light-web on the streambed (shallow-only cue).
+	caustics bool
+	// rings: sparse squashed ripple rings, lit on the far arc.
+	rings bool
 }
 
 // makeWaterBase paints the shared banded-blue water field (FBM gradient + crest
@@ -692,6 +976,13 @@ func makeWaterBase(w, h int, p waterParams) []color.RGBA {
 			if peak > p.peakCut {
 				c = core.MixColor(c, p.shine, (peak-p.peakCut)*p.peakGain)
 			}
+			// Caustic web — soft connected light lines where a noise field crosses
+			// zero, reading as sun refracted onto the streambed.
+			if p.caustics {
+				if a := math.Abs(fbmNoise(float64(x)*1.2+711, float64(y)*1.2-401, 0.07, 3)); a < 0.06 {
+					c = core.MixColor(c, p.shine, (0.06-a)*4.0)
+				}
+			}
 			// Sun glints — short horizontal near-white dashes (x/7 = 7-px streak), crest-gated to the lit side.
 			if p.sunGlints && band > 0.25 && hashByteXY(x/7, y)%170 < 2 {
 				c = core.MixColor(c, p.shine, 0.85)
@@ -707,6 +998,25 @@ func makeWaterBase(w, h int, p waterParams) []color.RGBA {
 			pixels[y*w+x] = c
 		}
 	}
+	// Ripple rings — sparse squashed ellipse outlines (a dropped leaf, a fish
+	// kiss), brighter on the upper arc. Wrapped on both axes so the tile repeats.
+	if p.rings {
+		for i := 0; i < w*h/1900; i++ {
+			hp := mix32(uint32(i)*hashSalt + 401)
+			cx := int(hp % uint32(w))
+			cy := int((hp >> 9) % uint32(h))
+			r := 5 + float64((hp>>18)&7)
+			for a := 0.0; a < 2*math.Pi; a += 0.05 {
+				px := ((cx+int(math.Cos(a)*r))%w + w) % w
+				py := ((cy+int(math.Sin(a)*r*0.45))%h + h) % h
+				strength := 0.24
+				if math.Sin(a) < 0 { // upper arc catches the sun
+					strength = 0.42
+				}
+				pixels[py*w+px] = core.MixColor(pixels[py*w+px], p.shine, strength)
+			}
+		}
+	}
 	return pixels
 }
 
@@ -720,7 +1030,7 @@ func makeWaterPixels(w, h int) []color.RGBA {
 		sand:    color.RGBA{R: 214, G: 190, B: 144, A: 255},
 		peakCut: 0.55, peakGain: 1.4,
 		weedMod: 560, weedHit: 4, weedMix: 0.45,
-		sunGlints: true,
+		sunGlints: true, caustics: true, rings: true,
 	})
 }
 
@@ -733,6 +1043,7 @@ func makeDeepWaterPixels(w, h int) []color.RGBA {
 		weed:    color.RGBA{R: 96, G: 148, B: 120, A: 255},
 		peakCut: 0.62, peakGain: 0.9,
 		weedMod: 620, weedHit: 3, weedMix: 0.40,
+		rings: true, // deep water still ripples; no caustics (no visible bed)
 	})
 }
 
@@ -812,6 +1123,11 @@ func makeBarkPixels(w, h int) []color.RGBA {
 			}
 			c = noiseShade(c, light, deep, n, 0.32, 0.40)
 
+			// Secondary striations — finer fiber lines riding the main ridges.
+			stria := math.Sin(float64(x)*1.15 + warp*1.6 + float64(y)*0.045)
+			c = core.MixColor(c, deep, math.Max(0, -stria)*0.12)
+			c = core.MixColor(c, light, math.Max(0, stria)*0.07)
+
 			// Sparse pits + vertical moss patches (up the shaded side).
 			if hashByteXY(x/3, y/3)%180 < 2 {
 				c = core.MixColor(c, deep, 0.65)
@@ -823,40 +1139,136 @@ func makeBarkPixels(w, h int) []color.RGBA {
 			pixels[y*w+x] = c
 		}
 	}
+	// Lenticels — short horizontal bark cuts, dark slit over a lit swell.
+	for i := 0; i < w*h/620; i++ {
+		hp := mix32(uint32(i)*hashSalt + 311)
+		sx := int(hp % uint32(w))
+		sy := int((hp >> 9) % uint32(h))
+		ln := 3 + int((hp>>19)&3)
+		for k := 0; k < ln; k++ {
+			px := (sx + k) % w
+			pixels[sy*w+px] = core.MixColor(pixels[sy*w+px], deep, 0.62)
+			if py := (sy + 1) % h; true {
+				pixels[py*w+px] = core.MixColor(pixels[py*w+px], rim, 0.30)
+			}
+		}
+	}
+	// Lichen — pale sage rosettes clinging to the ridges.
+	lichen := color.RGBA{R: 172, G: 188, B: 152, A: 255}
+	lichenDim := color.RGBA{R: 142, G: 164, B: 134, A: 255}
+	for i := 0; i < w*h/850; i++ {
+		hp := mix32(uint32(i)*hashSalt + 577)
+		sx := int(hp % uint32(w))
+		sy := int((hp >> 9) % uint32(h))
+		r := 1.5 + float64((hp>>19)&3)*0.5
+		tone := lichen
+		if (hp>>22)&1 == 0 {
+			tone = lichenDim
+		}
+		ri := int(r) + 1
+		for dy := -ri; dy <= ri; dy++ {
+			for dx := -ri; dx <= ri; dx++ {
+				if float64(dx*dx+dy*dy) > r*r {
+					continue
+				}
+				px := ((sx+dx)%w + w) % w
+				py := ((sy+dy)%h + h) % h
+				// Ragged rosette edge via per-pixel hash dropout.
+				if hashByteXY(px*5, py*7)%4 == 0 {
+					continue
+				}
+				pixels[py*w+px] = core.MixColor(pixels[py*w+px], tone, 0.50)
+			}
+		}
+	}
 	return pixels
 }
 
 func makeLeafPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	// Pastel-saturated canopy — spring green with cream dapples and gold accents.
-	base := color.RGBA{R: 142, G: 204, B: 110, A: 255}
-	light := color.RGBA{R: 200, G: 232, B: 144, A: 255}
-	deep := color.RGBA{R: 96, G: 160, B: 96, A: 255}
-	gold := color.RGBA{R: 238, G: 224, B: 138, A: 255}
-	hotspot := color.RGBA{R: 236, G: 244, B: 180, A: 255}
-
+	// Pastel-saturated canopy painted as MASSED FOLIAGE: a deep interior
+	// under-layer, then hundreds of stamped leaves whose tone follows a cluster
+	// field — shade leaves in the hollows, lit and gold leaves on the crests.
+	// Stamps wrap both axes (the texture tiles around canopy spheres).
+	interior := color.RGBA{R: 92, G: 146, B: 88, A: 255}
+	interiorLight := color.RGBA{R: 128, G: 182, B: 104, A: 255}
+	interiorDeep := color.RGBA{R: 66, G: 114, B: 74, A: 255}
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			// Two-octave noise — clumpy patches plus finer brushstroke.
 			broad := fbmNoise(float64(x)*0.7, float64(y)*0.7, 0.06, 3)
 			fine := fbmNoise(float64(x)*1.2, float64(y)*1.2, 0.18, 4)
-			n := broad*0.55 + fine*0.45
-			m := fbmNoise(float64(x)+183, float64(y)-77, 0.05, 3)
-			c := base
-			c = noiseShade(c, light, deep, n, 0.80, 0.55)
-			if m > 0.50 {
-				c = core.MixColor(c, gold, (m-0.50)*0.70)
-			}
-			// Sunlit hotspots where broad + fine crests align.
-			if broad > 0.32 && fine > 0.38 {
-				c = core.MixColor(c, hotspot, 0.25)
-			}
-			// No v-axis gradient: GenMeshSphere's poles run along ±Z (horizontal),
-			// so a v-gradient would paint a sideways dark hemisphere. Top/under
-			// shading comes from the sun shader's NdotL. Keep this isotropic.
-			pixels[y*w+x] = c
+			n := broad*0.6 + fine*0.4
+			pixels[y*w+x] = noiseShade(interior, interiorLight, interiorDeep, n, 0.6, 0.55)
 		}
 	}
+	// Leaf tone ramp, hollow → crest. Gold replaces a slice of the crest leaves.
+	tones := [4]color.RGBA{
+		{R: 78, G: 128, B: 80, A: 255},   // shade leaf
+		{R: 112, G: 172, B: 94, A: 255},  // body leaf
+		{R: 148, G: 206, B: 110, A: 255}, // lit leaf
+		{R: 196, G: 232, B: 134, A: 255}, // crest leaf
+	}
+	gold := color.RGBA{R: 230, G: 220, B: 132, A: 255}
+	tipLit := color.RGBA{R: 226, G: 244, B: 168, A: 255}
+	stalkDark := color.RGBA{R: 58, G: 102, B: 66, A: 255}
+	// Two passes — shade/body leaves first, lit/crest leaves stamped over them —
+	// so bright foliage reads as sitting on top of the mass.
+	count := w * h / 26
+	for pass := 0; pass < 2; pass++ {
+		for i := 0; i < count; i++ {
+			hp := mix32(uint32(i)*hashSalt + 401)
+			sx := int(hp % uint32(w))
+			sy := int((hp >> 10) % uint32(h))
+			cluster := fbmNoise(float64(sx)+331, float64(sy)-77, 0.045, 3)
+			tone := 0
+			switch {
+			case cluster > 0.26:
+				tone = 3
+			case cluster > 0.08:
+				tone = 2
+			case cluster > -0.14:
+				tone = 1
+			}
+			if (pass == 0) != (tone < 2) {
+				continue // wrong pass for this tone bucket
+			}
+			c := tones[tone]
+			if tone == 3 && (hp>>24)&7 == 0 {
+				c = gold // sun-caught gold leaf on a crest
+			}
+			r := 2.1 + float64((hp>>16)&15)*0.11
+			ang := float64((hp>>20)&15) / 16 * math.Pi
+			ca, sa := math.Cos(ang), math.Sin(ang)
+			ri := int(r*1.5) + 1
+			for dy := -ri; dy <= ri; dy++ {
+				for dx := -ri; dx <= ri; dx++ {
+					lx := (float64(dx)*ca + float64(dy)*sa) / r
+					ly := (-float64(dx)*sa + float64(dy)*ca) / (r * 1.5)
+					if lx*lx+ly*ly > 1 {
+						continue
+					}
+					px := ((sx+dx)%w + w) % w
+					py := ((sy+dy)%h + h) % h
+					lc := c
+					// Tip-lit, stalk-shaded — local sparkle; real sun shading
+					// comes from the shader's NdotL.
+					switch {
+					case ly < -0.35:
+						lc = core.MixColor(lc, tipLit, 0.42)
+					case ly > 0.45:
+						lc = core.MixColor(lc, stalkDark, 0.50)
+					}
+					if math.Abs(lx) < 0.14 {
+						lc = core.MixColor(lc, stalkDark, 0.22) // midrib
+					}
+					pixels[py*w+px] = core.MixColor(pixels[py*w+px], lc, 0.92)
+				}
+			}
+		}
+	}
+	// No v-axis gradient: GenMeshSphere's poles run along ±Z (horizontal), so a
+	// v-gradient would paint a sideways dark hemisphere. Top/under shading comes
+	// from the sun shader's NdotL. Everything above is isotropic.
 	return pixels
 }
 
@@ -873,13 +1285,16 @@ func makeMarblePixels(w, h int) []color.RGBA {
 	polish := color.RGBA{R: 238, G: 232, B: 218, A: 255}
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			n := fbmNoise(float64(x), float64(y), 0.04, 4)
-			m := fbmNoise(float64(x)+177, float64(y)-91, 0.10, 3)
+			// Domain warp so the veins meander like real calcite seams instead of
+			// running straight.
+			warp := fbmNoise(float64(x)+913, float64(y)+407, 0.02, 2) * 7
+			n := fbmNoise(float64(x)+warp, float64(y), 0.04, 4)
+			m := fbmNoise(float64(x)+177, float64(y)-91+warp, 0.10, 3)
 			c := base
 			c = noiseShade(c, warm, cool, n, 0.35, 0.30)
 
-			// Veins: thin streaks where two FBM samples cross zero, wrapped in a
-			// warm bruise (mineral staining) before the dark crack core.
+			// Primary veins: thin streaks where two FBM samples cross zero, wrapped
+			// in a warm bruise (mineral staining) before the dark crack core.
 			vt := math.Abs(m + n*0.4)
 			if vt < 0.12 {
 				c = core.MixColor(c, warm, (0.12-vt)*2.2)
@@ -890,10 +1305,46 @@ func makeMarblePixels(w, h int) []color.RGBA {
 			if vt < 0.02 {
 				c = core.MixColor(c, deep, 0.55)
 			}
+			// Secondary hairlines — a finer, fainter crossing family.
+			if vt2 := math.Abs(fbmNoise(float64(x)*1.3-505, float64(y)*1.3+209+warp*0.5, 0.16, 3)); vt2 < 0.025 {
+				c = core.MixColor(c, vein, (0.025-vt2)*11)
+			}
 			// Polish sheen — a faint diagonal light-band, sine-based so it tiles.
 			s := math.Sin((float64(x) + float64(y)*0.7) * 0.045)
 			if s > 0.55 {
 				c = core.MixColor(c, polish, (s-0.55)*0.40)
+			}
+			pixels[y*w+x] = c
+		}
+	}
+	return pixels
+}
+
+// makeFlutedMarblePixels dresses the marble in classical fluting for column
+// shafts: an integer count of vertical grooves (x-periodic, so the texture wraps
+// the cylinder cleanly), each valley shaded concave with a bright arris fillet
+// between grooves.
+func makeFlutedMarblePixels(w, h int) []color.RGBA {
+	pixels := makeMarblePixels(w, h)
+	valley := color.RGBA{R: 132, G: 126, B: 116, A: 255}
+	arris := color.RGBA{R: 246, G: 240, B: 226, A: 255}
+	const flutes = 9.0
+	for y := 0; y < h; y++ {
+		// Slight per-row jitter so the grooves read hand-cut, not ruled.
+		jit := fbmNoise(3.1, float64(y)*0.8, 0.10, 2) * 0.35
+		for x := 0; x < w; x++ {
+			ph := float64(x)/float64(w)*flutes*2*math.Pi + jit
+			s := math.Sin(ph)
+			c := pixels[y*w+x]
+			// Concave valley: shade one flank harder than the other (side key light).
+			if s < 0 {
+				c = core.MixColor(c, valley, -s*0.34)
+				if math.Cos(ph) > 0.3 { // lit inner flank of the groove
+					c = core.MixColor(c, arris, (math.Cos(ph)-0.3)*0.18)
+				}
+			} else {
+				// Narrow bright fillet at the crest between grooves.
+				c = core.MixColor(c, arris, math.Pow(s, 5)*0.5)
 			}
 			pixels[y*w+x] = c
 		}
@@ -1021,46 +1472,139 @@ func makeHudGrainPixels(w, h int) []color.RGBA {
 	return px
 }
 
-func makeSkyPixels(w, h int) []color.RGBA {
+// makeSkyGradientPixels paints the cloudless sky backdrop — baby-blue zenith
+// through a pale mid band to a peach-cream horizon with a settling haze. The
+// clouds live on separate transparent planes (makeCloudLayerPixels) that
+// DrawSkyBackground scrolls at parallax speeds, so this stays static.
+func makeSkyGradientPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	// Pastel sky — baby-blue zenith to peach-cream horizon.
-	top := color.RGBA{R: 132, G: 188, B: 230, A: 255}
+	zenith := color.RGBA{R: 122, G: 182, B: 228, A: 255}
+	mid := color.RGBA{R: 168, G: 208, B: 234, A: 255}
 	horizon := color.RGBA{R: 248, G: 222, B: 198, A: 255}
-	clouds := []struct {
-		X  float64
-		y  float64
-		rx float64
-		ry float64
-	}{
-		{90, 126, 145, 34},
-		{314, 170, 178, 42},
-		{560, 112, 160, 38},
-		{812, 192, 210, 48},
-		{980, 132, 130, 32},
-	}
-	// Cloud tint off pure white so clouds don't glare.
-	cloudCol := color.RGBA{R: 232, G: 234, B: 232, A: 255}
-
+	haze := color.RGBA{R: 246, G: 236, B: 220, A: 255}
 	for y := 0; y < h; y++ {
 		t := float64(y) / float64(h-1)
-		t = t * t * (3 - 2*t)
+		st := t * t * (3 - 2*t)
+		var c color.RGBA
+		if st < 0.5 {
+			c = core.MixColor(zenith, mid, st*2)
+		} else {
+			c = core.MixColor(mid, horizon, (st-0.5)*2)
+		}
+		// Distant haze settling over the horizon.
+		if t > 0.55 {
+			c = core.MixColor(c, haze, (t-0.55)*0.5)
+		}
 		for x := 0; x < w; x++ {
-			c := core.MixColor(top, horizon, t)
-			cover := 0.0
-			for _, cloud := range clouds {
-				dx := math.Abs(float64(x) - cloud.X)
-				if wrapped := float64(w) - dx; wrapped < dx {
-					dx = wrapped
-				}
-				dy := float64(y) - cloud.y
-				d := (dx*dx)/(cloud.rx*cloud.rx) + (dy*dy)/(cloud.ry*cloud.ry)
-				cover += math.Exp(-d*2.6) * 0.34
-			}
-			if cover > 0 {
-				cover = math.Min(cover, 0.5)
-				c = core.MixColor(c, cloudCol, cover)
-			}
 			pixels[y*w+x] = c
+		}
+	}
+	return pixels
+}
+
+// cloudLayerSpec tunes one scrolling cloud plane for makeCloudLayerPixels.
+// Painterly cumulus: each cloud is a raft of gaussian lobes (bulging upward,
+// flattened beneath) shaded by its own cover gradient — sunlit crowns,
+// blue-lavender undersides.
+type cloudLayerSpec struct {
+	seed           uint32  // decorrelates the two planes' layouts
+	clouds, wisps  int     // cumulus count + high-streak count
+	cyMin, cyVar   float64 // cloud-center altitude band (px from the top)
+	sizeMin        float64 // cumulus size floor; hash adds up to ~0.6 on top
+	alphaCap       float64 // opacity ceiling (drop for distant planes)
+	hazeMix        float64 // aerial perspective: body pushed toward cream haze
+	shadeMax       float64 // underside shading ceiling
+}
+
+// makeCloudLayerPixels renders one transparent cloud plane. Lobes wrap in x so
+// the plane tiles seamlessly while DrawSkyBackground scrolls it.
+func makeCloudLayerPixels(w, h int, spec cloudLayerSpec) []color.RGBA {
+	cloudBody := color.RGBA{R: 240, G: 242, B: 242, A: 255}
+	cloudLit := color.RGBA{R: 255, G: 250, B: 236, A: 255}
+	cloudShade := color.RGBA{R: 186, G: 196, B: 216, A: 255}
+	hazeCream := color.RGBA{R: 246, G: 236, B: 220, A: 255}
+	cloudBody = core.MixColor(cloudBody, hazeCream, spec.hazeMix)
+	cloudLit = core.MixColor(cloudLit, hazeCream, spec.hazeMix*0.6)
+	cloudShade = core.MixColor(cloudShade, hazeCream, spec.hazeMix)
+
+	// Cover field, accumulated per lobe over its bounding box (x-wrapped so
+	// clouds crossing the seam stay round).
+	cover := make([]float64, w*h)
+	addLobe := func(cx, cy, rx, ry, amp float64) {
+		x0 := int(cx - rx*2.2)
+		x1 := int(cx + rx*2.2)
+		y0 := int(cy - ry*2.2)
+		y1 := int(cy + ry*2.6)
+		if y0 < 0 {
+			y0 = 0
+		}
+		if y1 >= h {
+			y1 = h - 1
+		}
+		for y := y0; y <= y1; y++ {
+			dy := (float64(y) - cy) / ry
+			if dy > 0 {
+				dy *= 1.55 // flatten the underside — cumulus sit on their bases
+			}
+			for x := x0; x <= x1; x++ {
+				xx := (x%w + w) % w
+				dx := (float64(x) - cx) / rx
+				cover[y*w+xx] += math.Exp(-(dx*dx+dy*dy)*2.1) * amp
+			}
+		}
+	}
+	// Cumulus bank — hash-placed lobe clusters over a wide flat base raft.
+	for i := 0; i < spec.clouds; i++ {
+		hp := mix32(uint32(i)*hashSalt + spec.seed)
+		cx := float64(hp % uint32(w))
+		cy := spec.cyMin + float64((hp>>10)%1024)/1024*spec.cyVar
+		size := spec.sizeMin + float64((hp>>18)&7)*0.085
+		baseRx := 95 * size
+		baseRy := 26 * size
+		addLobe(cx, cy+baseRy*0.25, baseRx, baseRy*0.8, 0.55)
+		nl := 4 + int((hp>>21)&3)
+		for l := 0; l < nl; l++ {
+			lh := mix32(hp ^ uint32(l+1)*hashSalt)
+			ox := (float64(lh%1000)/1000 - 0.5) * baseRx * 1.35
+			oy := -(float64((lh>>10)%1000) / 1000) * baseRy * 1.5 // lobes bulge upward
+			r := baseRx * (0.28 + float64((lh>>20)&7)*0.035)
+			addLobe(cx+ox, cy+oy, r, r*0.62, 0.60)
+		}
+	}
+	// High wisps — long faint streaks above the bank.
+	for i := 0; i < spec.wisps; i++ {
+		hp := mix32(uint32(i)*hashSalt + spec.seed + 787)
+		addLobe(float64(hp%uint32(w)), 38+float64((hp>>10)%52),
+			150+float64((hp>>18)&63), 7+float64((hp>>24)&3), 0.30)
+	}
+
+	coverAt := func(x, y int) float64 {
+		if y < 0 {
+			y = 0
+		}
+		if y >= h {
+			y = h - 1
+		}
+		return cover[y*w+x]
+	}
+	pixels := make([]color.RGBA, w*h) // zero value = transparent
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			cv := cover[y*w+x]
+			if cv <= 0.04 {
+				continue
+			}
+			// Vertical cover gradient picks the shading: more cloud above →
+			// underside shade; more below → sunlit crown.
+			edge := coverAt(x, y-7) - coverAt(x, y+7)
+			body := cloudBody
+			if edge < 0 {
+				body = core.MixColor(body, cloudLit, math.Min(1, -edge*2.4))
+			} else {
+				body = core.MixColor(body, cloudShade, math.Min(spec.shadeMax, edge*2.2))
+			}
+			body.A = uint8(math.Min(spec.alphaCap, (cv-0.04)*1.9) * 255)
+			pixels[y*w+x] = body
 		}
 	}
 	return pixels
