@@ -1828,7 +1828,9 @@ func floodFill(s *State, x, z int, b byte, erase bool) {
 			}
 			rows[pz][px] = b
 			filled = append(filled, [2]int{px, pz})
-			stack = append(stack, [2]int{px + 1, pz}, [2]int{px - 1, pz}, [2]int{px, pz + 1}, [2]int{px, pz - 1})
+			for _, d := range cardinalDeltas {
+				stack = append(stack, [2]int{px + d[0], pz + d[1]})
+			}
 		}
 	})
 	switch {
@@ -1872,7 +1874,9 @@ func floodFillVoxelElevation(s *State, x, z int, b byte, erase bool) {
 		}
 		visited[p] = true
 		region = append(region, p)
-		stack = append(stack, [2]int{p[0] + 1, p[1]}, [2]int{p[0] - 1, p[1]}, [2]int{p[0], p[1] + 1}, [2]int{p[0], p[1] - 1})
+		for _, d := range cardinalDeltas {
+			stack = append(stack, [2]int{p[0] + d[0], p[1] + d[1]})
+		}
 	}
 	pushUndo(s)
 	for _, c := range region {
@@ -2228,11 +2232,15 @@ func blockedTileSet[T core.TileXZ](w, h int, spawns []T, exempt func(x, z int) b
 	return mark
 }
 
+// cardinalDeltas are the four orthogonal (x,z) neighbour offsets, shared by the
+// reachability check and the flood-fill BFS so the neighbour set lives in one place.
+var cardinalDeltas = [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
+
 // reachableViaNeighbor reports whether any of (x,z)'s four orthogonal neighbours
 // is visited — i.e. the player can stand beside the tile to interact (chests and
 // doors are blocked on their own tile, so adjacency is what "reachable" means).
 func reachableViaNeighbor(visited []bool, w, h, x, z int) bool {
-	for _, d := range [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
+	for _, d := range cardinalDeltas {
 		nx, nz := x+d[0], z+d[1]
 		if nx < 0 || nx >= w || nz < 0 || nz >= h {
 			continue

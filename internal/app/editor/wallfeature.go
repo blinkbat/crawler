@@ -1,8 +1,6 @@
 package editor
 
 import (
-	"strconv"
-
 	"crawler/internal/app/core"
 	"crawler/internal/app/render"
 
@@ -15,7 +13,7 @@ import (
 // switch to do the work (open a wall, spawn a foe, …). See core/wallfeature.go.
 
 const (
-	wallFeatureModalW = float32(460)
+	wallFeatureModalW = modalCardNarrowW
 	wallFeatureModalH = float32(340)
 )
 
@@ -32,12 +30,7 @@ func uniqueWallFeatureID(s *State) string {
 	for _, f := range s.area.WallFeatures {
 		used[f.ID] = true
 	}
-	for i := 1; ; i++ {
-		id := "wf" + strconv.Itoa(i)
-		if !used[id] {
-			return id
-		}
-	}
+	return uniqueID("wf", func(id string) bool { return used[id] })
 }
 
 // addWallFeatureAt places a switch fixture on tile (x,z), oriented toward the open

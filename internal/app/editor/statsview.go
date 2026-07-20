@@ -13,7 +13,7 @@ import (
 // rough encounter budget for balancing.
 
 const (
-	statsModalW = float32(460)
+	statsModalW = modalCardNarrowW
 	statsRowH   = float32(20)
 )
 

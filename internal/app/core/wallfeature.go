@@ -102,7 +102,7 @@ func FacedWallFeature(g *GameState, useOnly bool) int {
 	}
 	dx, dz := FacingVector(g.Player.Facing)
 	fx, fz := g.Player.TileX+dx, g.Player.TileZ+dz
-	faceDir := NormalizeFacing(g.Player.Facing + 2) // the front tile's face toward the party
+	faceDir := OppositeFacing(g.Player.Facing) // the front tile's face toward the party
 	idx := WallFeatureIndexAt(g.Area.WallFeatures, fx, fz, faceDir)
 	if idx < 0 {
 		return -1

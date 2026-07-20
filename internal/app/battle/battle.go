@@ -1294,9 +1294,7 @@ func winBattle(g *core.GameState, message string) {
 	spoils.Active = true
 	g.Battle.Spoils = spoils
 	g.Battle.VictoryElapsed = 0
-	g.Battle.VictoryLevelSfxCursor = 0
-	g.Battle.VictoryLootSfxCursor = 0
-	g.Battle.VictoryTickSfxCursor = 0
+	resetVictorySfxCursors(&g.Battle)
 	audio.Play(audio.SoundVictory)
 }
 
@@ -1319,6 +1317,23 @@ func aggregateDrops(drops []core.ItemKind) []core.ItemStack {
 	return stacks
 }
 
+// drainSfxCursor rings snd once per not-yet-played step, advancing *cursor to
+// target. Shared by the spoils-screen level-up and loot cascade cues.
+func drainSfxCursor(cursor *int, target int, snd audio.Sound) {
+	for *cursor < target {
+		audio.Play(snd)
+		*cursor++
+	}
+}
+
+// resetVictorySfxCursors rewinds the three spoils-screen cue cursors so each
+// fanfare rings from the start. Used by winBattle (arm) and resetBattleTransients.
+func resetVictorySfxCursors(b *core.Battle) {
+	b.VictoryLevelSfxCursor = 0
+	b.VictoryLootSfxCursor = 0
+	b.VictoryTickSfxCursor = 0
+}
+
 // updateVictorySpoils drives the BattleWon phase. No captured spoils (debug
 // skip-win) keeps the timed auto-leave; otherwise it advances the spoils clock,
 // rings cues per threshold, and Confirm fast-forwards then tears down.
@@ -1338,16 +1353,10 @@ func updateVictorySpoils(g *core.GameState, dt float32) {
 	fill := core.VictoryFillProgress(g.Battle.VictoryElapsed)
 	// Ring the level-up cue as each bar crosses a threshold (cursor tracks rung count).
 	shownLevels := levelsShownAt(g, fill)
-	for g.Battle.VictoryLevelSfxCursor < shownLevels {
-		audio.Play(audio.SoundLevelUp)
-		g.Battle.VictoryLevelSfxCursor++
-	}
+	drainSfxCursor(&g.Battle.VictoryLevelSfxCursor, shownLevels, audio.SoundLevelUp)
 	// Pop the loot cue as each row cascades in (cursor mirrors the renderer's reveal).
 	shownLoot := core.VictoryLootRevealed(g.Battle.VictoryElapsed, len(g.Battle.Spoils.Drops))
-	for g.Battle.VictoryLootSfxCursor < shownLoot {
-		audio.Play(audio.SoundItemGet)
-		g.Battle.VictoryLootSfxCursor++
-	}
+	drainSfxCursor(&g.Battle.VictoryLootSfxCursor, shownLoot, audio.SoundItemGet)
 	// Count-up blip per VictoryXPPerTick of shown XP, tied to the eased fill;
 	// capped to one Play per frame so a huge haul can't machine-gun.
 	if tickIdx := xpTicksAt(g, fill); tickIdx > g.Battle.VictoryTickSfxCursor {
@@ -1521,7 +1530,7 @@ func resetBattleTransients(b *core.Battle) {
 	b.ShakeTimer = 0
 	b.RumbleTimer = 0
 	b.SequencePulseTimer = 0
-	b.SequencePulseIndex = -1
+	b.SequencePulseIndex = core.NoIndex
 	b.LastQualityTimer = 0
 	b.EnemyAttacker = core.NoIndex
 	b.EnemyAttackCursor = core.NoIndex
@@ -1536,9 +1545,7 @@ func resetBattleTransients(b *core.Battle) {
 	b.Readiness = nil
 	b.Spoils = core.VictorySpoils{}
 	b.VictoryElapsed = 0
-	b.VictoryLevelSfxCursor = 0
-	b.VictoryLootSfxCursor = 0
-	b.VictoryTickSfxCursor = 0
+	resetVictorySfxCursors(b)
 }
 
 // setBattleStatus writes to the transient prompt slot. The renderer separates
@@ -1604,7 +1611,7 @@ func updateBattleEffects(g *core.GameState, dt float32, members []core.Enemy) {
 	core.UpdateEnemySlides(members, enemySlideSlots, dt)
 	g.Battle.SequencePulseTimer = core.ApproachZero(g.Battle.SequencePulseTimer, dt)
 	if g.Battle.SequencePulseTimer <= 0 {
-		g.Battle.SequencePulseIndex = -1
+		g.Battle.SequencePulseIndex = core.NoIndex
 	}
 	// Decay the screen shake. Paused during hit-stop (Update early-returns), so a
 	// high-grade hit reads as freeze → settle.

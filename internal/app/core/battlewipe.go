@@ -37,11 +37,7 @@ var battleWipeNames = [BattleWipeKindCount]string{
 }
 
 func init() {
-	for _, n := range battleWipeNames {
-		if n == "" {
-			panic("core: battleWipeNames is missing a label for a BattleWipeKind — add a row to the keyed array")
-		}
-	}
+	assertNoEmptyLabels("battleWipeNames", battleWipeNames[:])
 }
 
 // BattleWipeName is the menu label for a wipe kind. Fails loud on an out-of-range

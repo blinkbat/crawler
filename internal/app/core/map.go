@@ -591,12 +591,12 @@ func (a *AreaDefinition) StandGroundY(x, z int) float32 {
 	return a.StandGroundYAt(x, a.ElevationLevelAt(x, z), z)
 }
 
-// rampLevel returns the LOW (ground) standing level of the ramp at column (x,z).
-// A ramp is a 2D floor property, so the slope rule applies only at this level —
-// a bridge deck stacked ABOVE a ramp tile is flat, not sloped. Heightfield: the
-// stored elevation (ramps store their low level). Voxel: the lowest standable
-// surface, else the column top for a wholly-void column.
-func (a *AreaDefinition) rampLevel(x, z int) int {
+// autoStandLevel resolves the auto (unspecified) standing level of column (x,z):
+// the lowest standable surface, else the column top so the value is never -1.
+// Heightfield reads the column top directly — LowestStandableLevel scans the whole
+// map and returns the same value there (this runs per-tile per-frame in drawWorld),
+// so the fast-path just skips the walk; only gapped voxel columns fall through.
+func (a *AreaDefinition) autoStandLevel(x, z int) int {
 	if len(a.Solids) == 0 {
 		return a.ElevationLevelAt(x, z)
 	}
@@ -604,6 +604,15 @@ func (a *AreaDefinition) rampLevel(x, z int) int {
 		return lo
 	}
 	return a.ElevationLevelAt(x, z)
+}
+
+// rampLevel returns the LOW (ground) standing level of the ramp at column (x,z).
+// A ramp is a 2D floor property, so the slope rule applies only at this level —
+// a bridge deck stacked ABOVE a ramp tile is flat, not sloped. Heightfield: the
+// stored elevation (ramps store their low level). Voxel: the lowest standable
+// surface, else the column top for a wholly-void column.
+func (a *AreaDefinition) rampLevel(x, z int) int {
+	return a.autoStandLevel(x, z)
 }
 
 // StandGroundYAt is StandGroundY for an EXPLICIT standing level, so a unit on a
@@ -780,15 +789,7 @@ func (a *AreaDefinition) levelGridAt(layer []string, x, z int) int {
 	if c, ok := a.layerByteAt(layer, x, z); ok && c != PropLevelAuto {
 		return ElevationLevelFromChar(c)
 	}
-	// Heightfield auto = column top, read directly: LowestStandableLevel scans the
-	// whole map, and this runs per-tile per-frame in drawWorld. Only gapped columns walk.
-	if len(a.Solids) == 0 {
-		return a.ElevationLevelAt(x, z)
-	}
-	if lo := a.LowestStandableLevel(x, z); lo >= 0 {
-		return lo
-	}
-	return a.ElevationLevelAt(x, z)
+	return a.autoStandLevel(x, z)
 }
 
 // PropLevelAt / DecorLevelAt are the level the prop/decor on tile (x,z) sits on.

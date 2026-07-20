@@ -97,14 +97,10 @@ func (a *AreaDefinition) PropYawStepAt(x, z int) int {
 // blank/auto char (or the grid is absent), so an all-auto grid isn't serialized —
 // keeping maps without authored facings byte-identical to the pre-feature format.
 func trimAllAutoGrid(rows []string, blank byte) []string {
-	for _, r := range rows {
-		for i := 0; i < len(r); i++ {
-			if r[i] != blank {
-				return rows
-			}
-		}
+	if planeAllChar(rows, blank) {
+		return nil
 	}
-	return nil
+	return rows
 }
 
 // SetPropYawStep writes the yaw override at (x,z): step<0 (or out of range) clears it

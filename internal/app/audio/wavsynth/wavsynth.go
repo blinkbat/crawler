@@ -170,20 +170,29 @@ func wrap2Pi(phase float64) float64 {
 	return p
 }
 
-// samplesFor is duration×SampleRate, floored to at least 1 (a non-positive
-// duration must still produce one sample, not zero).
-func samplesFor(duration float64) int {
-	// NaN/±Inf make int(duration*SampleRate) unspecified (could land large-positive
-	// and skip the <=0 floor); treat them as the degenerate single sample.
+// sanitizeDuration is the shared guard head for every synth path: NaN/±Inf are
+// non-finite (finite=false, clamped=0) because int(d*SampleRate) is unspecified for
+// them and could dodge the samples<=0 floor to drive a giant alloc; a finite duration
+// over maxDuration is capped so no path allocs unbounded. The <=0 / non-finite TAIL
+// diverges per caller (1 sample / shortSynthFloor / nil), so callers keep their own.
+func sanitizeDuration(duration float64) (clamped float64, finite bool) {
 	if math.IsNaN(duration) || math.IsInf(duration, 0) {
-		return 1
+		return 0, false
 	}
-	// Cap length here so EVERY synth path (Click, Chime, ShapeParams) is bounded —
-	// a corrupt/huge duration can't drive a giant alloc (SynthChime doubles this).
 	if duration > maxDuration {
 		duration = maxDuration
 	}
-	samples := int(duration * SampleRate)
+	return duration, true
+}
+
+// samplesFor is duration×SampleRate, floored to at least 1 (a non-positive
+// duration must still produce one sample, not zero).
+func samplesFor(duration float64) int {
+	d, finite := sanitizeDuration(duration)
+	if !finite {
+		return 1 // degenerate: one sample, never zero
+	}
+	samples := int(d * SampleRate)
 	if samples <= 0 {
 		samples = 1
 	}
@@ -231,17 +240,17 @@ func adsrEnv(secs, duration, attack, decay, sustain, release, releaseStart float
 //
 //	oscillator → noise mix → drive → low-pass → bitcrush → ×(ADSR·tremolo·volume)
 func SynthShapeParams(p ShapeParams) []int16 {
-	// NaN/±Inf slip past `> maxDuration` (all NaN comparisons are false) and make
-	// int(p.Duration*SampleRate) unspecified — it can land large-positive and dodge
-	// the samples<=0 guard, blowing up the make below. Pin the length before any math.
-	switch {
-	case math.IsNaN(p.Duration) || math.IsInf(p.Duration, 0) || p.Duration > maxDuration:
+	// Pin the length before any math: sanitizeDuration bounds NaN/Inf/over-cap; here
+	// non-finite folds to maxDuration (a full tone, not silence) while a non-positive
+	// duration floors to a short blip (like SynthChord's "no time → minimal") so a
+	// corrupt "0" sidecar can't emit a 30s buffer, keeping the envelope math finite.
+	switch d, finite := sanitizeDuration(p.Duration); {
+	case !finite:
 		p.Duration = maxDuration
-	case p.Duration <= 0:
-		// A non-positive duration is a (near-)silent cue, not a full-length tone; floor
-		// it to a short blip (like SynthChord's "no time → minimal") so a corrupt "0"
-		// sidecar can't emit a 30s buffer, while keeping the envelope math finite.
+	case d <= 0:
 		p.Duration = shortSynthFloor
+	default:
+		p.Duration = d
 	}
 	samples := samplesFor(p.Duration)
 	noiseMix := clamp01(p.NoiseMix)
@@ -353,15 +362,13 @@ func SynthSweep(duration, startHz, endHz, volume, attack, release float64) []int
 // SynthChord sums sines at the given frequencies into one note under a bell
 // envelope.
 func SynthChord(duration float64, freqs []float64, volume float64) []int16 {
-	// NaN/±Inf slip past `<= 0` (all NaN comparisons are false; int(±Inf) is
-	// unspecified) — either can land large-positive and dodge the samples<=0 guard,
-	// blowing up the make below. Pin them first (mirrors SynthShapeParams).
-	if math.IsNaN(duration) || math.IsInf(duration, 0) {
+	// sanitizeDuration bounds NaN/Inf/over-cap; a non-finite duration here degenerates
+	// to nil (mirrors SynthShapeParams' shared head, but with SynthChord's own tail).
+	d, finite := sanitizeDuration(duration)
+	if !finite {
 		return nil
 	}
-	if duration > maxDuration {
-		duration = maxDuration // bound the alloc, like samplesFor and every other synth path
-	}
+	duration = d
 	samples := int(duration * SampleRate)
 	if samples <= 0 {
 		// No time → no samples. (A non-positive duration must NOT fall through to

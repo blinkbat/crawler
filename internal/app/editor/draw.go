@@ -3392,12 +3392,15 @@ const (
 	saveAsModalH = float32(160)
 
 	// modalCardW is the standard editor card width; the door-edit and entity/dialog
-	// list modals share it. The Open card is intentionally narrower (openModalW).
-	modalCardW     = float32(480)
-	doorEditModalW = modalCardW
-	doorEditModalH = float32(424)
-	openModalW     = float32(460)
-	openModalH     = float32(460)
+	// list modals share it. The Open card is intentionally narrower (modalCardNarrowW).
+	modalCardW = float32(480)
+	// modalCardNarrowW is the narrower card width shared by the Open, confirm-dirty,
+	// locations, stats, and wall-feature modals — one edit retunes them together.
+	modalCardNarrowW = float32(460)
+	doorEditModalW   = modalCardW
+	doorEditModalH   = float32(424)
+	openModalW       = modalCardNarrowW
+	openModalH       = float32(460)
 	// Open-map list: rows start openModalListTop below the card top, with
 	// openModalListBottomPad reserved for the button row. Pitch is entityListRowH.
 	openModalListTop       = float32(50)
@@ -3406,7 +3409,7 @@ const (
 	entityEditModalH       = float32(440)
 	escMenuModalW          = float32(380)
 	escMenuModalH          = float32(178)
-	confirmDirtyModalW     = float32(460)
+	confirmDirtyModalW     = modalCardNarrowW
 	confirmDirtyModalH     = float32(212) // clears the hint above the button stack
 	validateModalW         = float32(560)
 )
@@ -3670,15 +3673,7 @@ func entityListRows(s *State) []entityListRow {
 	}
 	// Live type-to-filter (case-insensitive label substring). Row idx fields stay the
 	// original spawn indices, so activateEntityRow still targets the right spawn.
-	if f := strings.ToLower(strings.TrimSpace(s.entityListFilter)); f != "" {
-		kept := rows[:0]
-		for _, r := range rows {
-			if strings.Contains(strings.ToLower(r.label), f) {
-				kept = append(kept, r)
-			}
-		}
-		rows = kept
-	}
+	rows = filterByLabel(rows, func(r entityListRow) string { return r.label }, s.entityListFilter)
 	return rows
 }
 

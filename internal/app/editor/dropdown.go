@@ -84,23 +84,32 @@ func filterableDropdown(o dropdownOwner) bool {
 	return false
 }
 
+// filterByLabel returns items whose label contains query (case-insensitive substring);
+// an empty/whitespace query returns items unchanged. One home for the type-to-filter
+// match rule shared by the dropdown, Open dialog, and Objects index.
+func filterByLabel[T any](items []T, label func(T) string, query string) []T {
+	f := strings.ToLower(strings.TrimSpace(query))
+	if f == "" {
+		return items
+	}
+	out := make([]T, 0, len(items))
+	for _, it := range items {
+		if strings.Contains(strings.ToLower(label(it)), f) {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
 // visibleDropdownEntries is dropdownEntries filtered by the live type-to-filter
 // query (case-insensitive label substring) for filterable owners. The single seam
 // both update and draw read, so cursor indices can't drift from what's shown.
 func visibleDropdownEntries(s *State) []dropdownEntry {
 	entries := dropdownEntries(s)
-	f := strings.TrimSpace(s.dropdown.filter)
-	if f == "" || !filterableDropdown(s.dropdown.owner) {
+	if !filterableDropdown(s.dropdown.owner) {
 		return entries
 	}
-	lf := strings.ToLower(f)
-	out := make([]dropdownEntry, 0, len(entries))
-	for _, e := range entries {
-		if strings.Contains(strings.ToLower(e.label), lf) {
-			out = append(out, e)
-		}
-	}
-	return out
+	return filterByLabel(entries, func(e dropdownEntry) string { return e.label }, s.dropdown.filter)
 }
 
 // pumpDropdownFilter appends typed characters / applies backspace to the filterable
@@ -110,20 +119,7 @@ func pumpDropdownFilter(s *State) {
 	if !filterableDropdown(s.dropdown.owner) {
 		return
 	}
-	for {
-		r := rl.GetCharPressed()
-		if r == 0 {
-			break
-		}
-		if r >= 32 && r < 127 {
-			s.dropdown.filter += string(rune(r))
-			s.dropdown.cursor = 0
-		}
-	}
-	if rl.IsKeyPressed(rl.KeyBackspace) && len(s.dropdown.filter) > 0 {
-		s.dropdown.filter = s.dropdown.filter[:len(s.dropdown.filter)-1]
-		s.dropdown.cursor = 0
-	}
+	pumpPrintableASCII(&s.dropdown.filter, defaultTextFieldMaxLen, acceptPrintable, func() { s.dropdown.cursor = 0 })
 }
 
 const (

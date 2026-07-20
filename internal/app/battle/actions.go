@@ -980,7 +980,7 @@ func applyAttack(g *core.GameState, quality int) bool {
 	// selection already bars picking one in melee; this is the defense-in-depth hard
 	// gate (no damage, turn spent), and the swing still plays via AttackBump.
 	if core.EnemyFlying(&target) && !core.MemberMeleeReachesFlyer(*attacker) {
-		setBattleMessage(g, fmt.Sprintf("%s%s can't reach the airborne %s.", qualityTag(quality), attacker.Name, core.EnemySingularNoun(&target)))
+		setBattleMessage(g, qualityLine(quality, attacker.Name, " can't reach the airborne %s.", core.EnemySingularNoun(&target)))
 		finishActorTurn(g)
 		return true
 	}
@@ -988,14 +988,14 @@ func applyAttack(g *core.GameState, quality int) bool {
 	// 1.0 so high-DEX/high-grade essentially never whiff. The swing + timing popup
 	// still play on a miss; only damage is withheld.
 	if !core.MemberAttackHits(g.Rand(), *attacker, quality) {
-		setBattleMessage(g, fmt.Sprintf("%s%s swings wide.", qualityTag(quality), attacker.Name))
+		setBattleMessage(g, qualityLine(quality, attacker.Name, " swings wide."))
 		finishActorTurn(g)
 		return true
 	}
 	// Defender dodge: a connecting swing can still be sidestepped (symmetric with
 	// the party-side dodge). Skills are NOT dodgeable.
 	if core.RollDodge(g.Rand(), core.EffectiveEnemyStats(&target)) {
-		setBattleMessage(g, fmt.Sprintf("%s%s lunges but %s slips aside.", qualityTag(quality), attacker.Name, core.TheFoe(&target)))
+		setBattleMessage(g, qualityLine(quality, attacker.Name, " lunges but %s slips aside.", core.TheFoe(&target)))
 		finishActorTurn(g)
 		return true
 	}

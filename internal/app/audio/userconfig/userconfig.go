@@ -6,6 +6,7 @@ package userconfig
 import (
 	"crawler/internal/app/audio/wavsynth"
 	"crawler/internal/app/core"
+	"crawler/internal/app/core/mapfile"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -104,17 +105,10 @@ func forEachKeyValueLine(data []byte, fn func(key, val string)) {
 
 // atomicWriteFile writes data via a same-dir temp file + rename, so a crash mid-write
 // can't leave a truncated volumes/assignments/.wav file (which would silently drop the
-// tail entries or corrupt the audio). Same-dir temp keeps the rename on one filesystem.
+// tail entries or corrupt the audio). Delegates to mapfile's shared temp-then-rename
+// home (perm-aware variant) so the pattern lives in one place.
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, perm); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
+	return mapfile.AtomicWriteFile(path, data, perm)
 }
 
 // SaveVolumes writes music + SFX volume + mute to maps/sounds/volumes.txt (creating

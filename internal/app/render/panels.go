@@ -506,6 +506,10 @@ var satietyStageColors = [core.SatietyStageCount]rl.Color{
 	core.SatietyStarving: statusStarving,
 }
 
+// statusPillPadX is the total horizontal padding (both sides) baked into a formation-card
+// status/satiety pill's width around its FontSmall label. Named so the two pills can't drift.
+const statusPillPadX = float32(20)
+
 // drawFormationCard paints one member's landscape card in its 2×2 quadrant: class
 // glyph + name + Lv·row + HP/MP on the left; stat grid + armor/XP + status on the
 // right. Cursor = gilt focus ring; swap source (awaiting a partner) = green outline.
@@ -535,7 +539,7 @@ func drawFormationCard(font rl.Font, g *core.GameState, i int, quad rl.Rectangle
 	// (Poisoned, Stunned, …) still outranks Starving in PartyStatus and shows normally.
 	if kind, turns := core.PartyStatus(&g.Party[i]); kind != core.PartyStatusNone && kind != core.PartyStatusStarving {
 		label := partyStatusTurnLabel(kind, turns)
-		chipW := measurePanelStatValue(font, label, FontSmall).X + 20
+		chipW := measurePanelStatValue(font, label, FontSmall).X + statusPillPadX
 		col, _ := partyStatusVisual(kind)
 		drawStatusPill(font, leftX, y, chipW, 26, fadeColor(col, 0.28), fadeColor(col, 0.85), label, col, false)
 	}
@@ -544,7 +548,7 @@ func drawFormationCard(font rl.Font, g *core.GameState, i int, quad rl.Rectangle
 	stage := core.MemberStage(m)
 	satLabel := core.SatietyStageLabel(stage)
 	satCol := satietyStageColors[stage]
-	satW := measurePanelStatValue(font, satLabel, FontSmall).X + 20
+	satW := measurePanelStatValue(font, satLabel, FontSmall).X + statusPillPadX
 	// Sit below the status pill, but clamp inside the card so a short window can't
 	// push the chip past the quadrant's bottom edge.
 	const satChipH = float32(24)
@@ -590,7 +594,7 @@ func drawFormationCard(font rl.Font, g *core.GameState, i int, quad rl.Rectangle
 		// formationCTAInset, not footerBaselineY: this CTA sits inside a dense
 		// formation quadrant and rides tighter to the bottom than a modal footer hint.
 		hintY := quad.Y + quad.Height - formationCTAInset
-		glowCol := fadeColor(inkAccent, 0.55+0.45*pulseAttention())
+		glowCol := attentionGlow(inkAccent)
 		if m.PendingLevelUps > 0 {
 			if highlight {
 				// Cursored: full CTA with the confirm glyph.
@@ -886,7 +890,7 @@ func drawEquipPicker(g *core.GameState, assets Resources) {
 	_, sh := screenSizeF()
 	cardW := equipPickerCardW
 	cardH := headerH + float32(visibleRows)*rowH + equipPickerFooterH
-	if maxH := sh * 0.78; cardH > maxH {
+	if maxH := sh * equipPickerMaxHeightFrac; cardH > maxH {
 		cardH = maxH
 	}
 
@@ -962,7 +966,7 @@ func drawUseTargetPicker(g *core.GameState, assets Resources) {
 	_, sh := screenSizeF()
 	cardW := useTargetPickerCardW
 	cardH := headerH + float32(visibleRows)*rowH + pickerFooterH
-	if maxH := sh * 0.9; cardH > maxH { // windows gracefully on a short screen
+	if maxH := sh * useTargetPickerMaxHeightFrac; cardH > maxH { // windows gracefully on a short screen
 		cardH = maxH
 	}
 	card := drawPickerCard(font, cardW, cardH, title)

@@ -184,10 +184,7 @@ func CloseTransitionOverlays(g *GameState) {
 // spawnLevel picks the standing level for a unit at (x,z): the lowest standable
 // surface, falling back to the column top so the value is never -1.
 func spawnLevel(a *AreaDefinition, x, z int) int {
-	if lo := a.LowestStandableLevel(x, z); lo >= 0 {
-		return lo
-	}
-	return a.ElevationLevelAt(x, z)
+	return a.autoStandLevel(x, z)
 }
 
 // starterInventory returns the spawn inventory: rations only, no equipment

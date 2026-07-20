@@ -9,7 +9,6 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
-	"strings"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -2009,20 +2008,7 @@ func openEntityListModal(s *State) {
 func updateEntityListModal(s *State) Action {
 	// Type-to-filter: printable chars extend the query, Backspace trims it (cursor
 	// snaps to the top match so the filtered view + modalCursor can't drift).
-	for {
-		r := rl.GetCharPressed()
-		if r == 0 {
-			break
-		}
-		if r >= 32 && r < 127 {
-			s.entityListFilter += string(rune(r))
-			s.modalCursor = 0
-		}
-	}
-	if rl.IsKeyPressed(rl.KeyBackspace) && len(s.entityListFilter) > 0 {
-		s.entityListFilter = s.entityListFilter[:len(s.entityListFilter)-1]
-		s.modalCursor = 0
-	}
+	pumpPrintableASCII(&s.entityListFilter, defaultTextFieldMaxLen, acceptPrintable, func() { s.modalCursor = 0 })
 	rows := entityListRows(s)
 	n := len(rows)
 	s.modalCursor = input.CursorUpDown(s.modalCursor, n)
@@ -2437,18 +2423,7 @@ func updateOpenModal(s *State) Action {
 // The single seam both the updater and draw read so the cursor can't drift from
 // what's shown.
 func openVisiblePaths(s *State) []string {
-	q := strings.TrimSpace(s.openFilter)
-	if q == "" {
-		return s.modalPaths
-	}
-	lq := strings.ToLower(q)
-	out := make([]string, 0, len(s.modalPaths))
-	for _, p := range s.modalPaths {
-		if strings.Contains(strings.ToLower(core.MapIDFromPath(p)), lq) {
-			out = append(out, p)
-		}
-	}
-	return out
+	return filterByLabel(s.modalPaths, core.MapIDFromPath, s.openFilter)
 }
 
 // selectedOpenPath returns the cursored path in the filtered view, or "" when the

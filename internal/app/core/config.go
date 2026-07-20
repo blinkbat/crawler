@@ -1211,11 +1211,7 @@ var retroFilterNames = [RetroFilterCount]string{
 }
 
 func init() {
-	for k := RetroFilterKind(0); k < RetroFilterCount; k++ {
-		if retroFilterNames[k] == "" {
-			panic("core: retroFilterNames has an empty entry — label every RetroFilterKind")
-		}
-	}
+	assertNoEmptyLabels("retroFilterNames", retroFilterNames[:])
 }
 
 // validRetroFilter reports whether k indexes a filter slot (shared bounds rule).

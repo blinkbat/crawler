@@ -68,7 +68,7 @@ func currentLocation(s *State) *core.Location {
 }
 
 const (
-	locModalW = float32(460)
+	locModalW = modalCardNarrowW
 	locModalH = float32(430)
 )
 

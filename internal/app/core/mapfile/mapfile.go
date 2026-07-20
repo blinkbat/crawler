@@ -710,28 +710,10 @@ func Parse(r io.Reader) (MapFile, error) {
 			continue
 		}
 
-		if state == slotDialogs {
-			// One opaque JSON object per line, stored verbatim (core parses it). It
-			// ends with '}', so it can't look like a section header (ends with ':').
-			mf.Dialogs = append(mf.Dialogs, line)
-			continue
-		}
-
-		if state == slotTriggers {
-			// Opaque JSON-per-line, same handling as dialogs.
-			mf.Triggers = append(mf.Triggers, line)
-			continue
-		}
-
-		if state == slotLocations {
-			// Opaque JSON-per-line, same handling as dialogs (core marshals Location).
-			mf.Locations = append(mf.Locations, line)
-			continue
-		}
-
-		if state == slotWallFeatures {
-			// Opaque JSON-per-line, same handling as dialogs (core marshals WallFeature).
-			mf.WallFeatures = append(mf.WallFeatures, line)
+		if slot := verbatimSliceFor(&mf, state); slot != nil {
+			// One opaque JSON object per line, stored verbatim (core parses it). It ends
+			// with '}', so it can't look like a section header (which ends with ':').
+			*slot = append(*slot, line)
 			continue
 		}
 
@@ -879,6 +861,25 @@ func planeStackFor(mf *MapFile, slot layerSlot) *[][]string {
 		return &mf.PropStack
 	case slotDecorStack:
 		return &mf.DecorStack
+	}
+	return nil
+}
+
+// verbatimSliceFor returns the MapFile field for an opaque JSON-per-line entity
+// section (dialogs / triggers / locations / wall-features), or nil for any other
+// slot. One home so adding the next verbatim section is a one-line table edit, not
+// another copy-pasted parse arm (mirrors planeStackFor and the write-side
+// writeVerbatimSection calls).
+func verbatimSliceFor(mf *MapFile, slot layerSlot) *[]string {
+	switch slot {
+	case slotDialogs:
+		return &mf.Dialogs
+	case slotTriggers:
+		return &mf.Triggers
+	case slotLocations:
+		return &mf.Locations
+	case slotWallFeatures:
+		return &mf.WallFeatures
 	}
 	return nil
 }
@@ -1626,6 +1627,22 @@ func AtomicWrite(path string, write func(io.Writer) error) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// AtomicWriteFile is the perm-aware byte-slice sibling of AtomicWrite: it stages data
+// into a "<path>.tmp" (created with perm) then renames it over path, so a crash
+// mid-write leaves the prior file intact. Same temp-then-rename home; the audio config
+// writer (volumes/assignments/.wav) uses this variant to honor a file mode.
+func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, perm); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 func Save(path string, mf MapFile) error {

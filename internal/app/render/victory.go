@@ -191,7 +191,7 @@ func drawSpoilsLoot(b *core.Battle, font rl.Font, x, y, w, fill float32) float32
 		ease := core.Smoothstep(p)
 		label := core.ItemInfo(stack.Kind).Name
 		if stack.Count > 1 {
-			label += "  ×" + strconv.Itoa(stack.Count)
+			label = stackLabel(label, stack.Count)
 		}
 		drawTextWithShadow(font, label, x+(1-ease)*16, y, FontSmall, fadeColor(textPrimary, ease))
 		y += victoryLootRowH

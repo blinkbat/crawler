@@ -621,6 +621,10 @@ const (
 	// victoryWidthFrac is the spoils card's screen-relative WIDTH (height is
 	// content-sized; see DrawVictorySpoils).
 	victoryWidthFrac = float32(0.5)
+	// Picker cards are content-sized (rows × rowH) then clamped to this screen-height
+	// fraction so a long list windows gracefully on a short screen.
+	equipPickerMaxHeightFrac     = float32(0.78)
+	useTargetPickerMaxHeightFrac = float32(0.9)
 
 	overlayCardMarginScreen = int32(40) // minimum margin between card and screen edges
 
@@ -1681,6 +1685,13 @@ func fadeColor(col color.RGBA, alpha float32) color.RGBA {
 	}
 	col.A = uint8(float32(col.A) * alpha)
 	return col
+}
+
+// attentionGlow tints accent with the canonical 0.55+0.45·pulseAttention() "look here"
+// breathe — the shared char-panel / level-up unspent-points text cue. One home so the
+// two readouts can't drift apart (levelup.go's own comment promises they match).
+func attentionGlow(accent color.RGBA) color.RGBA {
+	return fadeColor(accent, 0.55+0.45*pulseAttention())
 }
 
 // colorWithAlpha replaces col's alpha with byteAlpha (0-255) — the "exact alpha"

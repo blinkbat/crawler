@@ -300,10 +300,8 @@ func EditorErasePressed() bool {
 // CursorLeftRight returns -1 on a Left edge, +1 on a Right edge, 0 otherwise.
 // Edge-only so a held key doesn't stream values; callers do the adjust math.
 func CursorLeftRight() int {
-	left := rl.IsKeyPressed(rl.KeyLeft) || rl.IsKeyPressed(rl.KeyA) ||
-		padPressed(rl.GamepadButtonLeftFaceLeft) || stickEdgeX(-1)
-	right := rl.IsKeyPressed(rl.KeyRight) || rl.IsKeyPressed(rl.KeyD) ||
-		padPressed(rl.GamepadButtonLeftFaceRight) || stickEdgeX(1)
+	left := rl.IsKeyPressed(rl.KeyLeft) || rl.IsKeyPressed(rl.KeyA) || padDirLeft()
+	right := rl.IsKeyPressed(rl.KeyRight) || rl.IsKeyPressed(rl.KeyD) || padDirRight()
 	switch {
 	case right && !left:
 		return 1

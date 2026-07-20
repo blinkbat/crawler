@@ -456,7 +456,8 @@ func bytesToSound(wav []byte) rl.Sound {
 	if !rl.IsAudioDeviceReady() {
 		return rl.Sound{}
 	}
-	wave := rl.LoadWaveFromMemory(".wav", wav, int32(len(wav)))
+	// WavExt (".wav") doubles as raylib's format-type hint here — same string, one source.
+	wave := rl.LoadWaveFromMemory(userconfig.WavExt, wav, int32(len(wav)))
 	snd := rl.LoadSoundFromWave(wave)
 	rl.UnloadWave(wave)
 	return snd
