@@ -60,6 +60,7 @@ func toggleIsoView(s *State) {
 // via closeModal, so exiting to title with one open would leak it). Idempotent.
 func (s *State) Close() {
 	s.freeIsoRT()
+	s.freeMinimapRT()
 	closeAllEditorPreviews()
 }
 

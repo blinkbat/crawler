@@ -1829,7 +1829,7 @@ func loadWellProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 	stoneDark := rl.NewColor(110, 108, 100, 255)
 	waterCol := rl.NewColor(56, 96, 138, 255)
 	wood := woodPaletteWarm
-	woodDark := rl.NewColor(74, 52, 34, 255)
+	woodDark := woodPaletteDark
 	return propModel{
 		models: models,
 		parts: []treePart{
@@ -1975,15 +1975,15 @@ func loadTableProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	models := []rl.Model{top, leg}
 	textureAndShade(models, shader, woodTex)
 	wood := rl.NewColor(160, 116, 72, 255)
-	woodDark := woodPaletteWarm
+	legWood := woodPaletteWarm // warm timber for the legs (matches the top's tone family)
 	return propModel{
 		models: models,
 		parts: []treePart{
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.65, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
-			{modelIdx: 1, offset: rl.NewVector3(-0.35, 0.30, -0.22), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
-			{modelIdx: 1, offset: rl.NewVector3(0.35, 0.30, -0.22), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
-			{modelIdx: 1, offset: rl.NewVector3(-0.35, 0.30, 0.22), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
-			{modelIdx: 1, offset: rl.NewVector3(0.35, 0.30, 0.22), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
+			{modelIdx: 1, offset: rl.NewVector3(-0.35, 0.30, -0.22), scale: rl.NewVector3(1, 1, 1), tint: legWood},
+			{modelIdx: 1, offset: rl.NewVector3(0.35, 0.30, -0.22), scale: rl.NewVector3(1, 1, 1), tint: legWood},
+			{modelIdx: 1, offset: rl.NewVector3(-0.35, 0.30, 0.22), scale: rl.NewVector3(1, 1, 1), tint: legWood},
+			{modelIdx: 1, offset: rl.NewVector3(0.35, 0.30, 0.22), scale: rl.NewVector3(1, 1, 1), tint: legWood},
 		},
 	}
 }

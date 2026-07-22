@@ -59,8 +59,7 @@ func gotoLayoutFor(s *State) gotoLayout {
 	y += textFieldH + 10
 	shown := min(len(s.bookmarks), gotoMaxBmShown)
 	l.top, l.end = scrollWindow(s.bookmarkCursor, len(s.bookmarks), shown)
-	for i := l.top; i < l.end; i++ {
-		row := rl.NewRectangle(x, y+float32(i-l.top)*gotoRowH, w, gotoRowH-4)
+	for _, row := range listRowRects(x, y, w, gotoRowH, l.top, l.end) {
 		del := rl.NewRectangle(row.X+row.Width-24, row.Y, 24, row.Height)
 		l.bmRows = append(l.bmRows, gotoRowRects{row: row, del: del})
 	}
@@ -104,9 +103,7 @@ func updateGotoModal(s *State) Action {
 		closeModal(s)
 		return ActionNone
 	}
-	if w := rl.GetMouseWheelMove(); w != 0 && len(s.bookmarks) > gotoMaxBmShown {
-		s.bookmarkCursor = clampCursor(s.bookmarkCursor-int(w), len(s.bookmarks))
-	}
+	wheelScrollCursor(&s.bookmarkCursor, len(s.bookmarks), gotoMaxBmShown)
 	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
 		mp := rl.GetMousePosition()
 		switch {

@@ -200,15 +200,25 @@ func areaIsOutdoorCached(m *AreaDefinition) bool {
 	return c.outdoor
 }
 
+// Storming reports whether a storm is active (building up or raining) — the one
+// home for the two-state "is it storming?" test.
+func (p WeatherPhase) Storming() bool { return p == WeatherBuilding || p == WeatherRaining }
+
+// beginClearing aborts an active storm into the Clearing phase. The single home for
+// how a storm is cancelled (authored Clear override + roofed/underground gates).
+func (w *WeatherState) beginClearing() {
+	if w.Phase.Storming() {
+		w.Phase = WeatherClearing
+		w.RainStepsLeft = 0
+	}
+}
+
 func TickWeatherStep(g *GameState) {
 	w := &g.Weather
 	// Authored per-area override takes precedence over the roof gate.
 	switch g.Area.WeatherMode {
 	case WeatherModeClear:
-		if w.Phase == WeatherBuilding || w.Phase == WeatherRaining {
-			w.Phase = WeatherClearing
-			w.RainStepsLeft = 0
-		}
+		w.beginClearing()
 		return
 	case WeatherModeRain:
 		// Force a persistent storm: start one from a dry/clearing state, and keep the
@@ -224,10 +234,7 @@ func TickWeatherStep(g *GameState) {
 	}
 	if !areaIsOutdoorCached(&g.Area) {
 		// Roofed/underground: no rain. A storm in progress drops to Clearing.
-		if w.Phase == WeatherBuilding || w.Phase == WeatherRaining {
-			w.Phase = WeatherClearing
-			w.RainStepsLeft = 0
-		}
+		w.beginClearing()
 		return
 	}
 	switch w.Phase {
@@ -256,7 +263,7 @@ func TickWeatherStep(g *GameState) {
 func TickWeather(g *GameState, dt float32) {
 	w := &g.Weather
 	target := float32(0)
-	if w.Phase == WeatherBuilding || w.Phase == WeatherRaining {
+	if w.Phase.Storming() {
 		target = 1
 	}
 	w.Intensity = Approach(w.Intensity, target, WeatherRampSpeed*dt)

@@ -841,6 +841,9 @@ const (
 
 // drawModalFooterHint paints a one-line dismissal/help hint at the modal card's
 // bottom-left (editorFontHint), at the shared baseline every modal uses.
+// dismissHint is the shared footer line for read-only modals dismissed by any input.
+const dismissHint = "Esc / Enter / click   close"
+
 func drawModalFooterHint(font rl.Font, card rl.Rectangle, text string, theme render.Theme) {
 	render.DrawRichText(font, text,
 		rl.NewVector2(card.X+modalContentInset, card.Y+card.Height-modalFooterHintDY),
@@ -867,10 +870,55 @@ const (
 func modalBodyTop(card rl.Rectangle) float32         { return card.Y + modalBodyTopDY }
 func listModalHeight(rows int, rowH float32) float32 { return modalListChromeH + float32(rows)*rowH }
 
+// listRowRects builds the base rects for a scrolled row window [top,end): fixed-pitch
+// rowH rows with a 4px bottom gutter (rowH-4 tall), indexed locally. Callers overlay
+// their own per-row action buttons (goto/prefab list modals).
+func listRowRects(x, y, w, rowH float32, top, end int) []rl.Rectangle {
+	rows := make([]rl.Rectangle, 0, end-top)
+	for i := top; i < end; i++ {
+		rows = append(rows, rl.NewRectangle(x, y+float32(i-top)*rowH, w, rowH-4))
+	}
+	return rows
+}
+
+// gridCellXY returns the top-left of cell i in a fixed cols-wide grid whose cells
+// pitch cellW × cellH from (startX, startY). Callers size/inset the rect themselves.
+func gridCellXY(i, cols int, startX, startY, cellW, cellH float32) (x, y float32) {
+	col := i % cols
+	row := i / cols
+	return startX + float32(col)*cellW, startY + float32(row)*cellH
+}
+
+// modalScreenMargin is the min gap a content-sized modal leaves below the screen
+// height (its height caps at screenH − this).
+const modalScreenMargin = float32(40)
+
+// contentModalHeight sizes a content modal to bodyH, floored at minH and capped to
+// leave modalScreenMargin below the screen. Shared by the Validate + Stats reports.
+func contentModalHeight(bodyH, minH float32) float32 {
+	ph := bodyH
+	if ph < minH {
+		ph = minH
+	}
+	_, sh := render.ScreenSizeF()
+	if ph > sh-modalScreenMargin {
+		ph = sh - modalScreenMargin
+	}
+	return ph
+}
+
 // drawSelectedListRow fills a list row's cursor plate with the editor's shared
 // bgActive tone. One home for the selected-row look so every editor list highlights
 // the cursor identically (the sound modal used the game-panel gilt style before).
 func drawSelectedListRow(rect rl.Rectangle) { rl.DrawRectangleRec(rect, bgActive) }
+
+// drawInsetCell paints a gallery cell's inset backdrop + 1px border. Content draws
+// on top afterward. (Not for the object browser, whose border must sit ON the
+// render-texture blit, so it draws its border after the preview instead.)
+func drawInsetCell(rect rl.Rectangle, borderCol rl.Color) {
+	rl.DrawRectangleRec(rect, bgFieldInset)
+	rl.DrawRectangleLinesEx(rect, 1, borderCol)
+}
 
 // modalFooterButtonY is the bottom button row's Y: modalBottomInset up from the
 // card bottom. Shared by modalButtonRow + the gallery modals.
@@ -1325,24 +1373,16 @@ func drawMinimap(s *State) {
 	drawOverlayBacking(mr)
 	rl.DrawRectangleRec(mr, minimapFloorCol)
 
-	wallCol := minimapWallCol
 	wpx, hpx := int(mr.Width), int(mr.Height)
-	for py := 0; py < hpx; py++ {
-		tz := int(float32(py) / scale)
-		if tz >= s.area.Height {
-			break
-		}
-		for px := 0; px < wpx; px++ {
-			tx := int(float32(px) / scale)
-			if tx >= s.area.Width {
-				break
-			}
-			// Paint a pixel where a tile rises above the walkable baseline
-			// (cliff/wall = structure); pits below stay blank.
-			if columnTopLevel(tx, tz) > core.ElevationBaseline {
-				rl.DrawPixel(int32(mr.X)+int32(px), int32(mr.Y)+int32(py), wallCol)
-			}
-		}
+	// The wall layer only changes on a content edit or minimap resize — rasterize it
+	// into an epoch-keyed RT once and blit, instead of ~wpx*hpx DrawPixel CGo calls
+	// per frame. Negative source height flips the bottom-up RenderTexture upright.
+	s.refreshMinimapRT(wpx, hpx, scale)
+	if s.minimapRT.ID != 0 {
+		rl.DrawTexturePro(s.minimapRT.Texture,
+			rl.NewRectangle(0, 0, float32(s.minimapRTW), -float32(s.minimapRTH)),
+			rl.NewRectangle(float32(int32(mr.X)), float32(int32(mr.Y)), float32(wpx), float32(hpx)),
+			rl.NewVector2(0, 0), 0, rl.White)
 	}
 
 	dot := func(tx, tz int, col rl.Color) {
@@ -1361,6 +1401,60 @@ func drawMinimap(s *State) {
 	rl.DrawRectangleLinesEx(
 		rl.NewRectangle(mr.X+vx0*scale, mr.Y+vz0*scale, (vx1-vx0)*scale, (vz1-vz0)*scale),
 		1, minimapViewportFrame)
+}
+
+// refreshMinimapRT rasterizes the minimap's wall layer into minimapRT, but only when
+// the cache key (contentEpoch + area dims + minimap px size) has changed since the
+// last build. In steady state (no edit, no resize) this is a cheap key compare and
+// the per-pixel scan is skipped entirely. Caller blits minimapRT afterward.
+func (s *State) refreshMinimapRT(wpx, hpx int, scale float32) {
+	if wpx <= 0 || hpx <= 0 {
+		return
+	}
+	if s.minimapRTPrimed && s.minimapRT.ID != 0 &&
+		s.minimapRTEpoch == s.contentEpoch &&
+		s.minimapRTW == int32(wpx) && s.minimapRTH == int32(hpx) &&
+		s.minimapRTAreaW == s.area.Width && s.minimapRTAreaH == s.area.Height {
+		return // cache current
+	}
+	if s.minimapRT.ID == 0 || s.minimapRTW != int32(wpx) || s.minimapRTH != int32(hpx) {
+		s.freeMinimapRT()
+		s.minimapRT = rl.LoadRenderTexture(int32(wpx), int32(hpx))
+		s.minimapRTW, s.minimapRTH = int32(wpx), int32(hpx)
+	}
+	rl.BeginTextureMode(s.minimapRT)
+	rl.ClearBackground(rl.Blank) // transparent — only wall pixels paint, over the floor backing
+	for py := 0; py < hpx; py++ {
+		tz := int(float32(py) / scale)
+		if tz >= s.area.Height {
+			break
+		}
+		for px := 0; px < wpx; px++ {
+			tx := int(float32(px) / scale)
+			if tx >= s.area.Width {
+				break
+			}
+			// Paint a pixel where a tile rises above the walkable baseline
+			// (cliff/wall = structure); pits below stay blank.
+			if columnTopLevel(tx, tz) > core.ElevationBaseline {
+				rl.DrawPixel(int32(px), int32(py), minimapWallCol)
+			}
+		}
+	}
+	rl.EndTextureMode()
+	s.minimapRTEpoch = s.contentEpoch
+	s.minimapRTAreaW, s.minimapRTAreaH = s.area.Width, s.area.Height
+	s.minimapRTPrimed = true
+}
+
+// freeMinimapRT releases the cached minimap wall-layer RT (idempotent).
+func (s *State) freeMinimapRT() {
+	if s.minimapRT.ID != 0 {
+		rl.UnloadRenderTexture(s.minimapRT)
+		s.minimapRT = rl.RenderTexture2D{}
+		s.minimapRTW, s.minimapRTH = 0, 0
+		s.minimapRTPrimed = false
+	}
 }
 
 // minimapMarker is one overview marker kind: its legend label, dot color, and a
@@ -1873,14 +1967,22 @@ func isSentinelBrush(layer Layer, char byte) bool {
 // "semantic" rather than a literal color.
 func drawSentinelHatch(r rl.Rectangle) {
 	stripe := sentinelHatchStripe
-	// Scissor to the swatch so the diagonal strokes can't bleed past its edges
-	// (DrawLineEx doesn't clip; the per-endpoint clamp left a ~1px corner overflow).
-	rl.BeginScissorMode(int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height))
+	// Anti-diagonal stripes (x+y = const) clamped to the swatch rect. Must NOT use
+	// Begin/EndScissorMode here: raylib has no scissor stack, so EndScissorMode would
+	// disable the palette's outer clip (set in drawPalette) for every later row.
 	steps := int(r.Width + r.Height)
 	for i := 0; i < steps; i += 4 {
-		rl.DrawLineEx(rl.NewVector2(r.X+float32(i), r.Y), rl.NewVector2(r.X, r.Y+float32(i)), 1, stripe)
+		c := float32(i)
+		ax, ay := r.X+c, r.Y // start on top edge, else clamp onto right edge
+		if c > r.Width {
+			ax, ay = r.X+r.Width, r.Y+(c-r.Width)
+		}
+		bx, by := r.X, r.Y+c // end on left edge, else clamp onto bottom edge
+		if c > r.Height {
+			bx, by = r.X+(c-r.Height), r.Y+r.Height
+		}
+		rl.DrawLineEx(rl.NewVector2(ax, ay), rl.NewVector2(bx, by), 1, stripe)
 	}
-	rl.EndScissorMode()
 }
 
 // --- Metadata panel --------------------------------------------------------
@@ -3286,6 +3388,14 @@ func drawModalHeaderAt(font rl.Font, theme render.Theme, card rl.Rectangle, titl
 // sub-modes can't drift.
 const openModalPromptDY = float32(86)
 
+// Open-map list-row insets (bypass modalContentInset). The hit-rect inset and the
+// text-left inset differ by design; named here rather than unified to preserve the
+// current pixel positions exactly.
+const (
+	openModalRowInsetX = float32(12) // row hit-rect inset per side
+	openModalRowTextX  = float32(18) // row text left inset
+)
+
 // openModalListGeom returns the open-map list geometry (card, first row Y, row
 // height, visible window), shared by draw and hit-test.
 func openModalListGeom(s *State) (card rl.Rectangle, listTop, rowH float32, topRow, end int) {
@@ -3305,7 +3415,7 @@ func openModalListGeom(s *State) (card rl.Rectangle, listTop, rowH float32, topR
 func openModalRowAt(s *State, p rl.Vector2) int {
 	card, listTop, rowH, topRow, end := openModalListGeom(s)
 	for i := topRow; i < end; i++ {
-		row := rl.NewRectangle(card.X+12, listTop+float32(i-topRow)*rowH, card.Width-24, rowH)
+		row := rl.NewRectangle(card.X+openModalRowInsetX, listTop+float32(i-topRow)*rowH, card.Width-2*openModalRowInsetX, rowH)
 		if pointIn(p, row) {
 			return i
 		}
@@ -3353,7 +3463,7 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 			col = theme.BorderActive
 			text = "> " + text
 		}
-		render.DrawTextWithShadow(font, text, r.X+18, listTop+float32(i-topRow)*rowH, editorFontBody, col)
+		render.DrawTextWithShadow(font, text, r.X+openModalRowTextX, listTop+float32(i-topRow)*rowH, editorFontBody, col)
 	}
 	// Scroll hint when the list overflows.
 	if topRow > 0 || end < len(vis) {
@@ -3578,14 +3688,7 @@ func drawCrystalEditModal(s *State, font rl.Font, theme render.Theme) {
 func drawValidateModal(s *State, font rl.Font, theme render.Theme) {
 	rows := s.modalValidateRows
 	pw := validateModalW
-	ph := 56 + float32(len(rows))*reachBadgeRowH + 56
-	if ph < 160 {
-		ph = 160
-	}
-	_, sh := render.ScreenSizeF()
-	if ph > sh-40 {
-		ph = sh - 40
-	}
+	ph := contentModalHeight(56+float32(len(rows))*reachBadgeRowH+56, 160)
 	r := drawModalHeader(font, theme, pw, ph, "VALIDATE MAP", theme.BorderActive)
 	if len(rows) == 0 {
 		render.DrawRichText(font, "All checks pass.",
@@ -3598,7 +3701,7 @@ func drawValidateModal(s *State, font rl.Font, theme render.Theme) {
 			y += reachBadgeRowH
 		}
 	}
-	drawModalFooterHint(font, r, "Esc / Enter / click   close", theme)
+	drawModalFooterHint(font, r, dismissHint, theme)
 }
 
 // entityKindRow tags an entity-list row by what it points at.

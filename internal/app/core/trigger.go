@@ -75,7 +75,7 @@ func ConditionKinds() []ConditionKind {
 }
 
 // Condition is one test in a trigger. The fields are a union keyed by Kind; unused
-// fields stay zero (mirrors DialogChoiceCondition / the old DialogTrigger unions).
+// fields stay zero (mirrors DialogChoiceCondition's union).
 type Condition struct {
 	Kind   ConditionKind `json:"kind"`
 	Negate bool          `json:"negate,omitempty"` // logical NOT of the whole test

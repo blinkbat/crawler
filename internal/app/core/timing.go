@@ -179,6 +179,19 @@ func tallyWindowAt(center, winWidth, commitStart, duration float32) TallyWindow 
 	}
 }
 
+// newTallyState assembles the shared press-tally TimingState from prepared windows,
+// owning the commit-zone→duration scaling (single home for the tally frame shape used
+// by both NewMultiPressState and NewTallyStateAtCenters).
+func newTallyState(duration float32, windows []TallyWindow) TimingState {
+	return TimingState{
+		Kind:        TimingKindPress,
+		Active:      true,
+		Duration:    duration,
+		Windows:     windows,
+		CommitStart: (1.0 - MultiPressWindow.CommitZoneFrac) * duration,
+	}
+}
+
 // NewMultiPressState builds a tally-mode press bar with `count` evenly-spaced
 // accept windows + a late commit zone. count <= 0 falls back to one window.
 func NewMultiPressState(rng *rand.Rand, duration float32, count int) TimingState {
@@ -214,13 +227,7 @@ func NewMultiPressState(rng *rand.Rand, duration float32, count int) TimingState
 		// (a commit-zone press resolves the bar early, making it unreachable).
 		windows[i] = tallyWindowAt(center, winWidth, commitStart, duration)
 	}
-	return TimingState{
-		Kind:        TimingKindPress,
-		Active:      true,
-		Duration:    duration,
-		Windows:     windows,
-		CommitStart: commitStart * duration,
-	}
+	return newTallyState(duration, windows)
 }
 
 // NewTallyStateAtCenters builds a tally-mode press bar with windows hand-placed
@@ -236,13 +243,7 @@ func NewTallyStateAtCenters(duration float32, centers ...float32) TimingState {
 	for _, c := range centers {
 		windows = append(windows, tallyWindowAt(c, winWidth, commitStart, duration))
 	}
-	return TimingState{
-		Kind:        TimingKindPress,
-		Active:      true,
-		Duration:    duration,
-		Windows:     windows,
-		CommitStart: commitStart * duration,
-	}
+	return newTallyState(duration, windows)
 }
 
 // randomizedPressWindow returns (start, end, sweet) fractions for a width-`width`

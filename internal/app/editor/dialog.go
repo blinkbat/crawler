@@ -207,6 +207,14 @@ func clampCursor(cur, count int) int {
 	return cur
 }
 
+// wheelScrollCursor scrolls cursor by the mouse-wheel notches (up = toward 0),
+// clamped in range, but only once the list overflows its maxRows visible window.
+func wheelScrollCursor(cursor *int, count, maxRows int) {
+	if w := rl.GetMouseWheelMove(); w != 0 && count > maxRows {
+		*cursor = clampCursor(*cursor-int(w), count)
+	}
+}
+
 // restoreModalCursor points the cursor at idx when in [0,count), else 0.
 func restoreModalCursor(s *State, idx, count int) {
 	if idx >= 0 && idx < count {

@@ -286,7 +286,8 @@ func handleEnemyIngest(ctx enemySpellCtx) bool {
 	}
 	m := &g.Party[picked]
 	// Webbed targets refuse Ingest — Webbed is "tempo control without removal," so
-	// the web shields the prey. The mantrap bites instead this turn.
+	// the web shields the prey. No fallback swing: the lunge is refused and the
+	// mantrap's turn passes (the wasted tempo is the point of shielding the prey).
 	if m.WebbedTurns > 0 {
 		setBattleMessage(g, ctx.enemyLine(" lunges, but %s is too tangled to swallow.", m.Name))
 		return false
@@ -590,9 +591,10 @@ func applyAoEDamageToSlots(g *core.GameState, skill core.SkillID, slots []int, d
 	return hits
 }
 
-// vfxNoneExempt is the frozen set of castable skills that intentionally queue NO
-// particle effect — utility casts with their own feedback (Scan IDs a foe,
-// Taunt/SmokeBomb only alter targeting, RaiseBones summons). init() asserts this
+// vfxNoneExempt is the frozen set of castable skills that map to VFXNone in
+// vfxKindFor — utility casts whose apply step supplies its own feedback rather than
+// routing a particle through vfxKindFor (Scan enqueues VFXScan directly; Taunt/
+// SmokeBomb/Vanish only alter targeting; RaiseBones summons). init() asserts this
 // set EXACTLY matches the castable skills vfxKindFor returns VFXNone for, so a new
 // damaging/status skill that forgets a vfxKindFor case trips a startup panic
 // instead of silently rendering nothing.
@@ -1104,7 +1106,7 @@ func applyPrayer(g *core.GameState, quality int) bool {
 	// don't index a stale slot or log a heal that never landed.
 	return applyAllyTargetSkill(g, core.SkillPrayer, core.LogHeal, func(actor, target *core.PartyMember) string {
 		// Prayer is Heal-kind (WIS + Effect.Heal).
-		heal := core.ScaleHeal(core.SkillHealFor(actor, core.SkillPrayer), quality)
+		heal := scaleSkillHeal(actor, core.SkillPrayer, quality)
 		before := target.HP
 		healPartyMember(g, g.Battle.PartyTarget, heal)
 		landed := target.HP - before
@@ -1359,7 +1361,7 @@ func applyWhirlwind(g *core.GameState, quality int) bool {
 
 func applyMassMend(g *core.GameState, quality int) bool {
 	actor := beginPartyAction(g)
-	heal := core.ScaleHeal(core.SkillHealFor(actor, core.SkillMassMend), quality)
+	heal := scaleSkillHeal(actor, core.SkillMassMend, quality)
 	// Tally wounds + queue VFX on PRE-heal HP, then heal via core.HealWholeParty
 	// (shared with the out-of-battle Mass Mend; no-ops dead/ingested, clamps at MaxHP).
 	healed := 0
@@ -1422,7 +1424,7 @@ func applyBackstab(g *core.GameState, quality int) bool {
 	crit, double := rollSkillCrit(g, actor, core.SkillBackstab, quality)
 	// Crit (and T2's double) applied post-armor inside damageEnemyCrit.
 	damage, defeated := damageEnemyCrit(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillBackstab), crit, double, false)
-	core.EnqueueEnemyVFX(g, core.VFXSlash, g.Battle.EnemyIndex)
+	enqueueSkillVFXAtEnemy(g, core.SkillBackstab)
 	logFoeHit(g, backstabMessage(actor.Name, target, damage, quality, defeated, crit), defeated)
 	finishActorTurn(g)
 	return true
@@ -1710,8 +1712,7 @@ func applyRecklessSwing(g *core.GameState, quality int) bool {
 	// BuffArmor, so no Blessed pill); stamp them straight off the resolved effect.
 	// Self-cast +1 correction (offsets finishActorTurn's immediate tick), else the
 	// Armor penalty drains this same turn before any enemy acts — see selfCastTurnBonus.
-	effect.BuffTurns += selfCastTurnBonus(g, g.Battle.CurrentParty)
-	core.StampPartyBuff(actor, core.SkillRecklessSwing, effect)
+	stampSelfCastBuff(g, g.Battle.CurrentParty, core.SkillRecklessSwing, effect)
 	foe := core.EnemySingularNoun(&target)
 	msg := killOrPlainLine(quality, actor.Name, " swings wildly at the %s for %d — guard down.", " caves the %s in for %d — guard down.", defeated, foe, damage)
 	logFoeHit(g, appendCrit(msg, crit), defeated)
@@ -1986,8 +1987,7 @@ func applyStoneSkin(g *core.GameState, quality int) bool {
 	return applyAllyTargetSkill(g, core.SkillStoneSkin, core.LogInfo, func(actor, target *core.PartyMember) string {
 		eff := core.EffectiveSkillEffect(actor, core.SkillStoneSkin)
 		// Self-cast +1 correction (offsets finishActorTurn's immediate tick); see selfCastTurnBonus.
-		eff.BuffTurns += selfCastTurnBonus(g, g.Battle.PartyTarget)
-		core.StampPartyBuff(target, core.SkillStoneSkin, eff)
+		eff = stampSelfCastBuff(g, g.Battle.PartyTarget, core.SkillStoneSkin, eff)
 		// Report the STAMPED duration (carries the self-cast +1), not the base.
 		return qualityLine(quality, actor.Name, " wards %s in stone (+%d Armor, +%d MDef, %d turns).",
 			target.Name, eff.BuffArmor, eff.BuffMDef, eff.BuffTurns)
@@ -2070,15 +2070,23 @@ func selfCastTurnBonus(g *core.GameState, targetIdx int) int {
 	return 0
 }
 
+// stampSelfCastBuff stamps skill's buff on party member idx with the self-cast +1
+// duration correction (selfCastTurnBonus). Returns the stamped effect so callers can
+// report its adjusted BuffTurns. The single home for the "add self-cast bonus, then
+// stamp" pairing (single-ally casts + the party-wide loop below).
+func stampSelfCastBuff(g *core.GameState, idx int, skill core.SkillID, effect core.SkillEffect) core.SkillEffect {
+	effect.BuffTurns += selfCastTurnBonus(g, idx)
+	core.StampPartyBuff(&g.Party[idx], skill, effect)
+	return effect
+}
+
 // stampPartyWideBuff stamps the buff on every available member (caster +1 via
 // selfCastTurnBonus) and returns the count. Shared by Bless / War Banner / Smoke Bomb.
 func stampPartyWideBuff(g *core.GameState, effect core.SkillEffect, skill core.SkillID) int {
 	buffed := 0
 	for _, i := range core.AvailablePartyTargets(g.Party) {
-		eff := effect
 		// Re-cast refreshes, never compounds.
-		eff.BuffTurns += selfCastTurnBonus(g, i)
-		core.StampPartyBuff(&g.Party[i], skill, eff)
+		stampSelfCastBuff(g, i, skill, effect)
 		core.EnqueuePartyVFX(g, vfxKindFor(skill), i)
 		buffed++
 	}
@@ -2127,7 +2135,7 @@ func applyCleanse(g *core.GameState, quality int) bool {
 func applySecondWind(g *core.GameState, quality int) bool {
 	actor := beginPartyAction(g)
 	// Utility-kind: flat Effect.Heal (no WIS), timing-scaled by ScaleHeal.
-	heal := core.ScaleHeal(core.SkillHealFor(actor, core.SkillSecondWind), quality)
+	heal := scaleSkillHeal(actor, core.SkillSecondWind, quality)
 	// Log the LANDED amount, not the intent — HealMember clamps at MaxHP (the
 	// Prayer convention: logged figures match the HP delta).
 	before := actor.HP
@@ -2152,7 +2160,7 @@ func applyRenewal(g *core.GameState, quality int) bool {
 	return applyAllyTargetSkill(g, core.SkillRenewal, core.LogHeal, func(actor, target *core.PartyMember) string {
 		effect := core.EffectiveSkillEffect(actor, core.SkillRenewal)
 		// Snapshot the per-turn heal at cast (WIS + timing), floored at 1. Re-cast replaces.
-		perTurn := max(core.ScaleHeal(core.SkillHealFor(actor, core.SkillRenewal), quality), 1)
+		perTurn := max(scaleSkillHeal(actor, core.SkillRenewal, quality), 1)
 		target.RegenPerTurn = perTurn
 		target.RegenTurns = effect.RegenTurns
 		return qualityLine(quality, actor.Name, " lays a renewal on %s — +%d HP at the end of their next %d turns.",
@@ -2175,6 +2183,12 @@ func setupTargetedEnemyAndPay(g *core.GameState, skill core.SkillID) bool {
 // `skill` (ScaleDamage ∘ SkillDamageFor).
 func scaleSkillDamage(actor *core.PartyMember, skill core.SkillID, quality int) int {
 	return core.ScaleDamage(core.SkillDamageFor(actor, skill), quality)
+}
+
+// scaleSkillHeal returns the quality-scaled heal for `actor` casting `skill`
+// (ScaleHeal ∘ SkillHealFor) — the heal twin of scaleSkillDamage.
+func scaleSkillHeal(actor *core.PartyMember, skill core.SkillID, quality int) int {
+	return core.ScaleHeal(core.SkillHealFor(actor, skill), quality)
 }
 
 // rollSkillCrit returns the (crit, double) flags. Standard skills crit via
@@ -3159,7 +3173,7 @@ func resolveMeteorIfDue(g *core.GameState) {
 	hits := 0
 	forEachLivingEnemy(g, func(slot int, _ *core.Enemy) {
 		damageEnemy(g, slot, dmg, autoStrikeQuality, core.SkillTagMagic)
-		core.EnqueueEnemyVFX(g, core.VFXEmber, slot)
+		core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillMeteor), slot)
 		hits++
 	})
 	if hits > 0 {

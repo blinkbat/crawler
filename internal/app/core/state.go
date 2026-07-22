@@ -253,6 +253,16 @@ func DoorByName(doors []Door, name string) *Door {
 
 // placeChests converts the authored chest list into runtime Chests. Items are
 // folded into stacks. Out-of-bounds and start-tile chests are dropped.
+// stacksFromKinds collapses a flat kind list into merged inventory stacks (one home
+// for the chest-fill loop shared by placeChests and SpawnChestAt).
+func stacksFromKinds(items []ItemKind) []ItemStack {
+	var stacks []ItemStack
+	for _, kind := range items {
+		stacks = AddItem(stacks, kind, 1)
+	}
+	return stacks
+}
+
 func placeChests(a AreaDefinition) []Chest {
 	if len(a.ChestSpawns) == 0 {
 		return nil
@@ -268,10 +278,7 @@ func placeChests(a AreaDefinition) []Chest {
 		if sp.TileX == sx && sp.TileZ == sz {
 			continue
 		}
-		var stacks []ItemStack
-		for _, kind := range sp.Items {
-			stacks = AddItem(stacks, kind, 1)
-		}
+		stacks := stacksFromKinds(sp.Items)
 		out = append(out, Chest{
 			TileX:  sp.TileX,
 			TileZ:  sp.TileZ,

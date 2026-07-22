@@ -120,11 +120,8 @@ func computeObjectViewLayout(s *State) objectViewLayout {
 	// Reuse the buffer so layout doesn't allocate twice per frame.
 	thumbs := objViewThumbsBuf[:0]
 	for i := start; i < end; i++ {
-		idx := i - start
-		col := idx % objViewCols
-		row := idx / objViewCols
-		cx := gridX + float32(col)*cellW + (cellW-thumbW)/2
-		cy := gridY + float32(row)*cellH
+		cx, cy := gridCellXY(i-start, objViewCols, gridX, gridY, cellW, cellH)
+		cx += (cellW - thumbW) / 2 // center the thumb in its cell
 		thumbs = append(thumbs, rl.NewRectangle(cx, cy, thumbW, objViewThumbH))
 	}
 	objViewThumbsBuf = thumbs // retain grown capacity for next frame

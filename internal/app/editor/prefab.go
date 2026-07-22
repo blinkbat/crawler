@@ -114,8 +114,7 @@ func prefabLayoutFor(s *State) prefabLayout {
 	l.saveBtn = rl.NewRectangle(x+w-100, y, 100, textFieldH)
 	y += textFieldH + 12
 	l.top, l.end = scrollWindow(s.prefabCursor, len(s.prefabPaths), shown)
-	for i := l.top; i < l.end; i++ {
-		row := rl.NewRectangle(x, y+float32(i-l.top)*prefabRowH, w, prefabRowH-4)
+	for _, row := range listRowRects(x, y, w, prefabRowH, l.top, l.end) {
 		load := rl.NewRectangle(row.X+row.Width-84, row.Y, 52, row.Height)
 		del := rl.NewRectangle(row.X+row.Width-26, row.Y, 26, row.Height)
 		l.rows = append(l.rows, prefabRowRects{row: row, load: load, del: del})
@@ -136,9 +135,7 @@ func updatePrefabsModal(s *State) Action {
 		savePrefabFromClipboard(s)
 		return ActionNone
 	}
-	if w := rl.GetMouseWheelMove(); w != 0 && len(s.prefabPaths) > prefabMaxRows {
-		s.prefabCursor = clampCursor(s.prefabCursor-int(w), len(s.prefabPaths))
-	}
+	wheelScrollCursor(&s.prefabCursor, len(s.prefabPaths), prefabMaxRows)
 	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
 		mp := rl.GetMousePosition()
 		switch {

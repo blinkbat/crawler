@@ -1,5 +1,10 @@
 package core
 
+import (
+	"fmt"
+	"reflect"
+)
+
 // region.go: editor region copy/paste — a rectangle of the grid layers
 // snapshotted and stamped elsewhere. Grid layers only (gridLayers()); entities
 // (packs/chests/doors/crystals) live in spawn lists and are NOT copied.
@@ -30,6 +35,27 @@ type TileRegion struct {
 
 // Empty reports whether the region has nothing to paste.
 func (r TileRegion) Empty() bool { return r.W <= 0 || r.H <= 0 || len(r.Layers) == 0 }
+
+// regionPlaneFieldCount pins the number of per-tile plane fields on TileRegion (the
+// slice members). CopyRegion captures them and FlipHorizontal/FlipVertical/Rotate90CW
+// each transform them by HAND — nothing else keeps them in lockstep, so a new plane a
+// transform forgets silently corrupts flip/rotate geometry (it keeps its original
+// orientation). The init tripwire fires when the field set changes: update CopyRegion
+// + all three transforms + the paste path, then bump this count.
+const regionPlaneFieldCount = 8
+
+func init() {
+	n := 0
+	t := reflect.TypeOf(TileRegion{})
+	for i := 0; i < t.NumField(); i++ {
+		if t.Field(i).Type.Kind() == reflect.Slice {
+			n++
+		}
+	}
+	if n != regionPlaneFieldCount {
+		panic(fmt.Sprintf("core: TileRegion has %d plane fields, expected %d — a plane was added/removed; update CopyRegion + FlipHorizontal/FlipVertical/Rotate90CW + the paste path, then bump regionPlaneFieldCount", n, regionPlaneFieldCount))
+	}
+}
 
 // clampSubstr returns s[lo:hi] with both bounds clamped to len(s) (lo<=hi
 // assumed), tolerating ragged source rows shorter than the copied rectangle.

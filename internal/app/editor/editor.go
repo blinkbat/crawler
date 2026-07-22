@@ -974,6 +974,16 @@ type State struct {
 	isoSpanMin, isoSpanMax int
 	isoSpanEpoch           uint64
 	isoSpanReady           bool
+	// minimapRT caches the overview's rasterized wall layer (drawMinimap). The
+	// ~150² per-pixel structure scan (one DrawPixel CGo call per wall pixel) ran
+	// EVERY frame the minimap was up; it now rasterizes into this RT only when the
+	// content or minimap size changes, then blits. Keyed on contentEpoch + area dims
+	// + minimap px size (mirrors the elevGrid/isoRT epoch-keyed caches).
+	minimapRT                      rl.RenderTexture2D
+	minimapRTEpoch                 uint64
+	minimapRTW, minimapRTH         int32
+	minimapRTAreaW, minimapRTAreaH int
+	minimapRTPrimed                bool
 
 	// Ctrl+F5 "test from cursor": when set, the run loop uses testStartOverrideX/Z
 	// as the playtest start, then resets the flag.

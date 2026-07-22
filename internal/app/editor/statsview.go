@@ -129,16 +129,12 @@ func updateStatsModal(s *State) Action {
 
 func drawStatsModal(s *State, font rl.Font, theme render.Theme) {
 	lines := mapStatsLines(s)
-	ph := 64 + float32(len(lines))*statsRowH + 24
-	_, sh := render.ScreenSizeF()
-	if ph > sh-40 {
-		ph = sh - 40
-	}
+	ph := contentModalHeight(64+float32(len(lines))*statsRowH+24, 0)
 	r := drawModalHeader(font, theme, statsModalW, ph, "MAP STATS", theme.BorderActive)
 	y := r.Y + 48
 	for _, line := range lines {
 		render.DrawRichText(font, line, rl.NewVector2(r.X+modalContentInset, y), editorFontBody, 1, theme.TextPrimary)
 		y += statsRowH
 	}
-	drawModalFooterHint(font, r, "Esc / Enter / click   close", theme)
+	drawModalFooterHint(font, r, dismissHint, theme)
 }

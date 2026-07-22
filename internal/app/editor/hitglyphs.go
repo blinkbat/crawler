@@ -51,17 +51,13 @@ func drawHitGlyphsModal(s *State, font rl.Font, theme render.Theme) {
 	startY := r.Y + hitGlyphHeaderH // content starts below the declared header band (was a bare 44)
 
 	for i, name := range names {
-		col := i % hitGlyphCols
-		row := i / hitGlyphCols
-		cellX := startX + float32(col)*hitGlyphCellW
-		cellY := startY + float32(row)*cellH
+		cellX, cellY := gridCellXY(i, hitGlyphCols, startX, startY, hitGlyphCellW, cellH)
 		cx := cellX + hitGlyphCellW/2
 		cy := cellY + hitGlyphCellH/2
 
 		// Inset backdrop so the glyph reads against the card.
 		cell := rl.NewRectangle(cellX+hitGlyphCellInsetX, cellY, hitGlyphCellW-2*hitGlyphCellInsetX, hitGlyphCellH)
-		rl.DrawRectangleRec(cell, bgFieldInset)
-		rl.DrawRectangleLinesEx(cell, 1, editorBorderDim)
+		drawInsetCell(cell, editorBorderDim)
 
 		t := float32(math.Mod(now+float64(i)*hitGlyphStagger, hitGlyphLoopSecs) / hitGlyphLoopSecs)
 		render.EditorDrawHitGlyph(i, cx, cy, t, hitGlyphPreScale)
@@ -70,5 +66,5 @@ func drawHitGlyphsModal(s *State, font rl.Font, theme render.Theme) {
 		render.DrawRichText(font, name, rl.NewVector2(cx-lw/2, cellY+hitGlyphCellH+4), editorFontLabel, 1, theme.TextPrimary)
 	}
 
-	drawModalFooterHint(font, r, "Each plays on a loop   ·   Esc / Enter / click   close", theme)
+	drawModalFooterHint(font, r, "Each plays on a loop   ·   "+dismissHint, theme)
 }

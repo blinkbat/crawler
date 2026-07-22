@@ -428,7 +428,7 @@ var (
 	stonePaletteLight = rl.NewColor(232, 224, 210, 255)
 
 	// marblePaleBody / marblePaleCap are the pale dressed-stone tones shared by the
-	// archway, pillars, and well/statue (body/shaft vs cap/head highlight). Lighter
+	// archway, pillars, and statue (body/shaft vs cap/head highlight). Lighter
 	// than stonePalette* (faceted rock) — a distinct smooth-marble family.
 	marblePaleBody = rl.NewColor(220, 214, 198, 255)
 	marblePaleCap  = rl.NewColor(228, 222, 206, 255)

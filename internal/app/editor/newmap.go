@@ -63,12 +63,8 @@ func newMapModalLayout() newMapLayout {
 		if brushes[i].Erase {
 			continue
 		}
-		col := i % newMapSwatchCols
-		row := i / newMapSwatchCols
-		l.floorSwatches[i] = rl.NewRectangle(
-			xLeft+float32(col)*(swatchW+gut),
-			swatchY+float32(row)*(swatchH+gut),
-			swatchW, swatchH)
+		cx, cy := gridCellXY(i, newMapSwatchCols, xLeft, swatchY, swatchW+gut, swatchH+gut)
+		l.floorSwatches[i] = rl.NewRectangle(cx, cy, swatchW, swatchH)
 	}
 
 	// Footer buttons, anchored bottom-right via the shared modal-button spec.

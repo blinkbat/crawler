@@ -52,10 +52,7 @@ func SpawnChestAt(g *GameState, x, z, level int, items []ItemKind) {
 	if ChestIndexAt(g.Chests, x, z) >= 0 {
 		return
 	}
-	var stacks []ItemStack
-	for _, kind := range items {
-		stacks = AddItem(stacks, kind, 1)
-	}
+	stacks := stacksFromKinds(items)
 	g.Chests = append(g.Chests, Chest{
 		TileX:  x,
 		TileZ:  z,

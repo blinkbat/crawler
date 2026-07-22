@@ -531,16 +531,6 @@ func BackRowMeleeBlocked(ac AttackClass, party []PartyMember, i int) bool {
 	return ac.IsMelee() && !PartyInEffectiveFront(party, i)
 }
 
-// EnemyFrontHasLiving reports whether any LIVING enemy stands in the front row.
-func EnemyFrontHasLiving(members []Enemy) bool {
-	for i := range members {
-		if members[i].Alive && members[i].Row == RowFront {
-			return true
-		}
-	}
-	return false
-}
-
 // EnemyColumnCovered reports whether back-row enemy i is shielded by a front-row foe
 // in the SAME column. Foes pack left-to-right, so a back foe is covered iff its
 // left-to-right slot among the back row is less than the front count (a front foe

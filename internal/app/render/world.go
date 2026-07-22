@@ -605,16 +605,17 @@ func drawAreaWorld(camera rl.Camera3D, m *core.AreaDefinition, assets Resources,
 		worldFrameClock = float32(rl.GetTime())
 	}
 	material := assets.worldMaterial(m.Materials)
-	profile := applyTimeOfDay(lightingFor(m.Materials), timeProfileAt(stepCount), areaIsEnclosed(m))
+	// One content fingerprint per frame, shared by the enclosure, elevGrid, and
+	// torch-site caches (each previously re-folded its own overlapping layer subset —
+	// the Ceiling layer alone was folded three times/frame). Any editor edit changes
+	// it and busts all three; in-game it's constant so none rebuild.
+	contentToken := areaContentToken(m)
+	profile := applyTimeOfDay(lightingFor(m.Materials), timeProfileAt(stepCount), areaIsEnclosed(m, contentToken))
 	if editorClearView {
 		profile = clarifyForEditor(profile)
 	}
 	cacheLightingProfile(profile)
 	assets.lighting.applyUniforms(camera, profile)
-	// One content fingerprint per frame, shared by the elevGrid + torch-site caches
-	// (each previously re-folded its own overlapping layer subset). Any editor edit
-	// changes it and busts both; in-game it's constant so neither rebuilds.
-	contentToken := areaContentToken(m)
 	// Torch point lights: collect nearest braziers, flicker, upload. Must run
 	// after applyUniforms (same shader) and before the tile loop draws.
 	torches := collectTorches(m, crystals, camera, contentToken)
@@ -1285,23 +1286,24 @@ var propShadowRadiusTable = func() [256]float32 {
 }()
 
 // areaKey identifies the area a per-area cache was built for. Matched on name +
-// dims PLUS a full-ceiling fingerprint, so two same-named/sized areas with
-// different roofs can't share a stale verdict (the editor "untitled" case).
-// Used by enclosureCache and torchSiteCache.
+// dims PLUS the per-frame areaContentToken (a superset of every authorable layer),
+// so two same-named/sized areas with different content (the editor "untitled" case)
+// can't share a stale verdict — and the caller's already-computed token is reused
+// instead of re-folding layers here. Used by enclosureCache and torchSiteCache.
 type areaKey struct {
 	name          string
 	width, height int
-	ceilHash      uint64
+	contentHash   uint64
 	primed        bool
 }
 
-func (k *areaKey) matches(m *core.AreaDefinition) bool {
+func (k *areaKey) matches(m *core.AreaDefinition, token uint64) bool {
 	return k.primed && k.name == m.Name && k.width == m.Width && k.height == m.Height &&
-		k.ceilHash == core.CeilingFingerprint(m)
+		k.contentHash == token
 }
 
-func (k *areaKey) set(m *core.AreaDefinition) {
-	k.ceilHash = core.CeilingFingerprint(m)
+func (k *areaKey) set(m *core.AreaDefinition, token uint64) {
+	k.contentHash = token
 	k.name, k.width, k.height, k.primed = m.Name, m.Width, m.Height, true
 }
 
@@ -1314,12 +1316,12 @@ var enclosureCache struct {
 
 // areaIsEnclosed reports whether the area is a roofed interior (gates the
 // dungeon lighting override), memoizing core.AreaIsOutdoor per area.
-func areaIsEnclosed(m *core.AreaDefinition) bool {
-	if enclosureCache.matches(m) {
+func areaIsEnclosed(m *core.AreaDefinition, token uint64) bool {
+	if enclosureCache.matches(m, token) {
 		return enclosureCache.enclosed
 	}
 	enclosed := !core.AreaIsOutdoor(m)
-	enclosureCache.set(m)
+	enclosureCache.set(m, token)
 	enclosureCache.enclosed = enclosed
 	return enclosed
 }
@@ -1363,12 +1365,11 @@ type torchSite struct {
 
 // torchSiteCache memoizes the brazier/torch tile list so the grid scan runs once
 // per area; per-frame work is then just distance + flicker over the cached sites.
-// contentHash fingerprints the layers torch sites derive from, so an editor
+// The embedded areaKey fingerprints content via the shared token, so an editor
 // prop/elevation edit (same name/dims) rebuilds rather than serving stale lights.
 var torchSiteCache struct {
 	areaKey
-	contentHash uint64
-	sites       []torchSite
+	sites []torchSite
 }
 
 func rebuildTorchSites(m *core.AreaDefinition, token uint64) {
@@ -1408,8 +1409,7 @@ func rebuildTorchSites(m *core.AreaDefinition, token uint64) {
 			}
 		}
 	}
-	torchSiteCache.set(m)
-	torchSiteCache.contentHash = token
+	torchSiteCache.set(m, token)
 }
 
 // torchFlicker is the warm light-pool brightness in ~0.72..1.0 from two desynced
@@ -1435,7 +1435,7 @@ func torchFlicker(t, phase float32) float32 {
 // lockstep with the gem body. Both share one distance-ranked pool, so a near crystal
 // can out-prioritise a far torch (Grimrock-style: a live crystal is just a light).
 func collectTorches(m *core.AreaDefinition, crystals []core.Crystal, camera rl.Camera3D, token uint64) []torchLight {
-	if !torchSiteCache.matches(m) || torchSiteCache.contentHash != token {
+	if !torchSiteCache.matches(m, token) {
 		rebuildTorchSites(m, token)
 	}
 	torchCandidateBuf = torchCandidateBuf[:0]
